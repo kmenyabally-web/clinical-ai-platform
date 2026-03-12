@@ -1,0 +1,32 @@
+stage-13-first-permitted-read-definition.md
+1. Purpose of Defining a First Permitted Read
+The system defines a single, minimal data read so that there is a clearly understood and documented starting point for any future access to information.
+This ensures that the very first use of live data is deliberate, tightly scoped, and justified, rather than an accidental or broad opening of access.
+By starting with one small, well-chosen read, the organisation can test that controls, governance, and user understanding work as intended, before considering any wider access to care or inspection data.
+2. Description of the First Permitted Read
+The first permitted read is a system-level, non-personal context field such as the name of the organisation that owns the CQC readiness system instance (for example, the provider’s corporate name).
+This information may be shown in a neutral context banner such as “You are using the [Organisation Name] CQC readiness environment,” so that staff and inspectors know which organisation’s system they are in.
+This read does not include any details about services, wards, teams, people using the service, or staff; it is simply the high-level organisational label for the system.
+3. Why This Read Is Considered Low Risk
+The organisation name is non-personal: it does not identify any individual person, service user, or member of staff.
+It is non-clinical: it does not describe health conditions, treatment plans, risks, or any aspect of care.
+It does not expose service user details: no names, identifiers, room numbers, or other person-level information are included.
+On its own, this information cannot reasonably be misused to harm individuals or compromise care, because it is already public or semi-public information and does not reveal anything about the state of care, incidents, or inspection findings.
+4. Explicit Exclusions
+The following are deliberately excluded from first-read consideration:
+Personal data: names, identifiers, contact details, demographics, or any information that relates to an identifiable person using the service or a member of staff.
+Clinical or care data: care plans, risk assessments, diagnoses, medications, observations, incidents, safeguarding or complaints content, capacity or consent information, or daily notes.
+Operational care data: lists or counts of people in services, overdue or in-date status, staffing levels, rosters, occupancy, or performance metrics.
+Inspection evidence: audit logs, compliance dashboards, reports, findings, or any information prepared for or arising from inspections.
+AI or analytical outputs: risk scores, summaries, classifications, predictions, or any automated analysis derived from care or inspection data.
+5. Conditions Under Which This Read Would Be Enabled
+Even this minimal organisational-name read is only permitted when:
+Authentication is in place: users must sign in; the system must not display organisational context to anonymous or unknown users.
+Role recognition is working: the system can reliably show who the user is and what role they hold, even if that role still has no access to care data.
+Read-only application connection has been tested: the app has already been proven to connect in a way that does not touch any care or inspection records.
+Governance has approved this first read: information governance and digital leads have agreed that showing the organisation name is appropriate and documented as the first permitted read.
+Audit is ready: the system is capable of recording that a user signed in and viewed the organisational context, even if this is the only data read at this stage.
+6. CQC and Regulatory Alignment
+Starting with such a constrained read demonstrates proportionality: the organisation only exposes the minimum necessary information to support safe orientation in the system, and nothing more.
+It reflects data minimisation under data protection law: the system does not read or reveal any personal or clinical data until there is a clear, documented need and appropriate controls.
+For CQC, this shows that the provider treats digital deployment like any other safety-critical change: beginning with a low-risk, well-governed starting point, then only expanding access when evidence, testing, and governance demonstrate that it is safe to do so.

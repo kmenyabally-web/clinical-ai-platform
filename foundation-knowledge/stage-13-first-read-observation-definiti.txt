@@ -1,0 +1,32 @@
+stage-13-first-read-observation-definition.md
+1. Purpose of Defining Observation Criteria
+In regulated health and social care, it is not enough to say that a system “works”; the organisation must be able to observe and demonstrate whether a control is operating safely.
+Defining clear criteria for success and failure before any data access is enabled ensures that the first permitted read is not judged on convenience or assumption, but on observable, agreed signs of safe behaviour.
+This protects people using services, staff, and the organisation by ensuring that even the smallest data read is treated as a controlled, testable step rather than an informal experiment.
+2. Definition of a Successful Read
+A successful first permitted data read means that the system retrieves and displays only the agreed, minimal item (for example, a non-personal organisational name) and nothing else.
+The user sees a clear and expected result, such as “You are using the [Organisation Name] CQC readiness environment”, with no additional information about services, people, care content, or inspection history.
+The action completes calmly, with the system behaving as described in the design and governance documents, and without any visible errors, warnings, or unexpected content.
+3. Definition of an Unsuccessful or Unsafe Read
+An unsuccessful read includes obvious failures such as the system not showing the agreed information at all or showing that it cannot complete the request.
+A read is considered unsafe if it reveals anything beyond the agreed minimal item, even if that extra information is not obviously clinical or personal (for example, if it starts to list services, counts of records, or hints about who uses the service).
+It is also unsafe if the behaviour is inconsistent or unpredictable (sometimes showing more than agreed, sometimes failing without a clear reason), as this suggests misconfiguration or weak control, even if no actual data breach has occurred.
+4. Observable Signals and Evidence
+The following non-sensitive signals may be observed to judge success or failure:
+On-screen confirmation: a simple, plain-English message that shows only the agreed organisational context and no other data.
+Stable behaviour: repeated attempts to perform the read lead to the same, safe result, without intermittent errors or extra information appearing.
+Recorded access events: the system records that a read was attempted and completed, in a way that can be reviewed later (for example, for audit or assurance) without needing to inspect the underlying data itself.
+Absence of error messages that suggest the system has tried to reach areas it should not (for example, references to missing person records or restricted collections).
+5. Absence of Data Exposure
+Success is confirmed not by examining the underlying data store, but by verifying that what is presented to the user is strictly limited to the agreed non-personal item.
+Reviewers look at what is on screen and what the system reports in high-level logs, not at the content of records; they confirm that no person names, identifiers, or care or inspection details appear at any point.
+If it is not possible to tell, from the user’s perspective and from high-level records, that only the agreed item has been read, then the read cannot be considered safely controlled.
+6. Decision Thresholds
+Progression beyond this first read is only considered when there is a high level of confidence that the read behaves exactly as intended, every time, and only returns the agreed non-sensitive information.
+This confidence is based on repeatable observation (several successful attempts, under different user roles if appropriate), documented review of outcomes, and absence of any sign that extra data might have been exposed or accessed.
+If there is any uncertainty about what might have been read or shown, or if the behaviour is not fully understood, the system must remain at this level and be treated as not yet safe for any broader data access.
+7. Regulatory and CQC Alignment
+Defining observable outcomes in advance reflects CQC’s expectations that providers have clear assurance mechanisms for digital systems, not just technical capability.
+It supports accountability by making it possible to show when and how the first data read was tested, what was expected, what was observed, and who accepted the outcome.
+This approach also demonstrates proportionality and prudence: even the smallest step into live data is treated as a controlled change, with defined success and failure criteria, rather than an informal trial.
+By proving control without operational risk at this early stage, the organisation builds a strong foundation for later stages where real care and inspection data will be accessed under tighter scrutiny.

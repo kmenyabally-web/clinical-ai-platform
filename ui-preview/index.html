@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>CQC Readiness Platform – Organisation View</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f6f8;
+      margin: 0;
+      padding: 0;
+      color: #222;
+    }
+
+    .container {
+      max-width: 960px;
+      margin: 60px auto;
+      background: #ffffff;
+      padding: 36px;
+      border-radius: 8px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+    }
+
+    h1 {
+      margin-top: 0;
+      font-size: 1.8em;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 0.85em;
+      background: #4a90e2;
+      color: white;
+      margin-left: 8px;
+    }
+
+    .org-box {
+      background: #eef2f5;
+      padding: 18px;
+      border-radius: 6px;
+      margin-bottom: 28px;
+    }
+
+    .top-nav {
+      background: #ffffff;
+      border-bottom: 1px solid #eef2f5;
+      padding: 10px 24px;
+    }
+
+    .top-nav-inner {
+      max-width: 960px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.9em;
+    }
+
+    .top-nav .nav-note {
+      font-weight: bold;
+      color: #222;
+    }
+
+    .top-nav .nav-links a {
+      margin-left: 12px;
+      text-decoration: none;
+      color: #4a90e2;
+      font-weight: 500;
+    }
+
+    .top-nav .nav-links a:hover {
+      text-decoration: underline;
+    }
+
+    .section-note {
+      font-size: 0.9em;
+      color: #666;
+      margin-top: 0;
+    }
+
+    .notice {
+      margin: 24px 0;
+      padding: 16px;
+      background: #fff3cd;
+      border-left: 6px solid #f9a825;
+      border-radius: 6px;
+      font-size: 0.95em;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 24px;
+    }
+
+    th, td {
+      padding: 14px;
+      border-bottom: 1px solid #ddd;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f0f3f6;
+    }
+
+    .status {
+      font-weight: bold;
+    }
+
+    .green { color: #2e7d32; }
+    .amber { color: #f9a825; }
+    .red { color: #c62828; }
+
+    .explanation {
+      margin-top: 32px;
+      background: #f7f9fb;
+      padding: 20px;
+      border-radius: 6px;
+    }
+
+    .capability-status {
+      margin-top: 32px;
+      background: #f0f3f6;
+      padding: 20px;
+      border-radius: 6px;
+    }
+
+    .capability-status ul {
+      margin: 12px 0 0 0;
+      padding-left: 24px;
+    }
+
+    .capability-status li {
+      margin-bottom: 8px;
+    }
+
+    .footer {
+      margin-top: 36px;
+      font-size: 0.9em;
+      color: #666;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="top-nav">
+    <div class="top-nav-inner">
+      <span class="nav-note">Inspection Readiness · Read-Only</span>
+      <span class="nav-links">
+        <a href="#overview">Overview</a>
+        <a href="#governance">Governance</a>
+        <a href="#safeguarding">Safeguarding</a>
+        <a href="#mental-capacity-consent">Mental Capacity &amp; Consent</a>
+        <a href="#staffing-training">Staffing &amp; Training</a>
+        <a href="#care-planning-framework">Care Planning Framework</a>
+      </span>
+    </div>
+  </div>
+
+  <div class="container">
+
+    <h1>
+      CQC Readiness Overview
+      <span class="badge">Preview · Read-Only</span>
+    </h1>
+
+    <div class="org-box">
+      <p><strong>Organisation:</strong> Example Care Provider Ltd</p>
+      <p><strong>Service type:</strong> Supported Living</p>
+      <p><strong>View:</strong> Organisation-level inspection readiness only</p>
+    </div>
+    <div id="overview">
+      <h2>Overview</h2>
+      <p class="section-note">
+        This section supports inspection readiness and governance assurance only.
+      </p>
+
+      <div class="explanation">
+        <h3>Organisation Context (Read-Only)</h3>
+        <p>
+          The fields below show example organisational context that helps frame inspection readiness.
+          They are illustrative placeholders and are not editable in this preview.
+        </p>
+        <ul>
+          <li><strong>Organisation name:</strong> Example care organisation (placeholder)</li>
+          <li><strong>Service type:</strong> Example supported living service (placeholder)</li>
+          <li><strong>Registered provider type:</strong> Example provider type (placeholder)</li>
+          <li><strong>Primary inspection focus:</strong> Example quality and safety focus (placeholder)</li>
+        </ul>
+        <p>
+          This information represents organisational context only.
+          No personal or care data is captured in this system.
+        </p>
+      </div>
+
+      <p>
+        This platform is used by leadership and governance roles to support inspection preparation
+        and self-assurance. It is not used by frontline staff for care delivery or day-to-day
+        operational work.
+      </p>
+
+      <p>
+        This screen provides a high-level overview of how prepared this organisation is
+        for CQC inspection. It focuses on governance, assurance, and readiness —
+        not on care delivery or records.
+      </p>
+
+      <div class="notice">
+        <p>
+          <strong>Multi-organisation design:</strong> This platform supports multiple care organisations.
+          Each organisation sees only its own readiness view. There is no cross-organisation visibility.
+        </p>
+      </div>
+    </div>
+
+    <div class="explanation">
+      <h3>Inspection Readiness Summary</h3>
+      <p>
+        This leadership-level summary provides a snapshot of inspection readiness across key areas.
+        It is designed for boards and senior leaders to support inspection preparation and internal
+        assurance discussions.
+      </p>
+      <ul>
+        <li><strong>Areas defined:</strong> 2 (illustrative example only)</li>
+        <li><strong>Areas in progress:</strong> 2 (illustrative example only)</li>
+        <li><strong>Areas not started:</strong> 1 (illustrative example only)</li>
+      </ul>
+      <p>
+        These example counts are static and illustrative. They do not represent live performance data
+        and are not calculated automatically by the platform.
+      </p>
+      <p>
+        <strong>How this is used:</strong> This summary supports board-level oversight and inspection
+        conversations. It does not represent live performance data and does not replace audits,
+        evidence, or professional judgement.
+      </p>
+      <div class="notice">
+        <p>
+          <strong>Inspection conversation:</strong> This summary helps organisations explain their
+          readiness position clearly during inspection, including strengths, gaps, and planned
+          improvement.
+        </p>
+      </div>
+    </div>
+
+    <div class="notice">
+      <strong>Scope & Limitations (Important)</strong>
+      <ul>
+        <li>This is a <strong>non-interactive, read-only preview</strong>.</li>
+        <li>No patients, service users, or staff records are shown or stored.</li>
+        <li>No documents, uploads, workflows, or actions are available.</li>
+        <li>No real authentication, permissions, or live systems are connected.</li>
+        <li>This platform shows <strong>readiness status only</strong>, not evidence.</li>
+      </ul>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>CQC Readiness Area</th>
+          <th>Readiness Level</th>
+          <th>What this status represents</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Governance & Leadership</td>
+          <td class="status green">Defined</td>
+          <td>Roles, responsibilities, and oversight arrangements are documented and understood.</td>
+        </tr>
+        <tr>
+          <td>Safeguarding Arrangements</td>
+          <td class="status amber">In progress</td>
+          <td>Safeguarding framework agreed; internal assurance and review still ongoing.</td>
+        </tr>
+        <tr>
+          <td>Mental Capacity & Consent</td>
+          <td class="status green">Defined</td>
+          <td>Processes for MCA, consent, and best-interest decisions are in place.</td>
+        </tr>
+        <tr>
+          <td>Staffing & Training</td>
+          <td class="status red">Not started</td>
+          <td>Preparation required before this area can be confidently evidenced.</td>
+        </tr>
+        <tr>
+          <td>Care Planning Framework</td>
+          <td class="status amber">In progress</td>
+          <td>Care planning structure agreed; no care data is displayed in this system.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="explanation">
+      <h3>How Readiness Levels Are Determined</h3>
+      <p>
+        Readiness levels are set by organisational leadership. They reflect governance
+        confidence, not evidence storage. Levels are reviewed periodically and are
+        not updated in real time. The platform does not calculate scores automatically.
+      </p>
+      <p><strong>Readiness levels:</strong></p>
+      <ul>
+        <li><strong>Not started:</strong> No defined framework or assurance yet</li>
+        <li><strong>In progress:</strong> Framework defined but assurance incomplete</li>
+        <li><strong>Defined:</strong> Governance and processes documented and understood</li>
+        <li><strong>Reviewed:</strong> Internal review completed with no major gaps identified</li>
+        <li><strong>Assured:</strong> Leadership confident and inspection-ready</li>
+      </ul>
+      <p>
+        Readiness levels support inspection preparation and self-assurance.
+        They do not replace professional judgement or operational systems.
+      </p>
+    </div>
+
+    <div class="explanation">
+      <h3>Inspection Alignment: Example CQC Questions</h3>
+      <p>
+        Readiness is assessed against the types of questions CQC inspectors ask.
+        These questions guide self-assurance and preparation. Answers are not
+        stored in this platform. Evidence remains in existing organisational systems.
+      </p>
+      <p>
+        The following example questions illustrate how readiness areas align to
+        inspector-style thinking. They help organisations reflect on governance
+        and assurance in advance of inspection.
+      </p>
+      <p><strong>Governance & Leadership:</strong></p>
+      <ul>
+        <li>How do leaders assure themselves that care is safe and well-led?</li>
+        <li>How are risks identified, escalated, and reviewed?</li>
+        <li>How do leaders know when improvement is required?</li>
+      </ul>
+      <p><strong>Safeguarding:</strong></p>
+      <ul>
+        <li>How are safeguarding concerns recognised and responded to?</li>
+        <li>How are staff supported to raise concerns safely?</li>
+        <li>How is learning shared after incidents?</li>
+      </ul>
+      <p><strong>Mental Capacity & Consent:</strong></p>
+      <ul>
+        <li>How is capacity assessed and recorded?</li>
+        <li>How are best-interest decisions made and reviewed?</li>
+        <li>How is consent respected and monitored?</li>
+      </ul>
+      <p><strong>Staffing & Training:</strong></p>
+      <ul>
+        <li>How do you ensure staff are suitably skilled and supported?</li>
+        <li>How is training need identified and reviewed?</li>
+        <li>How do you know staffing levels are safe?</li>
+      </ul>
+      <p><strong>Care Planning Framework:</strong></p>
+      <ul>
+        <li>How is person-centred care planned and reviewed?</li>
+        <li>How do staff know what good care looks like?</li>
+        <li>How is consistency assured across services?</li>
+      </ul>
+      <p>
+        These questions support inspection preparation and self-reflection.
+        This platform does not capture answers or evidence.
+      </p>
+    </div>
+
+    <div class="explanation">
+      <h3>How this system is used</h3>
+      <p>
+        This platform is updated by organisational leadership (for example, the
+        Registered Manager or Quality Lead) to reflect inspection readiness.
+        It does <strong>not</strong> replace care systems or evidence stores.
+      </p>
+      <p>
+        Evidence, records, and documentation remain in the organisation’s existing
+        care and governance systems and are only provided to inspectors if requested.
+      </p>
+    </div>
+
+    <div id="governance" class="explanation">
+      <h3>Governance</h3>
+      <p class="section-note">
+        This section supports inspection readiness and governance assurance only.
+      </p>
+      <p>
+        Governance readiness focuses on how leadership oversees quality, safety, and
+        improvement. It describes how responsibilities, assurance mechanisms, and
+        risk management are understood and applied in practice.
+      </p>
+      <p><strong>Example inspection-style questions:</strong></p>
+      <ul>
+        <li>How do leaders assure themselves that care is safe and well-led?</li>
+        <li>How are risks identified, escalated, and reviewed?</li>
+        <li>How do leaders know when improvement is required?</li>
+      </ul>
+      <p>
+        This guidance supports governance and inspection readiness. It does not
+        represent care delivery or operational decision-making.
+      </p>
+    </div>
+
+    <div id="safeguarding" class="explanation">
+      <h3>Safeguarding</h3>
+      <p class="section-note">
+        This section supports inspection readiness and governance assurance only.
+      </p>
+      <p>
+        Safeguarding readiness describes how concerns are recognised, reported, and
+        learned from. It focuses on organisational systems and culture that enable
+        people to speak up and for risks to be addressed.
+      </p>
+      <p><strong>Example inspection-style questions:</strong></p>
+      <ul>
+        <li>How are safeguarding concerns recognised and responded to?</li>
+        <li>How are staff supported to raise concerns safely?</li>
+        <li>How is learning shared after incidents?</li>
+      </ul>
+      <p>
+        This guidance supports safeguarding assurance and preparation for inspection.
+        It does not act as a safeguarding reporting or case management tool.
+      </p>
+    </div>
+
+    <div id="mental-capacity-consent" class="explanation">
+      <h3>Mental Capacity &amp; Consent</h3>
+      <p class="section-note">
+        This section supports inspection readiness and governance assurance only.
+      </p>
+      <p>
+        Mental capacity and consent readiness considers how decisions are made,
+        recorded, and reviewed. It focuses on governance around lawful decision-making
+        and respect for people’s rights.
+      </p>
+      <p><strong>Example inspection-style questions:</strong></p>
+      <ul>
+        <li>How is capacity assessed and recorded?</li>
+        <li>How are best-interest decisions made and reviewed?</li>
+        <li>How is consent respected and monitored?</li>
+      </ul>
+      <p>
+        This guidance supports assurance around capacity and consent. It does not
+        function as a clinical or case management system.
+      </p>
+    </div>
+
+    <div id="staffing-training" class="explanation">
+      <h3>Staffing &amp; Training</h3>
+      <p class="section-note">
+        This section supports inspection readiness and governance assurance only.
+      </p>
+      <p>
+        Staffing and training readiness looks at how the organisation ensures its
+        workforce is suitably skilled, supported, and deployed. It focuses on
+        governance around competence and safe staffing.
+      </p>
+      <p><strong>Example inspection-style questions:</strong></p>
+      <ul>
+        <li>How do you ensure staff are suitably skilled and supported?</li>
+        <li>How is training need identified and reviewed?</li>
+        <li>How do you know staffing levels are safe?</li>
+      </ul>
+      <p>
+        This guidance supports oversight of staffing and training readiness. It is
+        not a rota, HR, or training management system.
+      </p>
+    </div>
+
+    <div id="care-planning-framework" class="explanation">
+      <h3>Care Planning Framework</h3>
+      <p class="section-note">
+        This section supports inspection readiness and governance assurance only.
+      </p>
+      <p>
+        Care planning framework readiness focuses on how care is structured,
+        reviewed, and overseen. It looks at frameworks and governance that define
+        what good care looks like across services.
+      </p>
+      <p><strong>Example inspection-style questions:</strong></p>
+      <ul>
+        <li>How is person-centred care planned and reviewed?</li>
+        <li>How do staff know what good care looks like?</li>
+        <li>How is consistency assured across services?</li>
+      </ul>
+      <p>
+        This guidance supports inspection preparation and framework assurance. It
+        does not display or manage individual care records.
+      </p>
+    </div>
+
+    <div class="capability-status">
+      <h3>Care Folder Capability Status</h3>
+      <p>
+        Care folders exist as a future capability but are intentionally disabled.
+        This is a governance-first, inspection-safe decision.
+      </p>
+      <p><strong>Status:</strong> Not enabled</p>
+      <p><strong>Mode:</strong> Governance-first</p>
+      <p><strong>Reason:</strong> Care folders are intentionally disabled until organisational readiness, access controls, and assurance requirements are formally met.</p>
+      <p><strong>Requirements before care folders can be enabled:</strong></p>
+      <ul>
+        <li>Named accountable lead for care governance</li>
+        <li>Access control and role model approved</li>
+        <li>Data protection and safeguarding readiness confirmed</li>
+        <li>CQC readiness baseline achieved</li>
+        <li>Formal approval recorded by senior leadership</li>
+      </ul>
+      <p>
+        This platform does not enable care records until governance is proven. This protects people, staff, and the organisation.
+      </p>
+    </div>
+
+    <div class="explanation">
+      <h3>How Care Folders Are Introduced (Governed Transition)</h3>
+      <p>
+        Care folders are not a default feature of the platform. They are introduced
+        only after inspection readiness is demonstrated. Introduction is a formal
+        organisational decision, not a technical switch. Governance, access controls,
+        and safeguards are reviewed first. Enablement is scoped, monitored, and can
+        be paused or reversed.
+      </p>
+      <p><strong>Transition steps:</strong></p>
+      <ol>
+        <li>Inspection readiness baseline achieved</li>
+        <li>Governance and accountability confirmed</li>
+        <li>Access control and role boundaries approved</li>
+        <li>Data protection and safeguarding readiness verified</li>
+        <li>Formal leadership approval recorded</li>
+        <li>Care folder capability enabled in a controlled manner</li>
+      </ol>
+      <p>
+        Care folders are introduced only when it is safe and appropriate to do so.
+        This staged approach protects people, staff, and organisations.
+      </p>
+    </div>
+
+    <div class="footer">
+      This platform supports safe, proportionate CQC inspection preparation.
+      It does not influence care decisions and does not contain personal data.
+    </div>
+
+  </div>
+</body>
+</html>

@@ -1,0 +1,216 @@
+// =============================================================================
+// FIRESTORE SECURITY RULES — Digital CQC Readiness System (First Build)
+// =============================================================================
+// These rules implement the agreed access intent and guardrails defined in:
+// - Firestore-Collection-Structure-First-Build.md
+// - Firestore-Access-Intent-and-Guardrails.md
+// - Firestore-Rule-Behaviour-Conceptual.md
+//
+// Principles: Default deny; grant access only where explicitly required;
+// enforce organisation/service/person separation; inspector read-only;
+// audit log append-only (no user edit/delete); no cross-service access
+// without authority; authentication required for all access.
+//
+// Required custom claims (set via Admin SDK or auth triggers): role (string:
+// 'staff' | 'manager' | 'admin' | 'inspector'), organisationId (string),
+// serviceIds (array of strings — service IDs the user can access).
+// =============================================================================
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // -------------------------------------------------------------------------
+    // HELPER FUNCTIONS
+    // -------------------------------------------------------------------------
+    // Purpose: Centralise checks for authentication, role, scope, and write
+    // eligibility. Custom claims must be set per user: role, organisationId,
+    // serviceIds (array of service IDs the user can access).
+    // -------------------------------------------------------------------------
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserRole() {
+      return request.auth.token.role;
+    }
+
+    function getOrgId() {
+      return request.auth.token.organisationId;
+    }
+
+    function getServiceIds() {
+      return request.auth.token.serviceIds;
+    }
+
+    function isInspector() {
+      return getUserRole() == 'inspector';
+    }
+
+    function isAdmin() {
+      return getUserRole() == 'admin';
+    }
+
+    function isManager() {
+      return getUserRole() == 'manager';
+    }
+
+    function canWrite() {
+      return isAuthenticated() && !isInspector();
+    }
+
+    function userCanAccessOrganisation(orgId) {
+      return isAuthenticated()
+        && getOrgId() != null
+        && getOrgId() == orgId;
+    }
+
+    function userCanAccessService(serviceId) {
+      return isAuthenticated()
+        && getServiceIds() != null
+        && serviceId in getServiceIds();
+    }
+
+    function personBelongsToUserScope(serviceId) {
+      return getServiceIds() != null && serviceId in getServiceIds();
+    }
+
+    function getPersonServiceId(personId) {
+      return get(/databases/$(database)/documents/people/$(personId)).data.serviceId;
+    }
+
+    function userCanAccessPerson(personId) {
+      return isAuthenticated()
+        && exists(/databases/$(database)/documents/people/$(personId))
+        && getPersonServiceId(personId) in getServiceIds();
+    }
+
+    // -------------------------------------------------------------------------
+    // 2. GLOBAL DEFAULT-DENY
+    // -------------------------------------------------------------------------
+    // Purpose: No access is allowed unless a more specific rule explicitly
+    // permits it. Unknown or new paths remain inaccessible (fail safe).
+    // -------------------------------------------------------------------------
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // 3. ORGANISATION-LEVEL RULES
+    // -------------------------------------------------------------------------
+    // Purpose: Organisation data is readable by any authenticated user in that
+    // organisation; only admins may create or update. No delete. Strict
+    // separation: user's organisationId must match the document path.
+    // -------------------------------------------------------------------------
+
+    match /organisations/{orgId} {
+      allow read: if userCanAccessOrganisation(orgId);
+      allow create: if canWrite() && isAdmin();
+      allow update: if canWrite() && isAdmin() && userCanAccessOrganisation(orgId);
+      allow delete: if false;
+    }
+
+    match /organisations/{orgId}/registeredLocations/{locationId} {
+      allow read: if userCanAccessOrganisation(orgId);
+      allow create: if canWrite() && isAdmin() && userCanAccessOrganisation(orgId);
+      allow update: if canWrite() && isAdmin() && userCanAccessOrganisation(orgId);
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // 4. SERVICE-LEVEL RULES
+    // -------------------------------------------------------------------------
+    // Purpose: Service data is readable/writable only by users whose
+    // serviceIds include that service (staff: one service; manager: one or
+    // more). Only admin or manager can create/update services. No delete
+    // (governed process only). Cross-service: user must have serviceId in
+    // their token.
+    // -------------------------------------------------------------------------
+
+    match /services/{serviceId} {
+      allow read: if userCanAccessService(serviceId);
+      allow create: if canWrite()
+        && (isAdmin() || isManager())
+        && request.resource.data.organisationId == getOrgId();
+      allow update: if canWrite() && (isAdmin() || isManager()) && userCanAccessService(serviceId);
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // 5. PERSON-LEVEL RULES
+    // -------------------------------------------------------------------------
+    // Purpose: Person and care folder data are readable/writable only when
+    // the person's serviceId is in the user's serviceIds. Inspectors get
+    // read only via canWrite() being false. No delete of person or care
+    // folder content (critical evidence protection). Cross-service access
+    // blocked by serviceId check.
+    // -------------------------------------------------------------------------
+
+    match /people/{personId} {
+      allow read: if isAuthenticated() && resource.data.serviceId in getServiceIds();
+      allow create: if canWrite()
+        && (isAdmin() || isManager())
+        && request.resource.data.serviceId in getServiceIds();
+      allow update: if canWrite() && resource.data.serviceId in getServiceIds();
+      allow delete: if false;
+    }
+
+    match /people/{personId}/careFolder/{folderDocId} {
+      allow read: if userCanAccessPerson(personId);
+      allow create: if canWrite() && userCanAccessPerson(personId);
+      allow update: if canWrite() && userCanAccessPerson(personId);
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // 6. AUDIT / HISTORY PROTECTION RULES
+    // -------------------------------------------------------------------------
+    // Purpose: Audit log is append-only and must never be edited or deleted
+    // by users. Only a secure server process (e.g. Cloud Function using
+    // Admin SDK) should create audit entries after a user action. Client
+    // requests to create/update/delete audit are denied. Read is allowed
+    // for authenticated users (scope enforced by query filters in app).
+    // -------------------------------------------------------------------------
+
+    match /auditLog/{entryId} {
+      allow read: if isAuthenticated();
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // 7. INSPECTION / READ-ONLY ACCESS (ENFORCED VIA canWrite())
+    // -------------------------------------------------------------------------
+    // Purpose: Inspector role has no create/update/delete anywhere. This is
+    // enforced by canWrite() which requires !isInspector(). All write rules
+    // above use canWrite(), so inspectors are denied write on organisations,
+    // services, people, careFolder, and auditLog. Read is allowed where
+    // isAuthenticated() and scope (organisation/service/person) match; inspector
+    // token must have organisationId and serviceIds set for the context they
+    // are shown. No separate "inspector allow" needed for read—they pass
+    // userCanAccessOrganisation, userCanAccessService, userCanAccessPerson
+    // like managers, but fail every write.
+    // -------------------------------------------------------------------------
+    // (No additional match blocks; inspector write denial is implicit in
+    // all create/update/delete conditions above.)
+    // -------------------------------------------------------------------------
+
+    // -------------------------------------------------------------------------
+    // 8. EXPLICIT HARD DENIALS (DOCUMENTED)
+    // -------------------------------------------------------------------------
+    // The following are never allowed (enforced in rules above):
+    // - Audit: create/update/delete denied in section 6 (auditLog match).
+    // - Inspector write: denied by canWrite() in all create/update rules.
+    // - Cross-service: denied by userCanAccessService / getServiceIds() and
+    //   personBelongsToUserScope / resource.data.serviceId in getServiceIds().
+    // - Unauthenticated: denied by isAuthenticated() in every allow condition.
+    // - Delete of person: allow delete: if false (people match).
+    // - Delete of care folder content: allow delete: if false (careFolder match).
+    // No additional match blocks required; the rules above implement all denials.
+    // -------------------------------------------------------------------------
+  }
+}

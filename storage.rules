@@ -1,0 +1,26 @@
+// =============================================================================
+// FIREBASE STORAGE SECURITY RULES — Production
+// Healthcare compliance SaaS: tenant isolation for document storage.
+// =============================================================================
+// Path: /organisations/{organisationId}/documents/{fileId}
+// Requires: request.auth.token.organisationId == organisationId (set via custom
+//   claims so Storage rules can validate; Firestore rules can use users doc).
+// =============================================================================
+
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Organisation-scoped documents (policies, evidence). Only that org's users.
+    match /organisations/{organisationId}/documents/{allPaths=**} {
+      allow read, write: if request.auth != null
+        && request.auth.token.organisationId == organisationId;
+    }
+
+    // Deny all other paths by default
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

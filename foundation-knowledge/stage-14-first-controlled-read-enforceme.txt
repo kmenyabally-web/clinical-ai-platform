@@ -1,0 +1,23 @@
+stage-14-first-controlled-read-enforcement-definition.md
+# Where Enforcement Occurs for the First Controlled Data Read
+
+## Purpose of Defining Enforcement Locations
+In regulated health and social care systems, enforcement must exist at multiple technical layers, not just in written policy or user intent. Defining where enforcement occurs ensures that access boundaries are physically and logically enforced even if human error, misconfiguration, or misuse occurs.
+
+## Authentication Boundary
+Authentication establishes identity only. It confirms who the user is but does not, by itself, grant permission to read any data. This boundary ensures that no data access is possible without successful authentication, while also preventing identity from being treated as authorisation.
+
+## Authorisation and Rule Boundary
+Authorisation rules form the primary control layer that defines what authenticated users are allowed to request. These rules ensure that even valid roles cannot access data outside the explicitly permitted scope. Any request that does not match the defined permissions is refused by default.
+
+## Application Query Boundary
+The application itself is constrained so that it cannot request data beyond the agreed scope. Even if misused or incorrectly configured, the application layer does not expose broader queries, bulk reads, or indirect access paths to protected data.
+
+## Environment Separation Boundary
+Separation between development, testing, and live environments ensures that mistakes or experimentation cannot expose real care or inspection data. This boundary prevents accidental access to live data during configuration, testing, or troubleshooting activities.
+
+## Layered Failure Containment
+If one enforcement layer fails or is misapplied, additional layers remain in place to prevent over-access. This defence-in-depth approach ensures that no single control failure results in data exposure.
+
+## Why Layered Enforcement Is Required for CQC Compliance
+CQC expects systems to demonstrate proactive risk management, data minimisation, and fail-safe design. Layered enforcement provides confidence that access is controlled by system design, not reliance on user behaviour or manual oversight.

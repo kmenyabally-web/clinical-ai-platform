@@ -1,0 +1,137 @@
+// =============================================================================
+// FIRESTORE SECURITY RULES — Stage 20 (20A + 20B + 20C + 20D)
+// CQC Readiness Platform — Readiness + care folders + minimal patient records
+// =============================================================================
+// - Stage 20A: Auth + organisation isolation (users doc: uid, email, orgId, role, status)
+// - Stage 20B: Role-based writes (Manager: readiness; QualityLead: readinessProposals; Viewer: read-only)
+// - Stage 20C: careFoldersEnabled; empty care folder structure; Manager only creates folders.
+// - Stage 20D: records subcollection (minimal patient data); recordProposals; auditLogs (immutable). No delete; archive only.
+// - Stage 20E: aiEnabled on org; aiLogs (immutable); Manager-only AI invocation. AI assistive only; no decisions/scores.
+// No NHS number, no bulk export. Deny by default.
+// =============================================================================
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isActiveUser() {
+      return isSignedIn()
+        && getUserDoc().exists
+        && getUserDoc().data.status == 'active';
+    }
+
+    function userOrgId() {
+      return getUserDoc().data.orgId;
+    }
+
+    function userRole() {
+      return getUserDoc().data.role;
+    }
+
+    function isManager() {
+      return userRole() == 'Manager';
+    }
+
+    function isQualityLead() {
+      return userRole() == 'QualityLead';
+    }
+
+    function isViewer() {
+      return userRole() == 'Viewer';
+    }
+
+    function orgMatch(orgId) {
+      return isActiveUser() && userOrgId() == orgId;
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Users: read own doc only
+    match /users/{userId} {
+      allow read: if isActiveUser() && request.auth.uid == userId;
+      allow write: if false;
+    }
+
+    // Organisations: read own org; Manager may update (e.g. careFoldersEnabled only — app must restrict)
+    match /organisations/{orgId} {
+      allow read: if orgMatch(orgId);
+      allow create: if false;
+      allow update: if orgMatch(orgId) && isManager();
+      allow delete: if false;
+    }
+
+    // Readiness (live): read within org; write only Manager
+    match /organisations/{orgId}/readiness/{domainId} {
+      allow read: if orgMatch(orgId);
+      allow create, update: if orgMatch(orgId) && isManager();
+      allow delete: if false;
+    }
+
+    // Readiness summary under org: read within org; write only Manager if needed later
+    match /organisations/{orgId}/readinessSummary/{docId} {
+      allow read: if orgMatch(orgId);
+      allow write: if false;
+    }
+
+    // Readiness proposals: read within org; create by Manager or QualityLead; no update/delete by client
+    match /organisations/{orgId}/readinessProposals/{proposalId} {
+      allow read: if orgMatch(orgId);
+      allow create: if orgMatch(orgId) && (isManager() || isQualityLead());
+      allow update, delete: if false;
+    }
+
+    // Domain-level readiness (if stored as subcollection): same as readiness
+    match /organisations/{orgId}/domains/{domainId} {
+      allow read: if orgMatch(orgId);
+      allow create, update: if orgMatch(orgId) && isManager();
+      allow delete: if false;
+    }
+
+    // Care folders (Stage 20C): empty structure only. Read within org; only Manager may create folder doc.
+    match /organisations/{orgId}/careFolders/{folderId} {
+      allow read: if orgMatch(orgId);
+      allow create: if orgMatch(orgId) && isManager();
+      allow update, delete: if false;
+    }
+
+    // Records (Stage 20D): minimal patient data. Read within org; Manager create/update only; no delete (archive = status update).
+    match /organisations/{orgId}/careFolders/{folderId}/records/{recordId} {
+      allow read: if orgMatch(orgId);
+      allow create, update: if orgMatch(orgId) && isManager();
+      allow delete: if false;
+    }
+
+    // Record edit proposals (Stage 20D): QualityLead/Manager create only; no update/delete.
+    match /organisations/{orgId}/careFolders/{folderId}/recordProposals/{proposalId} {
+      allow read: if orgMatch(orgId);
+      allow create: if orgMatch(orgId) && (isManager() || isQualityLead());
+      allow update, delete: if false;
+    }
+
+    // Audit logs (Stage 20D): immutable. Read within org; Manager create only (on create/update/archive); no update/delete.
+    match /organisations/{orgId}/careFolders/{folderId}/auditLogs/{logId} {
+      allow read: if orgMatch(orgId);
+      allow create: if orgMatch(orgId) && isManager();
+      allow update, delete: if false;
+    }
+
+    // AI invocation logs (Stage 20E): immutable. Only Manager may create when invoking AI; no update/delete.
+    match /organisations/{orgId}/aiLogs/{logId} {
+      allow read: if orgMatch(orgId);
+      allow create: if orgMatch(orgId) && isManager();
+      allow update, delete: if false;
+    }
+  }
+}

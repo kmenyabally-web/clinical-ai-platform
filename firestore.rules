@@ -1,0 +1,263 @@
+// =============================================================================
+// FIRESTORE SECURITY RULES — Production
+// Healthcare compliance SaaS: tenant isolation, RBAC, audit immutability,
+// platform admin, validation. Deny by default.
+// =============================================================================
+// Tenant isolation: organisationId must match user's org (from token or users doc).
+// Service isolation: service-scoped data requires assignment (managerId) for
+//   Manager/QualityLead. Admin has full org access.
+// Rate limiting: not enforceable in rules; implement in Cloud Functions or
+//   middleware for notifications, audit_logs, inspection_sessions.
+// =============================================================================
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- Helpers: auth and user profile ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    // Prefer custom claim for org; fallback to users doc (set on signup/login).
+    function userOrgId() {
+      return request.auth.token.organisationId != null
+        ? request.auth.token.organisationId
+        : (getUserDoc().exists && getUserDoc().data.get('orgId', null) != null
+            ? getUserDoc().data.orgId
+            : null);
+    }
+
+    function userRole() {
+      return request.auth.token.role != null
+        ? request.auth.token.role
+        : (getUserDoc().exists ? getUserDoc().data.get('role', null) : null);
+    }
+
+    function isActiveUser() {
+      return isSignedIn()
+        && getUserDoc().exists
+        && getUserDoc().data.get('status', '') == 'active';
+    }
+
+    // Platform admin: document ID in platform_admins must equal uid (store admins as platform_admins/{uid}).
+    function isPlatformAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/platform_admins/$(request.auth.uid));
+    }
+
+    // Tenant isolation: user's org must match resource/request org.
+    function orgMatch(orgId) {
+      return isActiveUser() && userOrgId() != null && userOrgId() == orgId;
+    }
+
+    function isAdmin() { return userRole() == 'Admin'; }
+    function isManager() { return userRole() == 'Manager'; }
+    function isQualityLead() { return userRole() == 'QualityLead'; }
+    function isStaff() { return userRole() == 'Staff'; }
+    function isAuditor() { return userRole() == 'Auditor'; }
+
+    // Service-level access: Admin sees all; Manager/QualityLead only if assigned (managerId == uid).
+    function canAccessService(orgId, serviceId) {
+      return orgMatch(orgId) && (
+        isAdmin() ||
+        (serviceId == null || serviceId == '') ||
+        (get(/databases/$(database)/documents/services/$(serviceId)).data.get('managerId', null) == request.auth.uid)
+      );
+    }
+
+    // Writes allowed for roles that can mutate (not Auditor).
+    function canWriteCompliance() {
+      return isAdmin() || isManager() || isQualityLead() || isStaff();
+    }
+
+    function canWriteDocuments() {
+      return isAdmin() || isManager() || isQualityLead() || isStaff();
+    }
+
+    function canMarkNotificationRead() {
+      return isAdmin() || isManager();
+    }
+
+    function canWriteInspection() {
+      return isAdmin() || isManager() || isQualityLead();
+    }
+
+    // --- Default deny ---
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- users: read own; create own (signup); no update/delete from client ---
+    match /users/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isPlatformAdmin());
+      allow create: if request.auth.uid == userId
+        && request.resource.data.keys().hasAll(['orgId', 'role', 'status'])
+        && request.resource.data.orgId is string
+        && request.resource.data.role is string
+        && request.resource.data.status is string;
+      allow update, delete: if false;
+    }
+
+    // --- platform_admins: read only doc where userId == uid (for client-side check). Writes by backend only. ---
+    match /platform_admins/{docId} {
+      allow read: if isSignedIn() && (docId == request.auth.uid || resource.data.userId == request.auth.uid);
+      allow write: if false;
+    }
+
+    // --- organisations: read own org or platform admin; update (e.g. status) Admin or platform admin ---
+    match /organisations/{orgId} {
+      allow read: if orgMatch(orgId) || isPlatformAdmin();
+      allow create: if isSignedIn()
+        && !getUserDoc().exists()
+        && request.resource.data.keys().hasAll(['name', 'status'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0;
+      allow update: if (orgMatch(orgId) && isAdmin()) || isPlatformAdmin();
+      allow delete: if false;
+    }
+
+    // Subcollection: readiness (dashboard)
+    match /organisations/{orgId}/readiness/{docId} {
+      allow read, write: if orgMatch(orgId) && (isManager() || isAdmin());
+    }
+
+    // --- subscriptions: org-scoped; Admin or platform admin ---
+    match /subscriptions/{subId} {
+      allow read: if (isActiveUser() && resource.data.organisationId == userOrgId()) || isPlatformAdmin();
+      allow create: if (orgMatch(request.resource.data.organisationId) && isAdmin())
+        && request.resource.data.keys().hasAll(['organisationId', 'planName', 'status', 'billingCycle'])
+        && request.resource.data.organisationId is string
+        && request.resource.data.status == 'active';
+      allow update: if (isActiveUser() && resource.data.organisationId == userOrgId() && isAdmin()) || isPlatformAdmin();
+      allow delete: if false;
+    }
+
+    // --- services: org-scoped; create Admin only (plan limit enforced in app); read with service isolation ---
+    match /services/{serviceId} {
+      allow read: if isPlatformAdmin()
+        || (isActiveUser() && resource.data.organisationId == userOrgId()
+            && (isAdmin() || resource.data.get('managerId', null) == request.auth.uid));
+      allow create: if orgMatch(request.resource.data.organisationId) && isAdmin()
+        && request.resource.data.keys().hasAll(['organisationId', 'serviceName', 'serviceType', 'location'])
+        && request.resource.data.organisationId is string
+        && request.resource.data.serviceName is string;
+      allow update, delete: if orgMatch(resource.data.organisationId) && isAdmin();
+    }
+
+    // --- compliance_domains: org + optional serviceId; RBAC and service isolation ---
+    match /compliance_domains/{domainId} {
+      allow read: if isActiveUser() && resource.data.organisationId == userOrgId()
+        && (resource.data.get('serviceId', null) == null || canAccessService(resource.data.organisationId, resource.data.serviceId));
+      allow create: if orgMatch(request.resource.data.organisationId) && canWriteCompliance()
+        && request.resource.data.organisationId is string
+        && (request.resource.data.get('serviceId', null) == null || canAccessService(request.resource.data.organisationId, request.resource.data.serviceId));
+      allow update: if orgMatch(resource.data.organisationId) && canWriteCompliance()
+        && (resource.data.get('serviceId', null) == null || canAccessService(resource.data.organisationId, resource.data.serviceId));
+      allow delete: if false;
+    }
+
+    match /compliance_actions/{actionId} {
+      allow read: if isActiveUser() && resource.data.organisationId == userOrgId()
+        && (resource.data.get('serviceId', null) == null || canAccessService(resource.data.organisationId, resource.data.serviceId));
+      allow create: if orgMatch(request.resource.data.organisationId) && canWriteCompliance()
+        && request.resource.data.keys().hasAll(['organisationId', 'title', 'status'])
+        && request.resource.data.organisationId is string
+        && (request.resource.data.get('serviceId', null) == null || canAccessService(request.resource.data.organisationId, request.resource.data.serviceId));
+      allow update: if orgMatch(resource.data.organisationId) && canWriteCompliance()
+        && (resource.data.get('serviceId', null) == null || canAccessService(resource.data.organisationId, resource.data.serviceId));
+      allow delete: if false;
+    }
+
+    match /compliance_stats/{statId} {
+      allow read: if isActiveUser() && resource.data.organisationId == userOrgId()
+        && (resource.data.get('serviceId', null) == null || canAccessService(resource.data.organisationId, resource.data.serviceId));
+      allow create, update: if orgMatch(request.resource.data.organisationId) && canWriteCompliance();
+      allow delete: if false;
+    }
+
+    // --- audit_logs: immutable — create and read only; no update/delete ---
+    match /audit_logs/{logId} {
+      allow read: if isActiveUser() && resource.data.organisationId == userOrgId();
+      allow create: if isActiveUser()
+        && request.resource.data.organisationId == userOrgId()
+        && request.resource.data.keys().hasAll(['organisationId', 'userId', 'action', 'entityType', 'entityId', 'entityName'])
+        && request.resource.data.organisationId is string
+        && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // --- policies & evidence_documents: org + optional serviceId; validation ---
+    match /policies/{docId} {
+      allow read: if isActiveUser() && resource.data.organisationId == userOrgId()
+        && (resource.data.get('serviceId', null) == null || canAccessService(resource.data.organisationId, resource.data.serviceId));
+      allow create: if orgMatch(request.resource.data.organisationId) && canWriteDocuments()
+        && request.resource.data.organisationId is string
+        && request.resource.data.keys().hasAll(['organisationId', 'title', 'documentType', 'domainType'])
+        && (request.resource.data.get('serviceId', null) == null || canAccessService(request.resource.data.organisationId, request.resource.data.serviceId));
+      allow update: if orgMatch(resource.data.organisationId) && canWriteDocuments()
+        && (resource.data.get('serviceId', null) == null || canAccessService(resource.data.organisationId, resource.data.serviceId));
+      allow delete: if false;
+    }
+
+    match /evidence_documents/{docId} {
+      allow read: if isActiveUser() && resource.data.organisationId == userOrgId()
+        && (resource.data.get('serviceId', null) == null || canAccessService(resource.data.organisationId, resource.data.serviceId));
+      allow create: if orgMatch(request.resource.data.organisationId) && canWriteDocuments()
+        && request.resource.data.organisationId is string
+        && request.resource.data.keys().hasAll(['organisationId', 'title', 'documentType', 'domainType'])
+        && (request.resource.data.get('serviceId', null) == null || canAccessService(request.resource.data.organisationId, request.resource.data.serviceId));
+      allow update: if orgMatch(resource.data.organisationId) && canWriteDocuments()
+        && (resource.data.get('serviceId', null) == null || canAccessService(resource.data.organisationId, resource.data.serviceId));
+      allow delete: if false;
+    }
+
+    match /document_stats/{statId} {
+      allow read: if isActiveUser() && resource.data.organisationId == userOrgId();
+      allow create, update: if orgMatch(request.resource.data.organisationId) && canWriteDocuments()
+        && request.resource.data.organisationId is string;
+      allow delete: if false;
+    }
+
+    // --- notifications: read org; mark read (update) Admin/Manager only ---
+    match /notifications/{notifId} {
+      allow read: if isActiveUser() && resource.data.organisationId == userOrgId();
+      allow create: if orgMatch(request.resource.data.organisationId) && canWriteCompliance()
+        && request.resource.data.organisationId is string;
+      allow update: if orgMatch(resource.data.organisationId) && canMarkNotificationRead();
+      allow delete: if false;
+    }
+
+    // --- inspection_questions: shared template; read any authenticated; write backend only ---
+    match /inspection_questions/{qId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /inspection_sessions/{sessionId} {
+      allow read: if isActiveUser() && resource.data.organisationId == userOrgId()
+        && (resource.data.get('serviceId', null) == null || canAccessService(resource.data.organisationId, resource.data.serviceId));
+      allow create: if orgMatch(request.resource.data.organisationId) && canWriteInspection()
+        && request.resource.data.keys().hasAll(['organisationId', 'startedBy'])
+        && request.resource.data.organisationId is string
+        && request.resource.data.startedBy == request.auth.uid
+        && (request.resource.data.get('serviceId', null) == null || canAccessService(request.resource.data.organisationId, request.resource.data.serviceId));
+      allow update: if orgMatch(resource.data.organisationId) && canWriteInspection()
+        && (resource.data.get('serviceId', null) == null || canAccessService(resource.data.organisationId, resource.data.serviceId));
+      allow delete: if false;
+    }
+
+    match /inspection_responses/{responseId} {
+      allow read: if isActiveUser()
+        && get(/databases/$(database)/documents/inspection_sessions/$(resource.data.sessionId)).data.organisationId == userOrgId();
+      allow create, update: if isActiveUser()
+        && get(/databases/$(database)/documents/inspection_sessions/$(request.resource.data.sessionId)).data.organisationId == userOrgId()
+        && canWriteInspection();
+      allow delete: if false;
+    }
+  }
+}
