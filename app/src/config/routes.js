@@ -8,19 +8,14 @@ export const READINESS_SECTION_ROLES = ["Manager", "QualityLead"];
 
 /** @type {{ path: string, label: string, ariaLabel?: string, allowedRoles?: string[], platformAdminOnly?: boolean }[]} */
 export const NAV_ITEMS = [
-  { path: "/admin", label: "Admin", ariaLabel: "Platform admin control panel", platformAdminOnly: true },
-  { path: "/dashboard", label: "Overview", ariaLabel: "Dashboard overview", allowedRoles: undefined },
-  { path: "/actions", label: "Actions", ariaLabel: "Compliance actions", allowedRoles: undefined },
+  { path: "/dashboard", label: "Dashboard", ariaLabel: "Dashboard overview", allowedRoles: undefined },
+  { path: "/patients", label: "Patients", ariaLabel: "Patient list", allowedRoles: undefined },
+  { path: "/clinical-notes", label: "Clinical Notes", ariaLabel: "Clinical notes by service", allowedRoles: undefined },
+  { path: "/incidents", label: "Incidents & Safeguarding", ariaLabel: "Incidents and safeguarding", allowedRoles: undefined },
   { path: "/documents", label: "Documents", ariaLabel: "Evidence and policy documents", allowedRoles: undefined },
-  { path: "/evidence", label: "Evidence", ariaLabel: "Evidence management", allowedRoles: undefined },
-  { path: "/inspection-simulation", label: "Inspection simulation", ariaLabel: "CQC inspection simulation", allowedRoles: undefined },
-  { path: "/reports", label: "Reports", ariaLabel: "CQC Readiness Report", allowedRoles: undefined },
-  { path: "/notifications", label: "Notifications", ariaLabel: "Notifications and alerts", allowedRoles: undefined },
-  { path: "/services", label: "Services", ariaLabel: "Manage services", allowedRoles: undefined },
-  { path: "/billing", label: "Billing", ariaLabel: "Billing and subscription", allowedRoles: undefined },
-  { path: "/governance", label: "Governance", ariaLabel: "Governance", allowedRoles: READINESS_SECTION_ROLES },
-  { path: "/safeguarding", label: "Safeguarding", ariaLabel: "Safeguarding", allowedRoles: READINESS_SECTION_ROLES },
-  { path: "/mental-capacity", label: "Mental Capacity", ariaLabel: "Mental capacity and consent", allowedRoles: READINESS_SECTION_ROLES },
-  { path: "/staffing", label: "Staffing & Training", ariaLabel: "Staffing and training", allowedRoles: READINESS_SECTION_ROLES },
-  { path: "/care-planning", label: "Care Planning", ariaLabel: "Care planning framework", allowedRoles: READINESS_SECTION_ROLES },
+  { path: "/care-plans", label: "Care Plans", ariaLabel: "Patient care plans", allowedRoles: undefined },
+  { path: "/compliance", label: "Compliance", ariaLabel: "CQC compliance scores and risk", allowedRoles: undefined },
+  { path: "/evidence-pack", label: "Evidence Pack", ariaLabel: "Inspection evidence pack", allowedRoles: undefined },
+  { path: "/inspection-simulation", label: "Inspection Simulator", ariaLabel: "CQC inspection simulation", allowedRoles: undefined },
+  { path: "/admin", label: "Admin", ariaLabel: "Platform admin control panel", platformAdminOnly: true },
 ];

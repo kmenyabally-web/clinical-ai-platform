@@ -9,6 +9,7 @@ import {
 import { useAuth } from "./AuthContext";
 import { getCurrentUserProfile, getOrganisation } from "../services/organisation";
 import { isPlatformAdmin } from "../services/platformAdminService";
+import { DEV_AUTH_BYPASS } from "../config/devAuth";
 
 /**
  * OrganisationContext – multi-tenant scoping (see docs/architecture.md).
@@ -37,6 +38,27 @@ export function OrganisationProvider({ children }) {
   const lastLoadedUidRef = useRef(null);
 
   const loadOrganisation = useCallback(async (uid) => {
+    if (DEV_AUTH_BYPASS) {
+      const devOrgId = "dev-organisation";
+      const devOrg = {
+        id: devOrgId,
+        name: "Dev Organisation",
+        status: "active",
+      };
+      const devProfile = {
+        orgId: devOrgId,
+        role: "Admin",
+        status: "active",
+        isPlatformAdmin: true,
+      };
+      setOrganisationId(devOrgId);
+      setOrganisation(devOrg);
+      setUserProfile(devProfile);
+      setError(null);
+      lastLoadedUidRef.current = uid ?? "dev-user";
+      setLoading(false);
+      return;
+    }
     if (!uid) {
       setOrganisationId(null);
       setOrganisation(null);
@@ -98,6 +120,11 @@ export function OrganisationProvider({ children }) {
   }, []);
 
   useEffect(() => {
+    if (DEV_AUTH_BYPASS) {
+      // In dev bypass mode, loadOrganisation will synchronously set a dev organisation.
+      loadOrganisation("dev-user");
+      return;
+    }
     if (authLoading) {
       setLoading(true);
       return;

@@ -10,11 +10,12 @@ export default function SidebarNavItem({ item, collapsed }) {
   const path = item.path ?? "/dashboard";
   const ariaLabel = item.ariaLabel ?? item.label ?? "";
   const displayText = collapsed ? (item.label ?? "").charAt(0) : (item.label ?? "");
+  const exactMatch = path === "/dashboard" || path === "/patients";
 
   return (
     <NavLink
       to={path}
-      end={path === "/dashboard"}
+      end={exactMatch}
       aria-label={ariaLabel}
       title={collapsed ? item.label : undefined}
       style={({ isActive }) => ({

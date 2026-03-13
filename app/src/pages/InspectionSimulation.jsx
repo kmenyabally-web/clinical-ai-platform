@@ -13,6 +13,7 @@ import {
   getSessionsForOrganisation,
   getGapAnalysis,
 } from "../services/inspectionService";
+import { runInspectionSimulation, getLatestSimulation } from "../services/inspectionSimulator";
 import { CQC_KEY_QUESTIONS } from "../config/inspectionDomains";
 import { RESPONSE_VALUES } from "../config/inspectionDomains";
 
@@ -24,12 +25,18 @@ const cardStyle = {
   boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
 };
 
+function ratingColor(rating) {
+  if (rating === "Outstanding" || rating === "Good") return "#22c55e";
+  if (rating === "Requires Improvement") return "#f59e0b";
+  return "#ef4444";
+}
+
 /**
  * CQC Inspection Simulation. Managers/Admins run; Staff/Auditors view results.
  */
 export default function InspectionSimulation() {
-  const { organisationId } = useOrganisation();
-  const { currentServiceId } = useService();
+  const { organisationId, organisation } = useOrganisation();
+  const { currentServiceId, services } = useService();
   const { user } = useAuth();
   const { can, role } = useRole();
   const canRunInspection = can("audit:update");
@@ -45,6 +52,17 @@ export default function InspectionSimulation() {
   const [phase, setPhase] = useState("list"); // list | active | results
   const [result, setResult] = useState(null);
   const [gapAnalysis, setGapAnalysis] = useState(null);
+
+  const [dataSimulationResult, setDataSimulationResult] = useState(null);
+  const [dataSimulationLoading, setDataSimulationLoading] = useState(false);
+  const [dataSimulationError, setDataSimulationError] = useState(null);
+
+  const currentServiceName =
+    currentServiceId && Array.isArray(services)
+      ? services.find((s) => s?.id === currentServiceId)?.serviceName ||
+        services.find((s) => s?.id === currentServiceId)?.name ||
+        currentServiceId
+      : "All services";
 
   const auditContext =
     organisationId && user?.uid
@@ -81,6 +99,25 @@ export default function InspectionSimulation() {
   useEffect(() => {
     setLoading(false);
   }, [questions, sessions]);
+
+  useEffect(() => {
+    if (!organisationId) return;
+    getLatestSimulation(organisationId, currentServiceId ?? undefined).then(setDataSimulationResult).catch(() => {});
+  }, [organisationId, currentServiceId]);
+
+  async function handleRunDataSimulation() {
+    if (!organisationId || dataSimulationLoading) return;
+    setDataSimulationError(null);
+    setDataSimulationLoading(true);
+    try {
+      const sim = await runInspectionSimulation(organisationId, currentServiceId ?? undefined);
+      setDataSimulationResult(sim);
+    } catch (e) {
+      setDataSimulationError(e?.message ?? "Simulation failed.");
+    } finally {
+      setDataSimulationLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (!currentSessionId) return;
@@ -176,6 +213,98 @@ export default function InspectionSimulation() {
           {error}
         </p>
       )}
+
+      {/* ----- Data-driven inspection prediction ----- */}
+      <section aria-label="Inspection prediction" style={cardStyle}>
+        <h2 style={{ marginTop: 0, marginBottom: "0.5rem", fontSize: "1.15rem" }}>Inspection prediction (data-driven)</h2>
+        <p style={{ margin: "0 0 1rem 0", color: "#555", fontSize: "0.9rem" }}>
+          Predicted CQC ratings based on compliance scores, incidents, safeguarding, care plans and documents.
+        </p>
+
+        <h3 style={{ fontSize: "1rem", marginBottom: "0.35rem" }}>Section 1 — Service information</h3>
+        <p style={{ margin: 0, fontSize: "0.9rem", color: "#666" }}>
+          {organisation?.name ?? "Organisation"}
+          {currentServiceId ? ` · ${currentServiceName}` : " · Organisation level"}
+        </p>
+
+        <div style={{ marginTop: "1rem" }}>
+          <button
+            type="button"
+            onClick={handleRunDataSimulation}
+            disabled={!organisationId || dataSimulationLoading}
+            style={{
+              padding: "10px 20px",
+              background: "#1976d2",
+              color: "#fff",
+              border: "none",
+              borderRadius: 8,
+              fontWeight: 600,
+              cursor: organisationId && !dataSimulationLoading ? "pointer" : "default",
+            }}
+          >
+            {dataSimulationLoading ? "Running simulation…" : "Run Inspection Simulation"}
+          </button>
+        </div>
+
+        {dataSimulationError && (
+          <p role="alert" style={{ color: "#c62828", marginTop: "0.75rem" }}>{dataSimulationError}</p>
+        )}
+
+        {dataSimulationResult && (
+          <>
+            <h3 style={{ fontSize: "1rem", marginTop: "1.5rem", marginBottom: "0.35rem" }}>Section 2 — Predicted ratings</h3>
+            <table style={{ width: "100%", maxWidth: 400, borderCollapse: "collapse", fontSize: "0.9rem" }}>
+              <tbody>
+                <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
+                  <td style={{ padding: "0.4rem 0" }}>Safe</td>
+                  <td style={{ padding: "0.4rem 0", fontWeight: 600, color: ratingColor(dataSimulationResult.safeRating) }}>{dataSimulationResult.safeRating}</td>
+                </tr>
+                <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
+                  <td style={{ padding: "0.4rem 0" }}>Effective</td>
+                  <td style={{ padding: "0.4rem 0", fontWeight: 600, color: ratingColor(dataSimulationResult.effectiveRating) }}>{dataSimulationResult.effectiveRating}</td>
+                </tr>
+                <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
+                  <td style={{ padding: "0.4rem 0" }}>Caring</td>
+                  <td style={{ padding: "0.4rem 0", fontWeight: 600, color: ratingColor(dataSimulationResult.caringRating) }}>{dataSimulationResult.caringRating}</td>
+                </tr>
+                <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
+                  <td style={{ padding: "0.4rem 0" }}>Responsive</td>
+                  <td style={{ padding: "0.4rem 0", fontWeight: 600, color: ratingColor(dataSimulationResult.responsiveRating) }}>{dataSimulationResult.responsiveRating}</td>
+                </tr>
+                <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
+                  <td style={{ padding: "0.4rem 0" }}>Well-led</td>
+                  <td style={{ padding: "0.4rem 0", fontWeight: 600, color: ratingColor(dataSimulationResult.wellLedRating) }}>{dataSimulationResult.wellLedRating}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <h3 style={{ fontSize: "1rem", marginTop: "1.25rem", marginBottom: "0.35rem" }}>Section 3 — Risk areas</h3>
+            {dataSimulationResult.riskAreas?.length > 0 ? (
+              <ul style={{ margin: 0, paddingLeft: "1.25rem" }}>
+                {dataSimulationResult.riskAreas.map((area, i) => (
+                  <li key={i} style={{ marginBottom: "0.25rem", color: "#b91c1c" }}>
+                    ⚠ {area}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p style={{ margin: 0, color: "#22c55e" }}>No specific risk areas identified.</p>
+            )}
+
+            <h3 style={{ fontSize: "1rem", marginTop: "1.25rem", marginBottom: "0.35rem" }}>Section 4 — Recommendations</h3>
+            <ul style={{ margin: 0, paddingLeft: "1.25rem" }}>
+              {dataSimulationResult.recommendations?.map((rec, i) => (
+                <li key={i} style={{ marginBottom: "0.25rem" }}>{rec}</li>
+              ))}
+            </ul>
+
+            <h3 style={{ fontSize: "1rem", marginTop: "1.25rem", marginBottom: "0.35rem" }}>Section 5 — Inspection readiness score</h3>
+            <p style={{ margin: 0, fontSize: "1.25rem", fontWeight: 700 }}>
+              Inspection readiness: <strong>{dataSimulationResult.overallScore ?? 0}%</strong>
+            </p>
+          </>
+        )}
+      </section>
 
       {phase === "list" && (
         <>

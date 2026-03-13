@@ -1,0 +1,28 @@
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+import ErrorBoundary from "./components/ErrorBoundary";
+import { AuthProvider } from "./context/AuthContext";
+import { OrganisationProvider } from "./context/OrganisationContext";
+import { RoleProvider } from "./context/RoleContext";
+import { ServiceProvider } from "./context/ServiceContext";
+import { initErrorMonitoring } from "./lib/errorMonitoring";
+
+initErrorMonitoring();
+
+// Provider order: Auth → Organisation → Role → Service (needs org + user) → App.
+ReactDOM.createRoot(document.getElementById("root")).render(
+  <React.StrictMode>
+    <ErrorBoundary>
+    <AuthProvider>
+      <OrganisationProvider>
+        <RoleProvider>
+          <ServiceProvider>
+            <App />
+          </ServiceProvider>
+        </RoleProvider>
+      </OrganisationProvider>
+    </AuthProvider>
+    </ErrorBoundary>
+  </React.StrictMode>
+);

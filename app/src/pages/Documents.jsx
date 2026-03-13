@@ -109,6 +109,7 @@ export default function Documents() {
   return (
     <div>
       <div
+        className="page-header"
         style={{
           display: "flex",
           justifyContent: "space-between",
@@ -118,7 +119,10 @@ export default function Documents() {
           gap: "1rem",
         }}
       >
-        <h1 style={{ margin: 0 }}>Documents</h1>
+        <div>
+          <h1 style={{ margin: 0 }}>Documents</h1>
+          <p style={{ margin: 0, fontSize: "0.9rem", color: "#555" }}>Manage policies and evidence documents.</p>
+        </div>
         {canUpload && (
           <button
             type="button"
@@ -133,7 +137,7 @@ export default function Documents() {
               cursor: "pointer",
             }}
           >
-            Upload document
+            Upload Document
           </button>
         )}
       </div>

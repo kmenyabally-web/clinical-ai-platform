@@ -1,63 +1,70 @@
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "../firebase";
-
-/**
- * Immutable audit logging. Append-only; no update or delete.
- * See docs/audit-model.md. Call from UI via useAuditLogger() so organisationId, userId, userRole come from context.
+/** [PHASE B+ AUDIT HARDENING]
  *
- * @param {Object} params
- * @param {string} params.organisationId
- * @param {string} params.userId
- * @param {string} params.userRole
- * @param {string} params.action
- * @param {string} params.entityType
- * @param {string} params.entityId
- * @param {string} params.entityName
- * @param {*} [params.previousValue]
- * @param {*} [params.newValue]
- * @param {string} [params.serviceId] Optional. Service scope for the event.
- * @returns {Promise<void>} Resolves when written; never throws (logging failures are swallowed so main flow is not broken).
+ * Audit service – Phase B backend bridge.
+ *
+ * ATTENTION: Direct client-side writes to the auditLog collection
+ * remain prohibited by Firestore Rules. This service calls a trusted
+ * Cloud Function (onAuditEventCreated) which enforces identity and
+ * scope on the backend and writes to auditLog append-only.
  */
-export async function logAuditEvent({
-  organisationId,
-  userId,
-  userRole,
-  action,
-  entityType,
-  entityId,
-  entityName,
-  previousValue,
-  newValue,
-  serviceId,
-}) {
-  if (!organisationId || !userId) return;
 
-  const payload = {
-    organisationId: String(organisationId),
-    userId: String(userId),
-    userRole: String(userRole ?? ""),
-    action: String(action ?? ""),
-    entityType: String(entityType ?? ""),
-    entityId: String(entityId ?? ""),
-    entityName: String(entityName ?? ""),
-    previousValue: previousValue !== undefined ? previousValue : null,
-    newValue: newValue !== undefined ? newValue : null,
-    timestamp: serverTimestamp(),
-  };
-  if (serviceId) payload.serviceId = String(serviceId);
+import { getFunctions, httpsCallable } from "firebase/functions";
+import app from "../firebase";
+import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "../constants/auditTaxonomy";
+
+const functions = getFunctions(app);
+const onAuditEventCreated = httpsCallable(functions, "onAuditEventCreated");
+
+/** [PHASE B+ AUDIT HARDENING]
+ *
+ * logEvent(eventData)
+ *
+ * Sends a high-level audit event to the backend Cloud Function.
+ * The backend:
+ * - Validates authentication.
+ * - Derives organisationId and role from custom claims.
+ * - Injects serverTimestamp() and writes to auditLog.
+ *
+ * If the Cloud Function call fails, this function logs a critical
+ * non-PHI error to the console so that developers and operators
+ * know the audit trail is broken.
+ *
+ * @param {Object} eventData
+ *   - Must include: action, entityType.
+ *   - May include: entityId, entityName,
+ *     previousValue, newValue, serviceId.
+ *   - Must NOT include organisationId or userId; those are taken
+ *     from the auth context on the backend.
+ */
+export async function logEvent(eventData) {
+  const { action, entityType } = eventData || {};
+
+  const validAction = Object.values(AUDIT_ACTIONS).includes(action);
+  const validEntity = Object.values(AUDIT_ENTITIES).includes(entityType);
+
+  if (!validAction || !validEntity) {
+    // Do not call backend if taxonomy is violated.
+    // eslint-disable-next-line no-console
+    console.error(
+      "[audit] Invalid audit taxonomy. Event not sent.",
+      "action=",
+      action,
+      "entityType=",
+      entityType
+    );
+    return;
+  }
 
   try {
-    const ref = collection(db, "audit_logs");
-    await addDoc(ref, payload);
+    await onAuditEventCreated(eventData || {});
   } catch (err) {
-    console.error("[audit] logAuditEvent failed:", err);
+    // Critical, but non-PHI, error message.
+    // Do not log sensitive payload; log only meta-information.
+    // eslint-disable-next-line no-console
+    console.error(
+      "[audit] onAuditEventCreated failed. Audit trail may be incomplete.",
+      err && err.message ? err.message : err
+    );
   }
 }
 
-/**
- * Fire-and-forget audit log. Use from services so main operation is not blocked or broken by logging.
- * @param {Parameters<typeof logAuditEvent>[0]} params
- */
-export function logAuditEventNonBlocking(params) {
-  logAuditEvent(params).catch(() => {});
-}

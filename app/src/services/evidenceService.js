@@ -11,6 +11,7 @@ import {
 } from "firebase/firestore";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../firebase";
+import { addPatientTimelineEvent } from "./patientTimelineService";
 
 const EVIDENCE_COLLECTION = "evidence";
 const MAX_ITEMS = 200;
@@ -101,9 +102,10 @@ export function subscribeEvidence(organisationId, serviceId, onUpdate) {
  * @param {string} title
  * @param {File} file
  * @param {string} uploadedBy - User ID
+ * @param {string} [patientId] Optional; when provided, a patientTimeline event is created.
  * @returns {Promise<{ id: string }>}
  */
-export async function uploadEvidence(organisationId, serviceId, domain, title, file, uploadedBy) {
+export async function uploadEvidence(organisationId, serviceId, domain, title, file, uploadedBy, patientId) {
   if (!organisationId?.trim()) throw new Error("organisationId required");
   if (!domain?.trim()) throw new Error("domain required");
   if (!title?.trim()) throw new Error("title required");
@@ -131,6 +133,28 @@ export async function uploadEvidence(organisationId, serviceId, domain, title, f
   const fileUrl = await getDownloadURL(storageRef);
   const { updateDoc } = await import("firebase/firestore");
   await updateDoc(docRef, { fileUrl });
+
+  if (patientId && typeof patientId === "string" && patientId.trim()) {
+    await addPatientTimelineEvent({
+      eventId: fileId,
+      patientId: patientId.trim(),
+      organisationId,
+      serviceId: serviceId ?? null,
+      type: "evidence_upload",
+      title: title.trim(),
+      description: "",
+      createdBy: uploadedBy ?? "",
+      metadata: {
+        domain,
+        fileName: file.name,
+        collection: EVIDENCE_COLLECTION,
+      },
+    });
+  }
+
+  import("./complianceEngine").then(({ recalculateComplianceScoreAsync }) => {
+    recalculateComplianceScoreAsync(organisationId, serviceId ?? undefined);
+  }).catch(() => {});
 
   return { id: fileId };
 }

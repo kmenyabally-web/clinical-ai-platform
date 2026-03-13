@@ -21,7 +21,7 @@ export default function DocumentTable({
 }) {
   if (documents.length === 0) {
     return (
-      <p style={{ color: "#666", padding: "1rem 0" }}>No documents yet. Upload one to get started.</p>
+      <p style={{ color: "#64748b", padding: "2rem", background: "#f8fafc", borderRadius: 12 }}>No records yet</p>
     );
   }
 
