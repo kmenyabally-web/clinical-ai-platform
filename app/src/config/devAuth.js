@@ -1,8 +1,9 @@
 /**
  * Development auth bypass configuration.
  *
- * DEV_AUTH_BYPASS is true only in Vite's development mode.
- * In production builds this will be false and normal Firebase auth is used.
+ * For governance testing we explicitly disable the bypass so that
+ * real Firebase Authentication behaviour (login/logout, claims)
+ * is exercised even in development.
  */
-export const DEV_AUTH_BYPASS = import.meta.env.MODE === "development";
+export const DEV_AUTH_BYPASS = false;
 

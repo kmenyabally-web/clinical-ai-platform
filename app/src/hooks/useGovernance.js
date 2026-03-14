@@ -73,6 +73,10 @@ export function useGovernance() {
           return;
         }
 
+        // Debug logging to inspect claims arriving from Firebase
+        // eslint-disable-next-line no-console
+        console.log("DEBUG [Claims Check]:", userContext);
+
         const { role, organisationId } = userContext;
 
         if (!organisationId) {

@@ -13,7 +13,7 @@ import ProtectedRoute from "./components/ProtectedRoute";
 
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
-import FirstSafeScreen from "./components/FirstSafeScreen";
+import FirstSafeScreen from "./components/FirstSafeScreen.jsx";
 
 export default function App() {
   return (

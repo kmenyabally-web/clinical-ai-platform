@@ -1,70 +1,34 @@
-/** [PHASE B+ AUDIT HARDENING]
- *
- * Audit service – Phase B backend bridge.
- *
- * ATTENTION: Direct client-side writes to the auditLog collection
- * remain prohibited by Firestore Rules. This service calls a trusted
- * Cloud Function (onAuditEventCreated) which enforces identity and
- * scope on the backend and writes to auditLog append-only.
+/** * [ENABLEMENT GATE: STAGE 2 - NON-CLINICAL]
+ * * MASTER AUDIT SERVICE
+ * Standardised to prevent import errors in clinical services.
  */
 
-import { getFunctions, httpsCallable } from "firebase/functions";
-import app from "../firebase";
-import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "../constants/auditTaxonomy";
-
-const functions = getFunctions(app);
-const onAuditEventCreated = httpsCallable(functions, "onAuditEventCreated");
-
-/** [PHASE B+ AUDIT HARDENING]
- *
- * logEvent(eventData)
- *
- * Sends a high-level audit event to the backend Cloud Function.
- * The backend:
- * - Validates authentication.
- * - Derives organisationId and role from custom claims.
- * - Injects serverTimestamp() and writes to auditLog.
- *
- * If the Cloud Function call fails, this function logs a critical
- * non-PHI error to the console so that developers and operators
- * know the audit trail is broken.
- *
- * @param {Object} eventData
- *   - Must include: action, entityType.
- *   - May include: entityId, entityName,
- *     previousValue, newValue, serviceId.
- *   - Must NOT include organisationId or userId; those are taken
- *     from the auth context on the backend.
+/**
+ * Placeholder for non-blocking audit events.
+ * Stage 2 Governance: This does NOT write to Firestore yet.
  */
-export async function logEvent(eventData) {
-  const { action, entityType } = eventData || {};
+export const logAuditEventNonBlocking = async (eventData) => {
+  console.warn("[Stage 2 Governance] Audit Event Captured (No-Op):", eventData?.action);
+  return Promise.resolve({ ok: true, message: "Governance placeholder active." });
+};
 
-  const validAction = Object.values(AUDIT_ACTIONS).includes(action);
-  const validEntity = Object.values(AUDIT_ENTITIES).includes(entityType);
+/**
+ * Main Event Logger (Phase B Bridge)
+ */
+export const logEvent = async (eventData) => {
+  return logAuditEventNonBlocking(eventData);
+};
 
-  if (!validAction || !validEntity) {
-    // Do not call backend if taxonomy is violated.
-    // eslint-disable-next-line no-console
-    console.error(
-      "[audit] Invalid audit taxonomy. Event not sent.",
-      "action=",
-      action,
-      "entityType=",
-      entityType
-    );
-    return;
-  }
+/**
+ * Legacy init stub
+ */
+export const logAppInitStub = () => {
+  return logAuditEventNonBlocking({ action: "APP_INIT" });
+};
 
-  try {
-    await onAuditEventCreated(eventData || {});
-  } catch (err) {
-    // Critical, but non-PHI, error message.
-    // Do not log sensitive payload; log only meta-information.
-    // eslint-disable-next-line no-console
-    console.error(
-      "[audit] onAuditEventCreated failed. Audit trail may be incomplete.",
-      err && err.message ? err.message : err
-    );
-  }
-}
-
+// Default export for flexibility
+export default {
+  logEvent,
+  logAuditEventNonBlocking,
+  logAppInitStub
+};

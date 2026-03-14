@@ -71,6 +71,7 @@ node_modules/
 # Firebase Admin service accounts and local knowledge JSON
 firebase-adminsdk*.json
 foundation-knowledge/*.json
+scripts/*.json
 
 # Logs
 *.log

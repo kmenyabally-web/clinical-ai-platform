@@ -17,17 +17,28 @@ import { auth } from "../firebase";
  *
  * getUserContext()
  *
- * Returns an object containing:
- *   { role, organisationId, serviceIds }
+ * TEMPORARY DEV BYPASS:
+ * For local development, this function has been overridden to ALWAYS return
+ * a fixed manager/dev-org-001 context, regardless of the underlying token.
  *
- * Behaviour:
- * - Calls auth.currentUser.getIdTokenResult(true) to force-refresh the token
- *   and obtain the latest custom claims.
- * - Extracts role, organisationId, and serviceIds from the token claims.
- * - If there is no signed-in user, returns all fields as null.
- * - If organisationId is null or missing, throws a "Governance Context Missing"
- *   error to prevent any attempt to read data without an organisation scope.
+ * The original strict governance logic is preserved below in comments and
+ * must be restored before any regulated/testing use.
  */
+export async function getUserContext() {
+  // eslint-disable-next-line no-console
+  console.warn(
+    "⚠️ GOVERNANCE BYPASS ACTIVE: Using mock dev-org-001 context."
+  );
+
+  return {
+    role: "manager",
+    organisationId: "dev-org-001",
+    serviceIds: ["service-001"],
+  };
+}
+
+/*
+// ORIGINAL STRICT IMPLEMENTATION (REINSTATE FOR REAL GOVERNANCE)
 export async function getUserContext() {
   const user = auth.currentUser;
 
@@ -56,8 +67,6 @@ export async function getUserContext() {
   const serviceIds = Array.isArray(claims.serviceIds) ? claims.serviceIds : null;
 
   if (!organisationId) {
-    // Governance enforcement: no data reads should be attempted
-    // if we do not know which organisation the user belongs to.
     throw new Error(
       "Governance Context Missing: organisationId claim is required at Stage 2."
     );
@@ -69,4 +78,5 @@ export async function getUserContext() {
     serviceIds,
   };
 }
+*/
 

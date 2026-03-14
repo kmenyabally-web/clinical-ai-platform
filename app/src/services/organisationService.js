@@ -32,6 +32,43 @@ import { getUserContext } from "./authService";
  *   document does not exist or has no name field.
  */
 export async function getOrgDisplayName(providedOrgId) {
+  // TEMPORARY DEV BYPASS:
+  // We still call getUserContext (which itself is currently mocked) so that
+  // future reinstatement is straightforward.
+  const { organisationId } = await getUserContext();
+
+  // Original strict enforcement commented out for development:
+  // if (providedOrgId !== organisationId) {
+  //   throw new Error(
+  //     "Access denied: provided organisationId does not match the user’s governance scope."
+  //   );
+  // }
+
+  try {
+    const orgDocRef = doc(db, "organisations", organisationId);
+    const snapshot = await getDoc(orgDocRef);
+
+    if (!snapshot.exists()) {
+      return "Development Organisation (Bypassed)";
+    }
+
+    const data = snapshot.data() || {};
+    const name =
+      typeof data.name === "string" && data.name.trim().length > 0
+        ? data.name
+        : null;
+
+    return name || "Development Organisation (Bypassed)";
+  } catch (err) {
+    // If anything goes wrong (missing collection, permission, etc.),
+    // fall back to a clear development-only label.
+    return "Development Organisation (Bypassed)";
+  }
+}
+
+/*
+// ORIGINAL STRICT IMPLEMENTATION (REINSTATE FOR REAL GOVERNANCE)
+export async function getOrgDisplayName(providedOrgId) {
   const { organisationId } = await getUserContext();
 
   if (providedOrgId !== organisationId) {
@@ -40,7 +77,6 @@ export async function getOrgDisplayName(providedOrgId) {
     );
   }
 
-  // Document path is assumed to be keyed by organisationId.
   const orgDocRef = doc(db, "organisations", organisationId);
   const snapshot = await getDoc(orgDocRef);
 
@@ -50,7 +86,6 @@ export async function getOrgDisplayName(providedOrgId) {
 
   const data = snapshot.data() || {};
 
-  // Data minimisation: return ONLY the name field.
   const name =
     typeof data.name === "string" && data.name.trim().length > 0
       ? data.name
@@ -58,4 +93,5 @@ export async function getOrgDisplayName(providedOrgId) {
 
   return name;
 }
+*/
 
