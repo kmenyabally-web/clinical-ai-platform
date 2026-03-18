@@ -15,7 +15,7 @@ export default function Layout() {
       <div style={layoutStyles.main}>
         <Header />
         <div style={layoutStyles.content}>
-          <div style={layoutStyles.subNav}>
+          <div style={layoutStyles.subNav} className="top-nav">
             <NavLink to="/" label="Governance" active={location.pathname === "/"} />
             <NavLink
               to="/dashboard"

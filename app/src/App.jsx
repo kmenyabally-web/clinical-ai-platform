@@ -21,6 +21,7 @@ import PatientDetail from "./components/PatientDetail";
 import IncidentReportPage from "./components/IncidentReportPage";
 import IncidentFormPage from "./components/IncidentFormPage";
 import AuditLog from "./pages/AuditLog";
+import EvidencePack from "./pages/EvidencePack";
 
 export default function App() {
   return (
@@ -43,6 +44,7 @@ export default function App() {
           <Route path="/patients/:id/report-incident" element={<IncidentReportPage />} />
           <Route path="/incidents/new/:patientId" element={<IncidentFormPage />} />
           <Route path="/audit-log" element={<AuditLog />} />
+          <Route path="/evidence-pack" element={<EvidencePack />} />
         </Route>
 
         {/* For any other path, redirect to the Stage 2 safe screen. */}
