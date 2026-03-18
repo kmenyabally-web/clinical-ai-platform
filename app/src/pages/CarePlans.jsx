@@ -1,275 +1,373 @@
-import { useEffect, useState, useMemo, useCallback } from "react";
-import { Link, useParams } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
-import { useOrganisation } from "../context/OrganisationContext";
-import { useService } from "../context/ServiceContext";
-import CarePlanEditor from "../components/CarePlanEditor";
-import { fetchCarePlans, createCarePlan, updateCarePlan } from "../services/carePlanService";
-import { isIndexError, INDEX_ERROR_MESSAGE } from "../lib/firestoreIndexError";
+/** [ENABLEMENT GATE: STAGE 12 - AI CARE PLAN GENERATOR] */
 
-function formatDate(value) {
-  if (!value) return "—";
-  if (value instanceof Date) return value.toLocaleDateString();
-  if (typeof value?.toDate === "function") {
-    try {
-      return value.toDate().toLocaleDateString();
-    } catch {
-      return "—";
-    }
+import React, { useEffect, useMemo, useState } from "react";
+import { createCarePlanRecord } from "../services/carePlanManagementService";
+import { listPatients } from "../services/patientService";
+import { generateClinicalCarePlan } from "../services/aiService";
+import { getUserContext } from "../services/authService";
+import { useService } from "../context/ServiceContext";
+import { useAuth } from "../context/AuthContext";
+
+function escapeRegExp(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function extractSectionText(text, heading) {
+  if (!text) return "";
+  const h = escapeRegExp(heading);
+  // Expect headings like: "## Personal Preferences" (preferred by our prompt).
+  const re = new RegExp(
+    `(?:^|\\n)#{1,3}\\s*${h}\\s*(?:\\n|\\r\\n)([\\s\\S]*?)(?=(?:\\n#{1,3}\\s*[^\\n]+\\s*)|$)`,
+    "m"
+  );
+  const m = text.match(re);
+  if (m?.[1]) return m[1].trim();
+
+  // Fallback: heading line without Markdown hashes.
+  const re2 = new RegExp(`(?:^|\\n)${h}\\s*(?:\\n|\\r\\n)([\\s\\S]*?)(?=(?:\\n[^\\n]+\\s*\\n?)|$)`, "m");
+  const m2 = text.match(re2);
+  return (m2?.[1] ?? "").trim();
+}
+
+function parseCarePlanSections(editedText) {
+  const sections = {
+    personalPreferences: "",
+    riskMitigation: "",
+    mobilitySupport: "",
+    nutritionHydration: "",
+  };
+
+  sections.personalPreferences = extractSectionText(editedText, "Personal Preferences");
+  sections.riskMitigation = extractSectionText(editedText, "Risk Mitigation");
+  sections.mobilitySupport = extractSectionText(editedText, "Mobility Support");
+  sections.nutritionHydration = extractSectionText(editedText, "Nutrition/Hydration");
+
+  const hasAny =
+    Boolean(sections.personalPreferences) ||
+    Boolean(sections.riskMitigation) ||
+    Boolean(sections.mobilitySupport) ||
+    Boolean(sections.nutritionHydration);
+
+  if (!hasAny) {
+    return {
+      careNeeds: editedText.trim(),
+      riskAssessment: "",
+      supportStrategies: "",
+    };
   }
-  const d = new Date(value);
-  // eslint-disable-next-line no-restricted-globals
-  if (isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString();
+
+  return {
+    careNeeds: sections.personalPreferences,
+    riskAssessment: sections.riskMitigation,
+    supportStrategies: [sections.mobilitySupport, sections.nutritionHydration].filter(Boolean).join("\n\n"),
+  };
 }
 
 export default function CarePlans() {
-  const { patientId } = useParams();
   const { user } = useAuth();
-  const { organisationId, organisation } = useOrganisation();
-  const { currentServiceId, services } = useService();
+  const { currentServiceId } = useService();
 
-  const [carePlans, setCarePlans] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [selectedId, setSelectedId] = useState(null);
+  const [patients, setPatients] = useState([]);
+  const [patientsLoading, setPatientsLoading] = useState(false);
+  const [patientsError, setPatientsError] = useState(null);
 
-  const currentServiceName = useMemo(() => {
-    if (!Array.isArray(services) || services.length === 0) return "No service selected";
-    const match = services.find((s) => s?.id === currentServiceId) ?? services[0];
-    return match?.serviceName || match?.name || "Service";
-  }, [services, currentServiceId]);
+  const [selectedPatientId, setSelectedPatientId] = useState("");
+  const [keyObservationsRisks, setKeyObservationsRisks] = useState("");
 
-  const selectedPlan = useMemo(
-    () => carePlans.find((p) => p.id === selectedId) ?? null,
-    [carePlans, selectedId]
+  const [generating, setGenerating] = useState(false);
+  const [generatedText, setGeneratedText] = useState("");
+  const [editedText, setEditedText] = useState("");
+
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+  const [saveSuccess, setSaveSuccess] = useState(null);
+
+  const selectedPatient = useMemo(
+    () => patients.find((p) => p.id === selectedPatientId) ?? null,
+    [patients, selectedPatientId]
   );
 
-  const loadPlans = useCallback(() => {
-    if (!organisationId || !patientId) {
-      setCarePlans([]);
-      setLoading(false);
-      return;
+  useEffect(() => {
+    let mounted = true;
+    async function loadPatients() {
+      setPatientsLoading(true);
+      setPatientsError(null);
+      try {
+        const list = await listPatients();
+        if (!mounted) return;
+        setPatients(Array.isArray(list) ? list : []);
+      } catch (err) {
+        if (!mounted) return;
+        setPatientsError(err?.message ?? "Failed to load patients.");
+        setPatients([]);
+      } finally {
+        if (!mounted) return;
+        setPatientsLoading(false);
+      }
     }
-    setLoading(true);
-    setError(null);
-    fetchCarePlans(organisationId, patientId, currentServiceId ?? null)
-      .then((list) => setCarePlans(Array.isArray(list) ? list : []))
-      .catch((err) => {
-        console.error("Firestore query failed:", err);
-        setError(isIndexError(err) ? INDEX_ERROR_MESSAGE : (err?.message ?? "Failed to load care plans."));
-        setCarePlans([]);
-      })
-      .finally(() => setLoading(false));
-  }, [organisationId, patientId, currentServiceId]);
+    loadPatients();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
-    loadPlans();
-  }, [loadPlans]);
+    if (!selectedPatientId && patients.length > 0) {
+      setSelectedPatientId(patients[0].id ?? "");
+    }
+  }, [patients, selectedPatientId]);
 
-  async function handleSave(payload) {
-    if (!organisationId || !patientId || !currentServiceId || !user?.uid) return;
-    setSaving(true);
-    setError(null);
+  async function handleGenerate() {
+    setSaveError(null);
+    setSaveSuccess(null);
+
+    if (!selectedPatient) return;
+    if (!keyObservationsRisks.trim()) {
+      setSaveError("Please enter Key Observations / Risks before generating.");
+      return;
+    }
+
+    setGenerating(true);
     try {
-      if (selectedPlan) {
-        await updateCarePlan({
-          id: selectedPlan.id,
-          organisationId,
-          serviceId: currentServiceId,
-          patientId,
-          title: payload.title,
-          description: payload.description,
-          goals: payload.goals,
-          interventions: payload.interventions,
-          reviewDate: payload.reviewDate,
-          updatedBy: user.email || user.uid,
-        });
-      } else {
-        await createCarePlan({
-          organisationId,
-          serviceId: currentServiceId,
-          patientId,
-          title: payload.title,
-          description: payload.description,
-          goals: payload.goals,
-          interventions: payload.interventions,
-          reviewDate: payload.reviewDate,
-          createdBy: user.email || user.uid,
-        });
-      }
-      setSelectedId(null);
-      loadPlans();
+      const fullName = `${selectedPatient.firstName ?? ""} ${selectedPatient.lastName ?? ""}`.trim();
+      const dob = selectedPatient.dob ? String(selectedPatient.dob) : "";
+
+      const text = await generateClinicalCarePlan({
+        patientName: fullName || "Patient",
+        patientDob: dob,
+        keyObservationsRisks,
+      });
+
+      setGeneratedText(text);
+      setEditedText(text);
     } catch (err) {
-      console.error("Failed to save care plan", err);
-      setError(isIndexError(err) ? INDEX_ERROR_MESSAGE : (err?.message ?? "Failed to save care plan."));
+      setSaveError(err?.message ?? "Failed to generate care plan.");
+      setGeneratedText("");
+      setEditedText("");
     } finally {
-      setSaving(false);
+      setGenerating(false);
+    }
+  }
+
+  async function handleSave() {
+    setSaveError(null);
+    setSaveSuccess(null);
+
+    if (!selectedPatient) return;
+    if (!editedText.trim()) {
+      setSaveError("Nothing to save yet. Generate a draft first.");
+      return;
+    }
+
+    setSaveLoading(true);
+    try {
+      const { organisationId } = await getUserContext();
+      const createdBy = user?.email || user?.uid || "Unknown";
+
+      const { careNeeds, riskAssessment, supportStrategies } = parseCarePlanSections(editedText);
+      const title = `AI Care Plan Draft - ${selectedPatient.firstName ?? "Patient"} ${selectedPatient.lastName ?? ""}`.trim();
+
+      await createCarePlanRecord({
+        organisationId,
+        serviceId: currentServiceId ?? null,
+        patientId: selectedPatient.id,
+        careNeeds,
+        riskAssessment,
+        supportStrategies,
+        reviewDate: null,
+        createdBy,
+      });
+
+      setSaveSuccess("Draft saved to care plans. Please review and sign off.");
+    } catch (err) {
+      setSaveError(err?.message ?? "Failed to save care plan draft.");
+    } finally {
+      setSaveLoading(false);
     }
   }
 
   return (
-    <div style={{ padding: "2rem" }}>
+    <div style={{ padding: "2rem", maxWidth: 1040, margin: "0 auto" }}>
+      <style>{`
+        @keyframes cqcSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      `}</style>
+
       <div
         className="page-header"
-        style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: "1.5rem" }}
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          flexWrap: "wrap",
+          gap: 12,
+          marginBottom: "1.5rem",
+        }}
       >
         <div>
-          <h1 style={{ margin: 0, marginBottom: "0.25rem" }}>Care Plans</h1>
-          <p style={{ margin: 0, fontSize: "0.9rem", color: "#555" }}>
-            Manage care plans and reviews for the patient.
+          <h1 style={{ margin: 0, marginBottom: "0.25rem" }}>AI Care Plan Generator</h1>
+          <p style={{ margin: 0, color: "#555", fontSize: "0.9rem" }}>
+            Generate a Regulation 9 compliant draft for clinician review.
           </p>
-          <p style={{ margin: 0, marginTop: "0.25rem", fontSize: "0.85rem", color: "#777" }}>
-            Patient ID: <code>{patientId ?? "Unknown"}</code>
-            {patientId && (
-              <Link
-                to={`/patients/${patientId}/timeline`}
-                style={{
-                  marginLeft: "0.75rem",
-                  color: "#2563eb",
-                  fontSize: "0.85rem",
-                  textDecoration: "none",
-                }}
-              >
-                View Timeline
-              </Link>
-            )}
+          <p style={{ margin: "0.35rem 0 0 0", color: "#777", fontSize: "0.85rem" }}>
+            Service: {currentServiceId ?? "—"}
           </p>
-          <p style={{ margin: 0, marginTop: "0.25rem", fontSize: "0.85rem", color: "#777" }}>
-            Service: {currentServiceName}
-          </p>
-          {organisation && (
-            <p style={{ margin: 0, marginTop: "0.25rem", fontSize: "0.85rem", color: "#777" }}>
-              Organisation: {organisation.name ?? organisation.id ?? "—"}
-            </p>
-          )}
         </div>
-        <button
-          type="button"
-          onClick={() => setSelectedId(null)}
-          style={{
-            padding: "8px 16px",
-            borderRadius: 8,
-            border: "none",
-            background: "#005eb8",
-            color: "#fff",
-            fontWeight: 600,
-            fontSize: "0.9rem",
-            cursor: "pointer",
-          }}
-        >
-          Create Care Plan
-        </button>
       </div>
 
-      {loading && (
-        <section aria-busy="true">
-          <div
-            style={{
-              background: "#fff",
-              border: "1px solid #e0e0e0",
-              borderRadius: 12,
-              padding: "1rem 1.25rem",
-              color: "#666",
-            }}
-          >
-            Loading care plans…
-          </div>
-        </section>
+      {(patientsLoading || generating) && (
+        <div style={{ marginBottom: 12, color: "#64748b", fontWeight: 800, fontSize: 13 }}>
+          {generating ? "Generating AI draft…" : "Loading patients…"}
+        </div>
       )}
 
-      {!loading && error && (
-        <section style={{ marginTop: "0.75rem" }}>
-          <div
-            role="alert"
-            style={{
-              background: "#ffebee",
-              border: "1px solid #ef9a9a",
-              borderRadius: 12,
-              padding: "0.75rem 1rem",
-              color: "#b71c1c",
-              fontSize: "0.9rem",
-            }}
-          >
-            {error}
-          </div>
-        </section>
+      {patientsError && (
+        <div role="alert" style={{ marginBottom: 12, padding: "0.75rem 1rem", background: "#ffebee", border: "1px solid #ef9a9a", borderRadius: 12, color: "#b71c1c" }}>
+          {patientsError}
+        </div>
       )}
 
       <section
         style={{
-          marginTop: "1rem",
-          display: "grid",
-          gridTemplateColumns: "minmax(0, 2fr) minmax(0, 3fr)",
-          gap: "1rem",
+          background: "#ffffff",
+          border: "1px solid #e2e8f0",
+          borderRadius: 12,
+          padding: "1.25rem",
+          marginBottom: 16,
         }}
       >
-        <div
-          style={{
-            background: "#ffffff",
-            borderRadius: 12,
-            border: "1px solid #e2e8f0",
-            padding: "1rem 1.25rem",
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <h2 style={{ fontSize: "1rem", margin: 0, marginBottom: "0.5rem" }}>Existing plans</h2>
-            <button
-              type="button"
-              onClick={() => setSelectedId(null)}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 6,
-                border: "1px solid #cbd5e1",
-                background: "#fff",
-                fontSize: "0.8rem",
-                cursor: "pointer",
-              }}
+        <h2 style={{ fontSize: "1rem", marginTop: 0, marginBottom: "1rem" }}>Inputs</h2>
+
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 2fr)", gap: 12, alignItems: "start" }}>
+          <div>
+            <label style={{ display: "block", fontWeight: 900, marginBottom: 6, fontSize: 13 }}>Patient</label>
+            <select
+              value={selectedPatientId}
+              onChange={(e) => setSelectedPatientId(e.target.value)}
+              disabled={patientsLoading || patients.length === 0}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #cbd5e1" }}
             >
-              + New plan
-            </button>
+              {patients.map((p) => {
+                const fullName = `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim();
+                return (
+                  <option key={p.id} value={p.id}>
+                    {fullName || p.id} ({p.id})
+                  </option>
+                );
+              })}
+            </select>
           </div>
-          {carePlans.length === 0 ? (
-            <p style={{ fontSize: "0.85rem", color: "#64748b", padding: "2rem", background: "#f8fafc", borderRadius: 12 }}>
-              No records yet
-            </p>
-          ) : (
-            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-              {carePlans.map((plan) => (
-                <li
-                  key={plan.id}
-                  style={{
-                    padding: "0.5rem 0.25rem",
-                    borderTop: "1px solid #e5e7eb",
-                    cursor: "pointer",
-                    color: selectedId === plan.id ? "#0f172a" : "#334155",
-                    fontWeight: selectedId === plan.id ? 600 : 400,
-                  }}
-                  onClick={() => setSelectedId(plan.id)}
-                >
-                  <div>{plan.title || "Untitled plan"}</div>
-                  <div style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
-                    Review: {formatDate(plan.reviewDate)} · Updated: {formatDate(plan.updatedAt)}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
+
+          <div>
+            <label style={{ display: "block", fontWeight: 900, marginBottom: 6, fontSize: 13 }}>Key Observations / Risks</label>
+            <textarea
+              value={keyObservationsRisks}
+              onChange={(e) => setKeyObservationsRisks(e.target.value)}
+              rows={6}
+              placeholder="Add key observations and risks to inform the draft (e.g., mobility concerns, nutrition risk, support needs)…"
+              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #cbd5e1", resize: "vertical", fontSize: 13, lineHeight: 1.4 }}
+            />
+          </div>
         </div>
 
-        <div
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14, gap: 10, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={generating || patientsLoading || !selectedPatientId}
+            style={{
+              padding: "10px 14px",
+              background: "#005eb8",
+              color: "#fff",
+              border: "none",
+              borderRadius: 10,
+              fontWeight: 900,
+              cursor: generating ? "default" : "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 10,
+              opacity: generating ? 0.75 : 1,
+            }}
+          >
+            {generating ? (
+              <>
+                <span style={{ width: 16, height: 16, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.7)", borderTopColor: "#fff", animation: "cqcSpin 0.9s linear infinite" }} />
+                Generating AI…
+              </>
+            ) : (
+              "Generate AI Care Plan"
+            )}
+          </button>
+        </div>
+      </section>
+
+      {saveError && (
+        <div role="alert" style={{ marginBottom: 12, padding: "0.75rem 1rem", background: "#ffebee", border: "1px solid #ef9a9a", borderRadius: 12, color: "#b71c1c" }}>
+          {saveError}
+        </div>
+      )}
+
+      {saveSuccess && (
+        <div role="status" style={{ marginBottom: 12, padding: "0.75rem 1rem", background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: 12, color: "#3730a3", fontWeight: 900 }}>
+          {saveSuccess}
+        </div>
+      )}
+
+      <section
+        style={{
+          background: "#ffffff",
+          border: "1px solid #e2e8f0",
+          borderRadius: 12,
+          padding: "1.25rem",
+          marginBottom: 16,
+        }}
+      >
+        <h2 style={{ fontSize: "1rem", marginTop: 0, marginBottom: "0.5rem" }}>Document Preview</h2>
+        <p style={{ marginTop: 0, color: "#64748b", fontSize: "0.85rem", fontWeight: 800 }}>
+          You can edit the draft before saving to care plans.
+        </p>
+
+        <textarea
+          value={editedText}
+          onChange={(e) => setEditedText(e.target.value)}
+          rows={14}
+          placeholder="Click “Generate AI Care Plan” to create a draft…"
+          disabled={!generatedText || generating}
           style={{
-            background: "#ffffff",
-            borderRadius: 12,
-            border: "1px solid #e2e8f0",
-            padding: "1rem 1.25rem",
+            width: "100%",
+            padding: "10px 12px",
+            borderRadius: 10,
+            border: "1px solid #cbd5e1",
+            resize: "vertical",
+            fontSize: 13,
+            lineHeight: 1.4,
+            background: !generatedText ? "#f8fafc" : "#fff",
           }}
-        >
-          <h2 style={{ fontSize: "1rem", margin: 0, marginBottom: "0.5rem" }}>
-            {selectedPlan ? "Edit care plan" : "New care plan"}
-          </h2>
-          <CarePlanEditor carePlan={selectedPlan} onSave={handleSave} loading={saving} />
+        />
+
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12, gap: 10, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={!editedText.trim() || saveLoading || generating}
+            style={{
+              padding: "10px 14px",
+              background: "#16a34a",
+              color: "#fff",
+              border: "none",
+              borderRadius: 10,
+              fontWeight: 900,
+              cursor: saveLoading ? "default" : "pointer",
+              opacity: saveLoading ? 0.75 : 1,
+            }}
+          >
+            {saveLoading ? "Saving…" : "Save to Care Plans"}
+          </button>
+        </div>
+
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid #e5e7eb" }}>
+          <p style={{ margin: 0, fontWeight: 900, color: "#b45309", fontSize: 13 }}>
+            AI-generated draft. Must be reviewed and signed off by a qualified clinician.
+          </p>
         </div>
       </section>
     </div>
