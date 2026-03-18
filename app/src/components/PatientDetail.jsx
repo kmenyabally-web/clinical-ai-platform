@@ -93,7 +93,7 @@ export default function PatientDetail() {
       <h2 style={styles.title}>{fullName || "Patient record"}</h2>
 
       <div style={styles.actionsRow}>
-        <Link to={`/patients/${id}/report-incident`} style={styles.primaryAction}>
+        <Link to={`/incidents/new/${id}`} style={styles.primaryAction}>
           Report Incident (Stage 6)
         </Link>
       </div>

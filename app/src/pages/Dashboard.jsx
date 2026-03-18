@@ -10,10 +10,19 @@ import { fetchDocuments } from "../services/documentService";
 import { countCarePlansDueForReview } from "../services/carePlanManagementService";
 import ComplianceScoreCard from "../components/ComplianceScoreCard";
 import { isIndexError, INDEX_ERROR_MESSAGE } from "../lib/firestoreIndexError";
+import { logAuditEventNonBlocking } from "../services/auditService";
 
 export default function Dashboard() {
   const { organisationId, organisation } = useOrganisation();
   const { currentServiceId, services } = useService();
+
+  const [incidentStatsLoading, setIncidentStatsLoading] = useState(true);
+  const [incidentStats, setIncidentStats] = useState({
+    totalIncidents: 0,
+    highSeverityIncidents: 0,
+    pendingActions: 0,
+  });
+  const [recentIncidents, setRecentIncidents] = useState([]);
 
   const [metricsLoading, setMetricsLoading] = useState(true);
   const [metrics, setMetrics] = useState({
@@ -33,6 +42,79 @@ export default function Dashboard() {
       ? (services.find((s) => s?.id === currentServiceId)?.serviceName ||
           services.find((s) => s?.id === currentServiceId)?.name) ?? "Current service"
       : "All services";
+
+  useEffect(() => {
+    logAuditEventNonBlocking({ action: "COMPLIANCE_DASHBOARD_VIEW" }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadIncidentStats() {
+      // Stage 7 prompt explicitly requests dev-org-001.
+      const orgForStage7 = "dev-org-001";
+      setIncidentStatsLoading(true);
+      try {
+        const incidents = await fetchIncidents(orgForStage7, {});
+        const list = Array.isArray(incidents) ? incidents : [];
+
+        const normalizeSeverity = (s) => (s ?? "").toString().trim().toLowerCase();
+        const isHigh = (s) => {
+          const x = normalizeSeverity(s);
+          return x === "high" || x === "critical";
+        };
+
+        const totalIncidents = list.length;
+        const highSeverityIncidents = list.filter((i) => isHigh(i?.severity)).length;
+        const pendingActions = list.filter((i) => (i?.status || "open") === "open").length;
+
+        const getSortMillis = (i) => {
+          const v = i?.occurredAt ?? i?.reportedAt ?? i?.createdAt ?? null;
+          if (!v) return 0;
+          if (v instanceof Date) return v.getTime();
+          if (typeof v?.toDate === "function") {
+            try {
+              return v.toDate().getTime();
+            } catch {
+              return 0;
+            }
+          }
+          const d = new Date(v);
+          // eslint-disable-next-line no-restricted-globals
+          return isNaN(d.getTime()) ? 0 : d.getTime();
+        };
+
+        const recent = [...list]
+          .sort((a, b) => getSortMillis(b) - getSortMillis(a))
+          .slice(0, 3)
+          .map((i) => ({
+            id: i?.id ?? i?.incidentId ?? "",
+            title: i?.title ?? (i?.type ? String(i.type).replace(/_/g, " ") : "Incident"),
+            severity: i?.severity ?? "",
+            status: i?.status ?? "open",
+            createdAt: i?.occurredAt ?? i?.reportedAt ?? i?.createdAt ?? null,
+            patientId: i?.patientId ?? "",
+          }));
+
+        if (!cancelled) {
+          setIncidentStats({ totalIncidents, highSeverityIncidents, pendingActions });
+          setRecentIncidents(recent);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setIncidentStats({ totalIncidents: 0, highSeverityIncidents: 0, pendingActions: 0 });
+          setRecentIncidents([]);
+        }
+      } finally {
+        if (!cancelled) setIncidentStatsLoading(false);
+      }
+    }
+
+    loadIncidentStats();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -142,6 +224,9 @@ export default function Dashboard() {
       complianceScore.responsiveScore < 70 ||
       complianceScore.wellLedScore < 70);
 
+  const stage7HighAlert =
+    !incidentStatsLoading && incidentStats.highSeverityIncidents > 0;
+
   return (
     <div style={{ padding: 40 }}>
       <h1 style={{ marginTop: 0 }}>Compliance Dashboard</h1>
@@ -228,6 +313,29 @@ export default function Dashboard() {
         </div>
       )}
 
+      {stage7HighAlert ? (
+        <div
+          role="alert"
+          style={{
+            marginBottom: "1.25rem",
+            padding: "1rem 1.25rem",
+            background: "#991b1b",
+            border: "1px solid #7f1d1d",
+            borderRadius: 12,
+            color: "#ffffff",
+            display: "flex",
+            alignItems: "center",
+            gap: "0.75rem",
+          }}
+        >
+          <span style={{ fontSize: "1.25rem" }}>⚠</span>
+          <span style={{ fontWeight: 900 }}>
+            ATTENTION: {incidentStats.highSeverityIncidents} High-Severity Incident
+            {incidentStats.highSeverityIncidents === 1 ? "" : "s"} require immediate review.
+          </span>
+        </div>
+      ) : null}
+
       <section style={{ marginBottom: "1.5rem" }}>
         <h2 style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>Dashboard</h2>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 20 }}>
@@ -240,6 +348,24 @@ export default function Dashboard() {
             <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>Open Incidents</h3>
             <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>{metricsLoading ? "—" : metrics.openIncidents}</p>
             <Link to="/incidents" style={{ fontSize: "0.8rem", color: "#2563eb", marginTop: 4, display: "inline-block" }}>View →</Link>
+          </div>
+          <div style={{ padding: 20, background: "#f3f3f3", borderRadius: 12 }}>
+            <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>Total Incidents (Stage 7)</h3>
+            <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>
+              {incidentStatsLoading ? "—" : incidentStats.totalIncidents}
+            </p>
+          </div>
+          <div style={{ padding: 20, background: stage7HighAlert ? "#fef2f2" : "#f3f3f3", borderRadius: 12 }}>
+            <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>High Severity (Stage 7)</h3>
+            <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>
+              {incidentStatsLoading ? "—" : incidentStats.highSeverityIncidents}
+            </p>
+          </div>
+          <div style={{ padding: 20, background: "#f3f3f3", borderRadius: 12 }}>
+            <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>Pending Actions (Stage 7)</h3>
+            <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>
+              {incidentStatsLoading ? "—" : incidentStats.pendingActions}
+            </p>
           </div>
           <div style={{ padding: 20, background: metrics.safeguardingAlerts > 0 ? "#fef2f2" : "#f3f3f3", borderRadius: 12 }}>
             <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>Safeguarding Alerts</h3>
@@ -299,6 +425,39 @@ export default function Dashboard() {
         </div>
       </section>
 
+      <section aria-label="Recent incidents" style={{ marginBottom: "1.5rem" }}>
+        <h2 style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>Recent Incidents (Last 3)</h2>
+        <div style={{ background: "#ffffff", borderRadius: 12, border: "1px solid #e2e8f0", overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "#f8fafc" }}>
+                <th style={tableStyles.th}>Title</th>
+                <th style={tableStyles.th}>Severity</th>
+                <th style={tableStyles.th}>Status</th>
+                <th style={tableStyles.th}>When</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentIncidents.map((x) => (
+                <tr key={x.id}>
+                  <td style={tableStyles.td}>{x.title}</td>
+                  <td style={tableStyles.td}>{String(x.severity || "").toUpperCase()}</td>
+                  <td style={tableStyles.td}>{x.status}</td>
+                  <td style={tableStyles.td}>{formatWhen(x.createdAt) || "—"}</td>
+                </tr>
+              ))}
+              {recentIncidents.length === 0 && !incidentStatsLoading ? (
+                <tr>
+                  <td style={tableStyles.td} colSpan={4}>
+                    No incidents recorded yet.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section aria-label="CQC compliance scores">
         <h2 style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>CQC compliance scores</h2>
         {complianceLoading && (
@@ -336,3 +495,35 @@ export default function Dashboard() {
     </div>
   );
 }
+
+function formatWhen(value) {
+  if (!value) return "";
+  if (value instanceof Date) return value.toLocaleString();
+  if (typeof value?.toDate === "function") {
+    try {
+      return value.toDate().toLocaleString();
+    } catch {
+      return "";
+    }
+  }
+  const d = new Date(value);
+  // eslint-disable-next-line no-restricted-globals
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleString();
+}
+
+const tableStyles = {
+  th: {
+    textAlign: "left",
+    padding: "10px 12px",
+    borderBottom: "1px solid #e2e8f0",
+    color: "#0f172a",
+    fontSize: "0.85rem",
+  },
+  td: {
+    padding: "10px 12px",
+    borderBottom: "1px solid #f1f5f9",
+    color: "#0f172a",
+    fontSize: "0.85rem",
+  },
+};

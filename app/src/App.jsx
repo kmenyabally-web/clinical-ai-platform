@@ -19,6 +19,7 @@ import Dashboard from "./pages/Dashboard";
 import PatientList from "./components/PatientList";
 import PatientDetail from "./components/PatientDetail";
 import IncidentReportPage from "./components/IncidentReportPage";
+import IncidentFormPage from "./components/IncidentFormPage";
 
 export default function App() {
   return (
@@ -39,6 +40,7 @@ export default function App() {
           <Route path="/patients" element={<PatientList />} />
           <Route path="/patients/:id" element={<PatientDetail />} />
           <Route path="/patients/:id/report-incident" element={<IncidentReportPage />} />
+          <Route path="/incidents/new/:patientId" element={<IncidentFormPage />} />
         </Route>
 
         {/* For any other path, redirect to the Stage 2 safe screen. */}

@@ -5,7 +5,7 @@ import { useService } from "../context/ServiceContext";
 import { useAuth } from "../context/AuthContext";
 import { useRole } from "../context/RoleContext";
 import IncidentForm from "../components/IncidentForm";
-import { fetchIncidents, createIncident, INCIDENT_SEVERITY } from "../services/incidentService";
+import { fetchIncidents, createIncidentLegacy, INCIDENT_SEVERITY } from "../services/incidentService";
 import { isIndexError, INDEX_ERROR_MESSAGE } from "../lib/firestoreIndexError";
 
 function formatDate(value) {
@@ -72,7 +72,7 @@ export default function Incidents() {
     setCreating(true);
     setError(null);
     try {
-      await createIncident({
+      await createIncidentLegacy({
         organisationId,
         serviceId: effectiveServiceId,
         patientId: payload.patientId,

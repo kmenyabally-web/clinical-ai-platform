@@ -32,7 +32,7 @@ export const INCIDENT_TYPES = [
 export const INCIDENT_SEVERITY = ["low", "medium", "high", "critical"];
 
 /**
- * Create an incident and a linked patientTimeline event.
+ * Legacy: Create an incident and a linked patientTimeline event.
  * Ensures organisationId, serviceId, reportedBy and reportedAt are always set.
  *
  * @param {Object} params
@@ -48,7 +48,7 @@ export const INCIDENT_SEVERITY = ["low", "medium", "high", "critical"];
  * @param {string} [params.status]
  * @returns {Promise<{ id: string }>}
  */
-export async function createIncident({
+export async function createIncidentLegacy({
   organisationId,
   serviceId,
   patientId,
@@ -138,6 +138,43 @@ export async function createIncident({
   recalculateComplianceScoreAsync(organisationId, serviceId);
 
   return { id: incidentId };
+}
+
+/** [ENABLEMENT GATE: STAGE 6 - INCIDENT REPORTING SYSTEM]
+ *
+ * createIncident(incidentData)
+ *
+ * Implements the simplified Stage 6 incident creation required by the latest prompt:
+ * - Writes to "incidents"
+ * - Automatically attaches organisationId: "dev-org-001" (dev bypass)
+ * - createdAt: serverTimestamp()
+ * - status: "open"
+ * - Audits via logAuditEventNonBlocking
+ */
+export async function createIncident(incidentData) {
+  const safePayload = incidentData && typeof incidentData === "object" ? incidentData : {};
+
+  const incidentDoc = {
+    ...safePayload,
+    organisationId: "dev-org-001",
+    createdAt: serverTimestamp(),
+    status: "open",
+  };
+
+  const incidentsRef = collection(db, INCIDENTS_COLLECTION);
+  const snap = await addDoc(incidentsRef, incidentDoc);
+
+  await logAuditEventNonBlocking({
+    action: "INCIDENT_REPORT_CREATED",
+    incidentId: snap.id,
+    patientId: safePayload.patientId ?? null,
+    metadata: {
+      category: safePayload.category ?? null,
+      severity: safePayload.severity ?? null,
+    },
+  }).catch(() => {});
+
+  return { id: snap.id };
 }
 
 /** [ENABLEMENT GATE: STAGE 6 - INCIDENT REPORTING]
