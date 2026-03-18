@@ -14,6 +14,11 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import FirstSafeScreen from "./components/FirstSafeScreen.jsx";
+import Layout from "./components/Layout";
+import Dashboard from "./pages/Dashboard";
+import PatientList from "./components/PatientList";
+import PatientDetail from "./components/PatientDetail";
+import IncidentReportPage from "./components/IncidentReportPage";
 
 export default function App() {
   return (
@@ -23,13 +28,18 @@ export default function App() {
         <Route path="/signup" element={<Signup />} />
 
         <Route
-          path="/"
           element={
             <ProtectedRoute>
-              <FirstSafeScreen />
+              <Layout />
             </ProtectedRoute>
           }
-        />
+        >
+          <Route path="/" element={<FirstSafeScreen />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/patients" element={<PatientList />} />
+          <Route path="/patients/:id" element={<PatientDetail />} />
+          <Route path="/patients/:id/report-incident" element={<IncidentReportPage />} />
+        </Route>
 
         {/* For any other path, redirect to the Stage 2 safe screen. */}
         <Route path="*" element={<Navigate to="/" replace />} />

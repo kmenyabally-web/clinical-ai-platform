@@ -1,5 +1,6 @@
 /** [ENABLEMENT GATE: STAGE 2 - NON-CLINICAL] */
 import React from "react";
+import { Link } from "react-router-dom";
 import { useGovernance } from "../hooks/useGovernance";
 import { useAuth } from "../context/AuthContext";
 
@@ -51,6 +52,15 @@ export default function FirstSafeScreen() {
           You are currently operating under Stage 2 Governance. 
           Clinical data remains locked.
         </p>
+
+        <div style={styles.actions}>
+          <Link to="/patients" style={styles.linkButton}>
+            View Patients
+          </Link>
+          <Link to="/dashboard" style={styles.linkButtonSecondary}>
+            Dashboard
+          </Link>
+        </div>
       </div>
 
       <footer style={styles.footer}>
@@ -131,6 +141,32 @@ const styles = {
     border: "none",
     borderRadius: "5px",
     cursor: "pointer"
+  },
+  actions: {
+    display: "flex",
+    gap: 10,
+    justifyContent: "center",
+    marginTop: 14,
+  },
+  linkButton: {
+    display: "inline-block",
+    padding: "10px 14px",
+    backgroundColor: "#2563eb",
+    color: "white",
+    borderRadius: 8,
+    textDecoration: "none",
+    fontWeight: 700,
+    fontSize: 13,
+  },
+  linkButtonSecondary: {
+    display: "inline-block",
+    padding: "10px 14px",
+    backgroundColor: "#0f172a",
+    color: "white",
+    borderRadius: 8,
+    textDecoration: "none",
+    fontWeight: 700,
+    fontSize: 13,
   },
   spinner: {
     width: "40px",

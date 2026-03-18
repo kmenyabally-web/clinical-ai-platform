@@ -1,18 +1,33 @@
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 import { useOrganisation } from "../context/OrganisationContext";
+import { Link, Outlet, useLocation } from "react-router-dom";
 
-export default function Layout({ children }) {
+export default function Layout() {
   const { organisationId, isPlatformAdmin, loading, error } = useOrganisation();
+  const location = useLocation();
 
   const showOrgGuard = !loading && !organisationId && !isPlatformAdmin;
 
   return (
-    <div style={styles.app}>
+    <div style={layoutStyles.app}>
       <Sidebar />
-      <div style={styles.main}>
+      <div style={layoutStyles.main}>
         <Header />
-        <div style={styles.content}>
+        <div style={layoutStyles.content}>
+          <div style={layoutStyles.subNav}>
+            <NavLink to="/" label="Governance" active={location.pathname === "/"} />
+            <NavLink
+              to="/dashboard"
+              label="Dashboard"
+              active={location.pathname.startsWith("/dashboard")}
+            />
+            <NavLink
+              to="/patients"
+              label="Patient List"
+              active={location.pathname.startsWith("/patients")}
+            />
+          </div>
           {showOrgGuard ? (
             <div
               role="alert"
@@ -42,7 +57,7 @@ export default function Layout({ children }) {
               )}
             </div>
           ) : (
-            children
+            <Outlet />
           )}
         </div>
       </div>
@@ -50,7 +65,21 @@ export default function Layout({ children }) {
   );
 }
 
-const styles = {
+function NavLink({ to, label, active }) {
+  return (
+    <Link
+      to={to}
+      style={{
+        ...layoutStyles.link,
+        ...(active ? layoutStyles.linkActive : null),
+      }}
+    >
+      {label}
+    </Link>
+  );
+}
+
+const layoutStyles = {
   app: {
     display: "flex",
     height: "100vh",
@@ -64,5 +93,25 @@ const styles = {
   content: {
     padding: "32px",
     overflowY: "auto",
+  },
+  subNav: {
+    display: "flex",
+    gap: 10,
+    marginBottom: 16,
+    flexWrap: "wrap",
+  },
+  link: {
+    display: "inline-block",
+    padding: "8px 12px",
+    borderRadius: 10,
+    textDecoration: "none",
+    fontWeight: 800,
+    fontSize: 13,
+    color: "#0f172a",
+    backgroundColor: "#ffffff",
+    border: "1px solid #e2e8f0",
+  },
+  linkActive: {
+    backgroundColor: "#e2e8f0",
   },
 };

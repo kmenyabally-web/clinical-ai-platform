@@ -203,7 +203,7 @@ export default function Incidents() {
         }}
       >
         <h2 style={{ fontSize: "1rem", margin: 0, marginBottom: "0.75rem" }}>Report an incident</h2>
-        <IncidentForm onSubmit={handleCreateIncident} loading={creating} />
+        <IncidentForm onSubmit={handleCreateIncident} loading={creating} legacy />
       </section>
 
       <section aria-label="Incidents list">

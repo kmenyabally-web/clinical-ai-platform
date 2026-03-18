@@ -7,10 +7,14 @@ import {
   where,
   orderBy,
   getDocs,
+  limit,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { addTimelineEntry } from "./patientTimelineService";
 import { recalculateComplianceScoreAsync } from "./complianceEngine";
+import { auth } from "../firebase";
+import { getUserContext } from "./authService";
+import { logAuditEventNonBlocking } from "./auditService";
 
 const INCIDENTS_COLLECTION = "incidents";
 const PATIENT_TIMELINE_COLLECTION = "patientTimeline";
@@ -86,6 +90,14 @@ export async function createIncident({
   const incidentId = incidentSnap.id;
   await updateDoc(incidentSnap, { incidentId });
 
+  await logAuditEventNonBlocking({
+    action: "INCIDENT_REPORT_CREATED",
+    incidentId,
+    patientId,
+    severity,
+    incidentType: type,
+  }).catch(() => {});
+
   // Legacy: patientTimeline collection (existing behaviour).
   const timelineRef = collection(db, PATIENT_TIMELINE_COLLECTION);
   await addDoc(timelineRef, {
@@ -126,6 +138,109 @@ export async function createIncident({
   recalculateComplianceScoreAsync(organisationId, serviceId);
 
   return { id: incidentId };
+}
+
+/** [ENABLEMENT GATE: STAGE 6 - INCIDENT REPORTING]
+ *
+ * createIncidentReport(data)
+ *
+ * Stage 6 simplified incident reporting API that automatically attaches:
+ * - organisationId (from user context)
+ * - reporterId (current user uid)
+ * - createdAt (serverTimestamp)
+ *
+ * Required fields:
+ * - title, occurredAt (JS Date), location, severity (low|medium|high), description, patientId
+ */
+export async function createIncidentReport({
+  title,
+  occurredAt,
+  location,
+  severity,
+  description,
+  patientId,
+}) {
+  const { organisationId } = await getUserContext();
+  const reporterId = auth.currentUser?.uid || null;
+
+  if (!organisationId) throw new Error("Governance Error: organisationId is required.");
+  if (!reporterId) throw new Error("Governance Error: reporterId is required.");
+  if (!patientId?.trim()) throw new Error("patientId is required");
+  if (!title?.trim()) throw new Error("title is required");
+  if (!description?.trim()) throw new Error("description is required");
+  if (!location?.trim()) throw new Error("location is required");
+  if (!severity?.trim()) throw new Error("severity is required");
+  if (!(occurredAt instanceof Date) || isNaN(occurredAt.getTime())) {
+    throw new Error("occurredAt (Date) is required");
+  }
+
+  const incidentsRef = collection(db, INCIDENTS_COLLECTION);
+  const incidentDoc = {
+    incidentId: "",
+    organisationId,
+    patientId: patientId.trim(),
+    title: title.trim(),
+    location: location.trim(),
+    severity: severity.toLowerCase(),
+    description: description.trim(),
+    occurredAt, // stored as Timestamp by Firestore SDK
+    reporterId,
+    createdAt: serverTimestamp(),
+    status: "open",
+  };
+
+  const snap = await addDoc(incidentsRef, incidentDoc);
+  const incidentId = snap.id;
+  await updateDoc(snap, { incidentId });
+
+  await logAuditEventNonBlocking({
+    action: "INCIDENT_REPORT_CREATED",
+    incidentId,
+    patientId: patientId.trim(),
+    severity: severity.toLowerCase(),
+  }).catch(() => {});
+
+  return { id: incidentId };
+}
+
+/** [ENABLEMENT GATE: STAGE 6 - INCIDENT REPORTING]
+ *
+ * fetchIncidentsForPatient(patientId)
+ *
+ * Returns recent incidents for a single patient, scoped to current org.
+ */
+export async function fetchIncidentsForPatient(patientId, { limitCount = 20 } = {}) {
+  const { organisationId } = await getUserContext();
+  if (!organisationId) throw new Error("Governance Error: organisationId is required.");
+  if (!patientId?.trim()) return [];
+
+  const ref = collection(db, INCIDENTS_COLLECTION);
+  const q = query(
+    ref,
+    where("organisationId", "==", organisationId),
+    where("patientId", "==", patientId.trim()),
+    orderBy("createdAt", "desc"),
+    limit(typeof limitCount === "number" ? limitCount : 20)
+  );
+
+  const snapshot = await getDocs(q);
+  const docs = snapshot?.docs ?? [];
+  return docs.map((d) => {
+    const x = d?.data?.() ?? {};
+    return {
+      id: d?.id ?? "",
+      incidentId: x.incidentId ?? d?.id ?? "",
+      patientId: x.patientId ?? "",
+      title: x.title ?? "",
+      location: x.location ?? "",
+      severity: x.severity ?? "",
+      description: x.description ?? "",
+      occurredAt: x.occurredAt ?? null,
+      createdAt: x.createdAt ?? null,
+      reporterId: x.reporterId ?? "",
+      status: x.status ?? "open",
+    };
+  });
 }
 
 /**
