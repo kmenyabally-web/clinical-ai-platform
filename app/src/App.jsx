@@ -22,6 +22,8 @@ import IncidentReportPage from "./components/IncidentReportPage";
 import IncidentFormPage from "./components/IncidentFormPage";
 import AuditLog from "./pages/AuditLog";
 import EvidencePack from "./pages/EvidencePack";
+import ClinicalNotes from "./pages/ClinicalNotes";
+import Documents from "./pages/Documents";
 
 export default function App() {
   return (
@@ -43,6 +45,8 @@ export default function App() {
           <Route path="/patients/:id" element={<PatientDetail />} />
           <Route path="/patients/:id/report-incident" element={<IncidentReportPage />} />
           <Route path="/incidents/new/:patientId" element={<IncidentFormPage />} />
+          <Route path="/clinical-notes" element={<ClinicalNotes />} />
+          <Route path="/documents" element={<Documents />} />
           <Route path="/audit-log" element={<AuditLog />} />
           <Route path="/evidence-pack" element={<EvidencePack />} />
         </Route>

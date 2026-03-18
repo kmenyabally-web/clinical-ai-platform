@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getPatientById } from "../services/patientService";
 import { fetchIncidentsForPatient } from "../services/incidentService";
+import { fetchClinicalNotesForPatient } from "../services/noteService";
 
 export default function PatientDetail() {
   const { id } = useParams();
@@ -12,6 +13,9 @@ export default function PatientDetail() {
   const [error, setError] = useState(null);
   const [incidents, setIncidents] = useState([]);
   const [incidentsLoading, setIncidentsLoading] = useState(false);
+  const [notes, setNotes] = useState([]);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [notesError, setNotesError] = useState(null);
 
   useEffect(() => {
     let mounted = true;
@@ -30,6 +34,30 @@ export default function PatientDetail() {
     }
 
     load();
+    return () => {
+      mounted = false;
+    };
+  }, [id]);
+
+  useEffect(() => {
+    let mounted = true;
+    setNotesLoading(true);
+    setNotesError(null);
+    fetchClinicalNotesForPatient(id, { limitCount: 10 })
+      .then((list) => {
+        if (!mounted) return;
+        setNotes(Array.isArray(list) ? list : []);
+      })
+      .catch((err) => {
+        if (!mounted) return;
+        setNotes([]);
+        setNotesError(err);
+      })
+      .finally(() => {
+        if (!mounted) return;
+        setNotesLoading(false);
+      });
+
     return () => {
       mounted = false;
     };
@@ -127,6 +155,44 @@ export default function PatientDetail() {
           Stage 5 Access: Clinical data is currently restricted. Upgrade governance
           level to view.
         </div>
+      </div>
+
+      <div style={styles.notesCard}>
+        <div style={styles.notesHeader}>
+          <div style={styles.notesTitle}>Notes History</div>
+          {notesLoading ? (
+            <div style={styles.notesMeta}>Loading…</div>
+          ) : notesError ? (
+            <div style={styles.notesMeta}>Unable to load notes</div>
+          ) : (
+            <div style={styles.notesMeta}>{notes.length} recent</div>
+          )}
+        </div>
+
+        {notes.length === 0 && !notesLoading && !notesError ? (
+          <div style={styles.notesEmpty}>No clinical notes recorded for this patient.</div>
+        ) : (
+          <ul style={styles.notesList}>
+            {notes.slice(0, 10).map((n) => (
+              <li key={n.id} style={styles.notesItem}>
+                <div style={styles.notesItemTop}>
+                  <span style={styles.notesCategoryBadge}>{n.category || "Note"}</span>
+                  {n.mood && <span style={styles.notesMood}>{n.mood}</span>}
+                </div>
+                <div style={styles.notesItemSub}>
+                  <span>{formatWhen(n.createdAt) || "—"}</span>
+                  <span> · </span>
+                  <span>{n.authorEmail || "—"}</span>
+                </div>
+                {n.content && (
+                  <div style={styles.notesContent}>
+                    {n.content}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <div style={styles.incidentCard}>
@@ -340,6 +406,75 @@ const styles = {
     marginTop: 6,
     fontSize: 12,
     color: "#475569",
+  },
+  notesCard: {
+    marginTop: 16,
+    backgroundColor: "#ffffff",
+    border: "1px solid #e2e8f0",
+    borderRadius: 12,
+    overflow: "hidden",
+  },
+  notesHeader: {
+    padding: "12px 14px",
+    borderBottom: "1px solid #f1f5f9",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "baseline",
+    gap: 10,
+  },
+  notesTitle: {
+    fontWeight: 900,
+    color: "#0f172a",
+  },
+  notesMeta: {
+    fontSize: 12,
+    color: "#64748b",
+    fontWeight: 800,
+  },
+  notesEmpty: {
+    padding: "12px 14px",
+    color: "#334155",
+    fontSize: 13,
+  },
+  notesList: {
+    listStyle: "none",
+    margin: 0,
+    padding: 0,
+  },
+  notesItem: {
+    padding: "12px 14px",
+    borderBottom: "1px solid #f1f5f9",
+  },
+  notesItemTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+    alignItems: "center",
+  },
+  notesCategoryBadge: {
+    fontSize: 12,
+    fontWeight: 900,
+    color: "#0f172a",
+    backgroundColor: "#f1f5f9",
+    border: "1px solid #e2e8f0",
+    padding: "2px 8px",
+    borderRadius: 999,
+  },
+  notesMood: {
+    fontSize: 16,
+    lineHeight: 1,
+  },
+  notesItemSub: {
+    marginTop: 6,
+    fontSize: 12,
+    color: "#475569",
+  },
+  notesContent: {
+    marginTop: 8,
+    fontSize: 12,
+    color: "#334155",
+    whiteSpace: "pre-wrap",
+    lineHeight: 1.4,
   },
   backLink: {
     textDecoration: "none",

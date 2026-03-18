@@ -8,6 +8,7 @@ import {
   orderBy,
   startAfter,
   serverTimestamp,
+  setDoc,
   updateDoc,
   increment,
   doc,
@@ -15,12 +16,17 @@ import {
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../firebase";
 import { logAuditEventNonBlocking } from "./auditService";
+import { getUserContext } from "./authService";
 import { DOMAIN_TO_STATS_FIELD } from "../config/documentDomains";
 
 const POLICIES_COLLECTION = "policies";
 const EVIDENCE_DOCUMENTS_COLLECTION = "evidence_documents";
 const DOCUMENT_STATS_COLLECTION = "document_stats";
 const PAGE_SIZE = 50;
+
+// Stage 12 managed document system (expiry + category tiles)
+const MANAGED_DOCUMENTS_COLLECTION = "documents";
+const MANAGED_CATEGORIES = ["Insurance", "Policies", "ID", "Training", "Other"];
 
 /** Supported file types for upload (Storage). */
 export const SUPPORTED_FILE_EXTENSIONS = [".pdf", ".docx", ".xlsx", ".jpg", ".jpeg", ".png"];
@@ -88,8 +94,60 @@ function incrementDocumentCount(organisationId, domainType, serviceId) {
  * @param {{ userId: string, userRole: string }} auditContext
  * @returns {Promise<{ id: string, collection: string }>}
  */
-export async function uploadDocument(organisationId, payload, auditContext, serviceId) {
+export async function uploadDocument(organisationIdOrFile, payload, auditContext, serviceId) {
+  // Stage 12 managed document upload: uploadDocument(file, metadata)
+  // - Writes to Storage: /organisations/{organisationId}/documents/
+  // - Writes to Firestore: collection /documents with expiryDate + category.
+  if (organisationIdOrFile && typeof organisationIdOrFile === "object" && typeof organisationIdOrFile.name === "string") {
+    const file = organisationIdOrFile;
+    const metadata = payload ?? {};
+
+    if (!file) throw new Error("File required");
+    if (!isSupportedFileType(file)) throw new Error("File type not supported. Use: pdf, docx, xlsx, jpg, png.");
+
+    const { organisationId: claimsOrgId } = await getUserContext();
+    const scopedOrgId = (claimsOrgId ?? "dev-org-001").toString().trim();
+
+    const category = (metadata.category ?? "Other").toString().trim();
+    if (!MANAGED_CATEGORIES.includes(category)) {
+      throw new Error(`Invalid category. Must be one of: ${MANAGED_CATEGORIES.join(", ")}`);
+    }
+
+    const rawExpiry = metadata.expiryDate ?? null;
+    let expiryDate = null;
+    if (rawExpiry != null && rawExpiry !== "") {
+      const d = rawExpiry instanceof Date ? rawExpiry : new Date(rawExpiry);
+      if (isNaN(d.getTime())) throw new Error("expiryDate is not a valid date.");
+      expiryDate = d;
+    }
+
+    const col = collection(db, MANAGED_DOCUMENTS_COLLECTION);
+    const docRef = doc(col);
+    const fileId = docRef.id;
+
+    const ext = file.name.includes(".") ? file.name.slice(file.name.lastIndexOf(".")) : "";
+    const storagePath = `organisations/${scopedOrgId}/documents/${fileId}${ext}`;
+    const storageRef = ref(storage, storagePath);
+
+    await uploadBytesResumable(storageRef, file);
+    const fileUrl = await getDownloadURL(storageRef);
+
+    await setDoc(docRef, {
+      organisationId: scopedOrgId,
+      fileName: file.name,
+      fileUrl,
+      category,
+      expiryDate: expiryDate ?? null,
+      uploadedAt: serverTimestamp(),
+    });
+
+    return { id: fileId };
+  }
+
+  // Legacy behaviour (existing policies / evidence_documents document system).
+  const organisationId = organisationIdOrFile;
   if (!organisationId?.trim()) throw new Error("organisationId required");
+
   const { title, documentType, domainType, description, file } = payload;
   if (!file) throw new Error("File required");
   if (!isSupportedFileType(file)) throw new Error("File type not supported. Use: pdf, docx, xlsx, jpg, png.");
@@ -135,7 +193,79 @@ export async function uploadDocument(organisationId, payload, auditContext, serv
       newValue: { title: docData.title, documentType: docData.documentType, domainType: docData.domainType },
     });
   }
+
   return { id: fileId, collection: colName };
+}
+
+/**
+ * Fetch managed Stage 12 documents (category + expiryDate).
+ * No ordering here to avoid needing new composite indexes.
+ *
+ * @param {string} organisationId
+ * @returns {Promise<Array<{id:string,fileName:string,fileUrl:string,category:string,expiryDate:any,uploadedAt:any}>>}
+ */
+export async function fetchManagedDocuments(organisationId) {
+  // DEBUG / VERIFICATION MODE (temporary):
+  // Hardcode collection and orgId to validate that UI reads the correct top-level collection.
+  // If this returns 0 but no-filter debug returns documents, then stored organisationId is different.
+  const collectionName = "documents";
+  const scopedOrgId = "dev-org-001";
+  const q = query(
+    collection(db, collectionName),
+    where("organisationId", "==", scopedOrgId)
+  );
+
+  const snap = await getDocs(q);
+  return (snap?.docs ?? []).map((d) => {
+    const x = d?.data?.() ?? {};
+    return {
+      id: d?.id ?? "",
+      fileName: x.fileName ?? "",
+      fileUrl: x.fileUrl ?? "",
+      category: x.category ?? "Other",
+      expiryDate: x.expiryDate ?? null,
+      uploadedAt: x.uploadedAt ?? null,
+    };
+  });
+}
+
+/**
+ * Debug-only helper: fetch documents from the `documents` collection with no filters.
+ * Use to confirm whether data exists when the scoped query returns [].
+ */
+export async function fetchAllManagedDocumentsNoFilterDebug(limitCount = 25) {
+  const q = query(collection(db, "documents"), limit(limitCount));
+  const snap = await getDocs(q);
+  return (snap?.docs ?? []).map((d) => {
+    const x = d?.data?.() ?? {};
+    return {
+      id: d?.id ?? "",
+      fileName: x.fileName ?? "",
+      fileUrl: x.fileUrl ?? "",
+      category: x.category ?? "Other",
+      expiryDate: x.expiryDate ?? null,
+      uploadedAt: x.uploadedAt ?? null,
+      organisationId: x.organisationId ?? null,
+    };
+  });
+}
+
+/**
+ * Debug-only helper: fetch documents if they were stored incorrectly as a sub-collection:
+ * organisations/{organisationId}/documents/{docId}
+ */
+export async function fetchOrgDocumentsSubcollectionDebugNoFilter(organisationId, limitCount = 25) {
+  const orgId = (organisationId ?? "").toString().trim();
+  if (!orgId) return [];
+  const q = query(collection(db, "organisations", orgId, "documents"), limit(limitCount));
+  const snap = await getDocs(q);
+  return (snap?.docs ?? []).map((d) => {
+    const x = d?.data?.() ?? {};
+    return {
+      id: d?.id ?? "",
+      ...x,
+    };
+  });
 }
 
 /**

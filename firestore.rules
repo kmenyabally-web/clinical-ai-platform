@@ -216,6 +216,23 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // --- documents (Stage 12): category + expiry monitoring; immutable create-only ---
+    match /documents/{docId} {
+      allow read: if isActiveUser() && resource.data.organisationId == userOrgId();
+      allow create: if orgMatch(request.resource.data.organisationId) && canWriteDocuments()
+        && request.resource.data.keys().hasAll(['organisationId', 'fileName', 'fileUrl', 'category', 'expiryDate', 'uploadedAt'])
+        && request.resource.data.organisationId is string
+        && request.resource.data.fileName is string
+        && request.resource.data.fileUrl is string
+        && request.resource.data.category is string
+        && (request.resource.data.expiryDate == null || request.resource.data.expiryDate is timestamp)
+        && request.resource.data.uploadedAt != null
+        && (request.resource.data.category == 'Insurance' || request.resource.data.category == 'Policies'
+          || request.resource.data.category == 'ID' || request.resource.data.category == 'Training' || request.resource.data.category == 'Other');
+      allow update: if false;
+      allow delete: if false;
+    }
+
     match /document_stats/{statId} {
       allow read: if isActiveUser() && resource.data.organisationId == userOrgId();
       allow create, update: if orgMatch(request.resource.data.organisationId) && canWriteDocuments()
