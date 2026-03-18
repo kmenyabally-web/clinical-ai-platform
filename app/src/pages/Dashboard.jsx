@@ -11,6 +11,8 @@ import { countCarePlansDueForReview } from "../services/carePlanManagementServic
 import ComplianceScoreCard from "../components/ComplianceScoreCard";
 import { isIndexError, INDEX_ERROR_MESSAGE } from "../lib/firestoreIndexError";
 import { logAuditEventNonBlocking } from "../services/auditService";
+import { collection, getDocs, query, where } from "firebase/firestore";
+import { db } from "../firebase";
 
 export default function Dashboard() {
   const { organisationId, organisation } = useOrganisation();
@@ -44,29 +46,35 @@ export default function Dashboard() {
       : "All services";
 
   useEffect(() => {
-    logAuditEventNonBlocking({ action: "COMPLIANCE_DASHBOARD_VIEW" }).catch(() => {});
+    logAuditEventNonBlocking({ action: "DASHBOARD_REPORTS_GENERATED" }).catch(() => {});
   }, []);
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadIncidentStats() {
-      // Stage 7 prompt explicitly requests dev-org-001.
+      // Stage 7 prompt explicitly requests dev-org-001 and a direct Firestore query.
       const orgForStage7 = "dev-org-001";
       setIncidentStatsLoading(true);
       try {
-        const incidents = await fetchIncidents(orgForStage7, {});
-        const list = Array.isArray(incidents) ? incidents : [];
+        const q = query(
+          collection(db, "incidents"),
+          where("organisationId", "==", orgForStage7)
+        );
+        const snapshot = await getDocs(q);
+        const docs = snapshot?.docs ?? [];
+
+        const list = docs.map((d) => {
+          const x = d?.data?.() ?? {};
+          return { id: d?.id ?? "", ...x };
+        });
 
         const normalizeSeverity = (s) => (s ?? "").toString().trim().toLowerCase();
-        const isHigh = (s) => {
-          const x = normalizeSeverity(s);
-          return x === "high" || x === "critical";
-        };
+        const isHigh = (s) => normalizeSeverity(s) === "high";
 
         const totalIncidents = list.length;
         const highSeverityIncidents = list.filter((i) => isHigh(i?.severity)).length;
-        const pendingActions = list.filter((i) => (i?.status || "open") === "open").length;
+        const pendingActions = list.filter((i) => (i?.status || "").toString().toLowerCase() === "open").length;
 
         const getSortMillis = (i) => {
           const v = i?.occurredAt ?? i?.reportedAt ?? i?.createdAt ?? null;
@@ -86,10 +94,13 @@ export default function Dashboard() {
 
         const recent = [...list]
           .sort((a, b) => getSortMillis(b) - getSortMillis(a))
-          .slice(0, 3)
+          .slice(0, 5)
           .map((i) => ({
             id: i?.id ?? i?.incidentId ?? "",
-            title: i?.title ?? (i?.type ? String(i.type).replace(/_/g, " ") : "Incident"),
+            title:
+              i?.title ??
+              i?.name ??
+              (i?.type ? String(i.type).replace(/_/g, " ") : "Incident"),
             severity: i?.severity ?? "",
             status: i?.status ?? "open",
             createdAt: i?.occurredAt ?? i?.reportedAt ?? i?.createdAt ?? null,
@@ -229,6 +240,13 @@ export default function Dashboard() {
 
   return (
     <div style={{ padding: 40 }}>
+      <style>{`
+        @keyframes urgentPulse {
+          0% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.01); opacity: 0.92; }
+          100% { transform: scale(1); opacity: 1; }
+        }
+      `}</style>
       <h1 style={{ marginTop: 0 }}>Compliance Dashboard</h1>
       {organisation?.name && (
         <p style={{ margin: "0 0 1rem 0", color: "#555", fontSize: "0.95rem" }}>
@@ -319,19 +337,20 @@ export default function Dashboard() {
           style={{
             marginBottom: "1.25rem",
             padding: "1rem 1.25rem",
-            background: "#991b1b",
+            background: "#b91c1c",
             border: "1px solid #7f1d1d",
             borderRadius: 12,
             color: "#ffffff",
             display: "flex",
             alignItems: "center",
             gap: "0.75rem",
+            animation: "urgentPulse 1.1s ease-in-out infinite",
           }}
         >
           <span style={{ fontSize: "1.25rem" }}>⚠</span>
           <span style={{ fontWeight: 900 }}>
-            ATTENTION: {incidentStats.highSeverityIncidents} High-Severity Incident
-            {incidentStats.highSeverityIncidents === 1 ? "" : "s"} require immediate review.
+            URGENT: {incidentStats.highSeverityIncidents} High-severity incident
+            {incidentStats.highSeverityIncidents === 1 ? "" : "s"} require immediate clinical review.
           </span>
         </div>
       ) : null}
@@ -349,21 +368,21 @@ export default function Dashboard() {
             <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>{metricsLoading ? "—" : metrics.openIncidents}</p>
             <Link to="/incidents" style={{ fontSize: "0.8rem", color: "#2563eb", marginTop: 4, display: "inline-block" }}>View →</Link>
           </div>
-          <div style={{ padding: 20, background: "#f3f3f3", borderRadius: 12 }}>
-            <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>Total Incidents (Stage 7)</h3>
-            <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>
+          <div style={{ padding: 24, background: "#ffffff", borderRadius: 12, border: "1px solid #e2e8f0" }}>
+            <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>Total Incidents</h3>
+            <p style={{ margin: 0, fontSize: "2rem", fontWeight: 800 }}>
               {incidentStatsLoading ? "—" : incidentStats.totalIncidents}
             </p>
           </div>
-          <div style={{ padding: 20, background: stage7HighAlert ? "#fef2f2" : "#f3f3f3", borderRadius: 12 }}>
-            <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>High Severity (Stage 7)</h3>
-            <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>
+          <div style={{ padding: 24, background: stage7HighAlert ? "#fef2f2" : "#ffffff", borderRadius: 12, border: "1px solid #e2e8f0" }}>
+            <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>Critical Alerts (High)</h3>
+            <p style={{ margin: 0, fontSize: "2rem", fontWeight: 800 }}>
               {incidentStatsLoading ? "—" : incidentStats.highSeverityIncidents}
             </p>
           </div>
-          <div style={{ padding: 20, background: "#f3f3f3", borderRadius: 12 }}>
-            <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>Pending Actions (Stage 7)</h3>
-            <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>
+          <div style={{ padding: 24, background: "#ffffff", borderRadius: 12, border: "1px solid #e2e8f0" }}>
+            <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>Open Cases</h3>
+            <p style={{ margin: 0, fontSize: "2rem", fontWeight: 800 }}>
               {incidentStatsLoading ? "—" : incidentStats.pendingActions}
             </p>
           </div>
@@ -426,7 +445,7 @@ export default function Dashboard() {
       </section>
 
       <section aria-label="Recent incidents" style={{ marginBottom: "1.5rem" }}>
-        <h2 style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>Recent Incidents (Last 3)</h2>
+        <h2 style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>Recent Activity (Last 5 incidents)</h2>
         <div style={{ background: "#ffffff", borderRadius: 12, border: "1px solid #e2e8f0", overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
