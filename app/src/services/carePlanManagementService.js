@@ -77,6 +77,30 @@ export async function saveAiCarePlanDraft({ organisationId, patientId, content }
   return { id: snap.id };
 }
 
+/** All care plan documents for a patient (AI drafts and structured records). */
+export async function listCarePlansForPatient(organisationId, patientId, { limitCount = 200 } = {}) {
+  const org = (organisationId ?? "").trim();
+  const pid = (patientId ?? "").trim();
+  if (!org || !pid) return [];
+
+  const ref = collection(db, CARE_PLANS_COLLECTION);
+  const q = query(
+    ref,
+    where("organisationId", "==", org),
+    where("patientId", "==", pid),
+    limit(limitCount)
+  );
+  const snapshot = await getDocs(q);
+  const docs = snapshot?.docs ?? [];
+  const rows = docs.map((d) => snapshotFromDoc(d));
+  rows.sort((a, b) => {
+    const ta = a.createdAt?.toMillis?.() ?? a.updatedAt?.toMillis?.() ?? 0;
+    const tb = b.createdAt?.toMillis?.() ?? b.updatedAt?.toMillis?.() ?? 0;
+    return tb - ta;
+  });
+  return rows;
+}
+
 /** List AI-saved drafts for a patient (documents with status "draft" and `content`). */
 export async function listAiCarePlanDraftsForPatient(organisationId, patientId, { limitCount = 25 } = {}) {
   const org = (organisationId ?? "").trim() || "dev-org-001";

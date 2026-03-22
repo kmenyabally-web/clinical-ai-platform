@@ -1,468 +1,254 @@
-/** [ENABLEMENT GATE: STAGE 9 - EVIDENCE PACK EXPORT] */
+/** [ENABLEMENT GATE: STAGE 9 / 14 - EVIDENCE PACK EXPORT] */
 
-import React, { useEffect, useState } from "react";
-import { collection, getDocs, query, where, orderBy } from "firebase/firestore";
-import { db } from "../firebase";
+import React, { useEffect, useMemo, useState } from "react";
+import { listPatients } from "../services/patientService";
+import { getUserContext } from "../services/authService";
+import { buildEvidencePackZip } from "../services/evidencePackService";
 import { logAuditEventNonBlocking } from "../services/auditService";
 
 export default function EvidencePack() {
-  const [incidents, setIncidents] = useState([]);
-  const [auditRows, setAuditRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [patients, setPatients] = useState([]);
+  const [loadingPatients, setLoadingPatients] = useState(true);
+  const [patientsError, setPatientsError] = useState(null);
 
-  useEffect(() => {
-    logAuditEventNonBlocking({ action: "EVIDENCE_PACK_GENERATED" }).catch(() => {});
-  }, []);
+  const [selectedPatientId, setSelectedPatientId] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState(null);
+  const [lastSummary, setLastSummary] = useState(null);
+
+  const selectedPatient = useMemo(
+    () => patients.find((p) => p.id === selectedPatientId) ?? null,
+    [patients, selectedPatientId]
+  );
+
+  const patientLabel = selectedPatient
+    ? `${selectedPatient.firstName ?? ""} ${selectedPatient.lastName ?? ""}`.trim() || selectedPatient.id
+    : "";
 
   useEffect(() => {
     let mounted = true;
-
     async function load() {
-      setLoading(true);
-      setError(null);
+      setLoadingPatients(true);
+      setPatientsError(null);
       try {
-        const incidentsQ = query(
-          collection(db, "incidents"),
-          where("organisationId", "==", "dev-org-001"),
-          where("severity", "in", ["High", "high", "HIGH"])
-        );
-        const incidentsSnap = await getDocs(incidentsQ);
-        const incDocs = incidentsSnap?.docs ?? [];
-
-        const incidentList = incDocs.map((d) => {
-          const x = d?.data?.() ?? {};
-          return {
-            id: d?.id ?? "",
-            title: x.title ?? x.type ?? "Incident",
-            severity: x.severity ?? "",
-            patientId: x.patientId ?? "",
-            occurredAt: x.occurredAt ?? x.reportedAt ?? x.createdAt ?? null,
-            regulation:
-              x.regulation ??
-              guessRegulation(x),
-          };
-        });
-
-        const auditQ = query(
-          collection(db, "audit_logs"),
-          orderBy("timestamp", "desc")
-        );
-        const auditSnap = await getDocs(auditQ);
-        const auditDocs = auditSnap?.docs ?? [];
-        const audits = auditDocs.map((d) => {
-          const x = d?.data?.() ?? {};
-          return {
-            id: d?.id ?? "",
-            timestamp: x.timestamp ?? null,
-            action: x.action ?? "",
-            userEmail: x.userEmail ?? x.user ?? "",
-            metadata: x.metadata ?? {},
-          };
-        });
-
+        const list = await listPatients();
         if (!mounted) return;
-        setIncidents(incidentList);
-        setAuditRows(audits);
-      } catch (err) {
+        setPatients(Array.isArray(list) ? list : []);
+      } catch (e) {
         if (!mounted) return;
-        setError(err);
+        setPatientsError(e?.message ?? "Failed to load patients.");
+        setPatients([]);
       } finally {
-        if (!mounted) return;
-        setLoading(false);
+        if (mounted) setLoadingPatients(false);
       }
     }
-
     load();
     return () => {
       mounted = false;
     };
   }, []);
 
-  const organisationId = "dev-org-001";
-  const generatedOn = new Date();
-  const generatedDateStr = generatedOn.toLocaleDateString("en-GB");
+  useEffect(() => {
+    if (!selectedPatientId && patients.length > 0) {
+      setSelectedPatientId(patients[0].id ?? "");
+    }
+  }, [patients, selectedPatientId]);
 
-  function handlePrint() {
-    window.print();
-  }
+  async function handleGenerateBundle() {
+    setError(null);
+    setLastSummary(null);
+    if (!selectedPatient) {
+      setError("Select a patient.");
+      return;
+    }
+    setGenerating(true);
+    try {
+      const { organisationId } = await getUserContext();
+      const org = organisationId || "dev-org-001";
+      const { blob, rootFolderName, counts } = await buildEvidencePackZip({
+        organisationId: org,
+        patientId: selectedPatient.id,
+        patientName: patientLabel,
+      });
 
-  if (loading) {
-    return <div style={styles.text}>Generating inspection report…</div>;
-  }
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const filename = `CQC_Evidence_Pack_${dateStr}.zip`;
 
-  if (error) {
-    return (
-      <div style={styles.errorBox}>
-        <div style={styles.errorTitle}>Failed to generate evidence pack</div>
-        <div style={styles.errorText}>{error?.message || String(error)}</div>
-      </div>
-    );
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      setLastSummary({ rootFolderName, counts, filename });
+      logAuditEventNonBlocking({
+        action: "EVIDENCE_PACK_GENERATED",
+        entityType: "EVIDENCE_PACK",
+        organisationId: org,
+        metadata: { patientId: selectedPatient.id, counts },
+      }).catch(() => {});
+    } catch (e) {
+      setError(e?.message ?? "Failed to build evidence pack.");
+    } finally {
+      setGenerating(false);
+    }
   }
 
   return (
-    <div style={styles.container} className="evidence-pack-root">
-      <style>{printCss}</style>
-      <div className="print-only" style={styles.printHeader}>
-        <div style={styles.printConfidential}>
-          CONFIDENTIAL: CQC Compliance Evidence Pack - Generated on {generatedDateStr}
-        </div>
-        <div style={styles.printOrgId}>Organisation ID: {organisationId}</div>
-      </div>
+    <div style={{ padding: "2rem", maxWidth: 720, margin: "0 auto" }}>
+      <style>{`
+        @keyframes cqcSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      `}</style>
 
-      <header style={styles.header} className="no-print">
-        <div>
-          <h1 style={styles.title}>Inspection Evidence Pack</h1>
-          <p style={styles.subtitle}>
-            High-severity incidents for dev-org-001 with same-day audit activity.
-          </p>
-        </div>
-        <button type="button" onClick={handlePrint} style={styles.printButton} className="no-print">
-          Export for CQC Inspector
-        </button>
+      <header style={{ marginBottom: "1.5rem" }}>
+        <h1 style={{ margin: 0, marginBottom: "0.35rem", fontSize: "1.65rem", fontWeight: 900, color: "#0f172a" }}>
+          CQC Evidence Pack
+        </h1>
+        <p style={{ margin: 0, color: "#64748b", fontSize: "0.95rem", lineHeight: 1.5 }}>
+          Generate a single inspection bundle (ZIP) containing clinical notes, care plans as readable text files, and
+          organisation policy/evidence documents for the selected patient and organisation.
+        </p>
       </header>
 
-      {incidents.length === 0 ? (
-        <p style={styles.text}>No high-severity incidents recorded for this organisation.</p>
-      ) : (
-        incidents.map((incident) => {
-          const sameDayAudits = auditRows.filter((a) =>
-            isSameDay(a.timestamp, incident.occurredAt)
-          );
-          return (
-            <section key={incident.id} style={styles.incidentSection}>
-              <h2 style={styles.incidentTitle}>{incident.title}</h2>
-              <div style={styles.incidentMetaRow}>
-                <span>
-                  <strong>Severity:</strong> {String(incident.severity || "").toUpperCase()}
-                </span>
-                <span>
-                  <strong>Patient ID:</strong> {incident.patientId || "—"}
-                </span>
-                <span>
-                  <strong>Date/Time:</strong> {formatWhen(incident.occurredAt) || "—"}
-                </span>
-              </div>
+      <section
+        style={{
+          background: "#fff",
+          border: "1px solid #e2e8f0",
+          borderRadius: 12,
+          padding: "1.25rem",
+          marginBottom: 16,
+        }}
+      >
+        <h2 style={{ marginTop: 0, marginBottom: "0.75rem", fontSize: "1rem", fontWeight: 900, color: "#0f172a" }}>
+          Patient
+        </h2>
+        {loadingPatients && <p style={{ margin: 0, color: "#64748b", fontSize: 14 }}>Loading patients…</p>}
+        {patientsError && (
+          <div role="alert" style={{ padding: "0.75rem 1rem", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, color: "#991b1b" }}>
+            {patientsError}
+          </div>
+        )}
+        {!loadingPatients && !patientsError && (
+          <select
+            value={selectedPatientId}
+            onChange={(e) => setSelectedPatientId(e.target.value)}
+            disabled={patients.length === 0}
+            style={{
+              width: "100%",
+              maxWidth: 420,
+              padding: "10px 12px",
+              borderRadius: 8,
+              border: "1px solid #cbd5e1",
+              fontSize: 14,
+            }}
+          >
+            {patients.map((p) => {
+              const name = `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim();
+              return (
+                <option key={p.id} value={p.id}>
+                  {name || p.id}
+                </option>
+              );
+            })}
+          </select>
+        )}
+      </section>
 
-              <div style={styles.regulationBox}>
-                <div style={styles.regulationLabel}>CQC Regulation</div>
-                <div style={styles.regulationText}>{incident.regulation}</div>
-              </div>
-
-              <div style={styles.auditBlock}>
-                <div style={styles.auditHeader}>Same-day audit trail</div>
-                {sameDayAudits.length === 0 ? (
-                  <p style={styles.auditEmpty}>No audit entries recorded on the same day.</p>
-                ) : (
-                  <table style={styles.auditTable}>
-                    <thead>
-                      <tr>
-                        <th style={styles.auditTh}>Time</th>
-                        <th style={styles.auditTh}>Action</th>
-                        <th style={styles.auditTh}>User</th>
-                        <th style={styles.auditTh}>Metadata</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sameDayAudits.map((a) => (
-                        <tr key={a.id}>
-                          <td style={styles.auditTd}>{formatTime(a.timestamp) || "—"}</td>
-                          <td style={styles.auditTd}>{a.action || "—"}</td>
-                          <td style={styles.auditTd}>{a.userEmail || "—"}</td>
-                          <td style={styles.auditTd}>{renderMetadata(a.metadata)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-
-              <div style={styles.inspectorNotes}>
-                <label style={styles.textareaLabel}>
-                  Management Response/Actions Taken
-                </label>
-                <textarea style={styles.textarea} rows={4} />
-              </div>
-            </section>
-          );
-        })
+      {error && (
+        <div role="alert" style={{ marginBottom: 16, padding: "0.75rem 1rem", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 12, color: "#991b1b" }}>
+          {error}
+        </div>
       )}
+
+      {lastSummary && (
+        <div
+          role="status"
+          style={{
+            marginBottom: 16,
+            padding: "0.75rem 1rem",
+            background: "#ecfdf5",
+            border: "1px solid #6ee7b7",
+            borderRadius: 12,
+            color: "#065f46",
+            fontSize: 14,
+          }}
+        >
+          <strong style={{ display: "block", marginBottom: 6 }}>Download started: {lastSummary.filename}</strong>
+          <span style={{ display: "block", fontSize: 13 }}>
+            Folder inside ZIP: {lastSummary.rootFolderName}
+          </span>
+          <span style={{ display: "block", fontSize: 13, marginTop: 4 }}>
+            Included: {lastSummary.counts.notes} note(s), {lastSummary.counts.carePlans} care plan(s), up to{" "}
+            {lastSummary.counts.documents} organisation document(s).
+          </span>
+        </div>
+      )}
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+        <button
+          type="button"
+          onClick={handleGenerateBundle}
+          disabled={generating || loadingPatients || !selectedPatientId || patients.length === 0}
+          style={{
+            padding: "12px 20px",
+            borderRadius: 10,
+            border: "none",
+            background: generating ? "#94a3b8" : "#0f172a",
+            color: "#fff",
+            fontWeight: 900,
+            fontSize: 15,
+            cursor: generating || loadingPatients ? "default" : "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
+          {generating ? (
+            <>
+              <span
+                style={{
+                  width: 18,
+                  height: 18,
+                  borderRadius: "50%",
+                  border: "2px solid rgba(255,255,255,0.5)",
+                  borderTopColor: "#fff",
+                  animation: "cqcSpin 0.85s linear infinite",
+                }}
+              />
+              Building bundle…
+            </>
+          ) : (
+            "Generate Inspection Bundle"
+          )}
+        </button>
+      </div>
+
+      <section style={{ marginTop: "2rem", paddingTop: "1.25rem", borderTop: "1px solid #e2e8f0" }}>
+        <h3 style={{ marginTop: 0, fontSize: "0.95rem", fontWeight: 900, color: "#334155" }}>What is included</h3>
+        <ul style={{ margin: 0, paddingLeft: "1.25rem", color: "#475569", fontSize: 14, lineHeight: 1.6 }}>
+          <li>
+            <strong>clinical_notes/</strong> — one <code>.txt</code> per note (category, author, content).
+          </li>
+          <li>
+            <strong>care_plans/</strong> — AI drafts and structured plans as readable <code>.txt</code> (not binary PDF).
+          </li>
+          <li>
+            <strong>organisation_documents/</strong> — files from your organisation policy/evidence libraries (same org as
+            the patient context).
+          </li>
+          <li>
+            <strong>README.txt</strong> — manifest and generation metadata at the root of the folder inside the ZIP.
+          </li>
+        </ul>
+        <p style={{ margin: "1rem 0 0 0", fontSize: 13, color: "#92400e", fontWeight: 700 }}>
+          Confidential: handle per GDPR and organisational information governance. Suitable for CQC evidence when
+          redaction and consent requirements are met.
+        </p>
+      </section>
     </div>
   );
 }
-
-function formatWhen(value) {
-  if (!value) return "";
-  if (typeof value?.toDate === "function") {
-    try {
-      return value.toDate().toLocaleString();
-    } catch {
-      return "";
-    }
-  }
-  const d = value instanceof Date ? value : new Date(value);
-  // eslint-disable-next-line no-restricted-globals
-  if (isNaN(d.getTime())) return "";
-  return d.toLocaleString();
-}
-
-function formatTime(value) {
-  if (!value) return "";
-  if (typeof value?.toDate === "function") {
-    try {
-      return value.toDate().toLocaleTimeString();
-    } catch {
-      return "";
-    }
-  }
-  const d = value instanceof Date ? value : new Date(value);
-  // eslint-disable-next-line no-restricted-globals
-  if (isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString();
-}
-
-function isSameDay(a, b) {
-  if (!a || !b) return false;
-  const da = a instanceof Date ? a : typeof a?.toDate === "function" ? a.toDate() : new Date(a);
-  const db = b instanceof Date ? b : typeof b?.toDate === "function" ? b.toDate() : new Date(b);
-  // eslint-disable-next-line no-restricted-globals
-  if (isNaN(da.getTime()) || isNaN(db.getTime())) return false;
-  return (
-    da.getFullYear() === db.getFullYear() &&
-    da.getMonth() === db.getMonth() &&
-    da.getDate() === db.getDate()
-  );
-}
-
-function renderMetadata(meta) {
-  if (!meta || typeof meta !== "object") return "—";
-  const entries = Object.entries(meta);
-  if (entries.length === 0) return "—";
-  return entries
-    .map(([key, value]) => `${key}: ${String(value)}`)
-    .join(" · ");
-}
-
-function guessRegulation(x) {
-  const title = (x.title ?? x.type ?? "").toString().toLowerCase();
-  const desc = (x.description ?? "").toString().toLowerCase();
-  const combined = `${title} ${desc}`;
-
-  if (combined.includes("medication") || combined.includes("overdose")) {
-    return "Regulation 12: Safe care and treatment (medication safety).";
-  }
-  if (
-    combined.includes("governance") ||
-    combined.includes("audit") ||
-    combined.includes("policy")
-  ) {
-    return "Regulation 17: Good governance (records, audit, and oversight).";
-  }
-  if (
-    combined.includes("fall") ||
-    combined.includes("injury") ||
-    combined.includes("environment")
-  ) {
-    return "Regulation 12: Safe care and treatment (environmental risks).";
-  }
-  return "Regulation 17: Good governance.";
-}
-
-const printCss = `
-/* Hidden by default; shown only for printing. */
-.print-only {
-  display: none;
-}
-
-@page {
-  size: A4;
-  margin: 10mm;
-}
-@media print {
-  body {
-    margin: 0;
-    background: #fff;
-  }
-  .no-print {
-    display: none !important;
-  }
-  .top-nav {
-    display: none !important;
-  }
-
-  /* Hide sidebar + any global layout header. */
-  aside[role="complementary"],
-  aside,
-  header {
-    display: none !important;
-  }
-
-  .evidence-pack-root {
-    padding: 0 !important;
-    max-width: none !important;
-    width: 210mm !important;
-    margin: 0 !important;
-    font-size: 12pt !important;
-  }
-
-  .print-only {
-    display: block !important;
-    page-break-after: avoid;
-    margin-bottom: 6mm;
-  }
-}
-`;
-
-const styles = {
-  container: {
-    maxWidth: 900,
-    margin: "0 auto",
-    fontFamily: "serif",
-    padding: 16,
-    backgroundColor: "#ffffff",
-  },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  title: {
-    margin: 0,
-    fontSize: "1.6rem",
-    fontWeight: 800,
-    color: "#111827",
-  },
-  subtitle: {
-    margin: 0,
-    fontSize: "0.9rem",
-    color: "#4b5563",
-  },
-  printButton: {
-    padding: "8px 16px",
-    borderRadius: 6,
-    border: "1px solid #0f172a",
-    backgroundColor: "#111827",
-    color: "#ffffff",
-    fontSize: "0.9rem",
-    fontWeight: 600,
-    cursor: "pointer",
-  },
-  incidentSection: {
-    marginBottom: 24,
-    paddingBottom: 16,
-    borderBottom: "1px solid #e5e7eb",
-  },
-  incidentTitle: {
-    margin: "0 0 4px 0",
-    fontSize: "1.1rem",
-    fontWeight: 700,
-    color: "#111827",
-  },
-  incidentMetaRow: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: 12,
-    fontSize: "0.85rem",
-    color: "#4b5563",
-    marginBottom: 8,
-  },
-  regulationBox: {
-    borderLeft: "4px solid #2563eb",
-    paddingLeft: 10,
-    marginBottom: 10,
-  },
-  regulationLabel: {
-    fontSize: "0.75rem",
-    textTransform: "uppercase",
-    letterSpacing: "0.05em",
-    color: "#6b7280",
-  },
-  regulationText: {
-    fontSize: "0.9rem",
-    color: "#111827",
-  },
-  auditBlock: {
-    marginTop: 8,
-  },
-  auditHeader: {
-    fontSize: "0.9rem",
-    fontWeight: 700,
-    marginBottom: 4,
-    color: "#111827",
-  },
-  auditEmpty: {
-    fontSize: "0.85rem",
-    color: "#4b5563",
-  },
-  auditTable: {
-    width: "100%",
-    borderCollapse: "collapse",
-    fontSize: "0.8rem",
-  },
-  auditTh: {
-    textAlign: "left",
-    padding: "6px 8px",
-    borderBottom: "1px solid #e5e7eb",
-    backgroundColor: "#f9fafb",
-  },
-  auditTd: {
-    padding: "6px 8px",
-    borderBottom: "1px solid #f3f4f6",
-  },
-  text: {
-    fontFamily: "sans-serif",
-    color: "#374151",
-  },
-  errorBox: {
-    padding: 14,
-    borderRadius: 12,
-    border: "1px solid #fecaca",
-    backgroundColor: "#fef2f2",
-    color: "#7f1d1d",
-    fontFamily: "sans-serif",
-  },
-  errorTitle: {
-    fontWeight: 900,
-    marginBottom: 4,
-  },
-  errorText: {
-    fontSize: 13,
-  },
-  printHeader: {
-    marginBottom: 12,
-  },
-  printConfidential: {
-    fontWeight: 900,
-    fontSize: 14,
-    color: "#111827",
-    marginBottom: 4,
-    letterSpacing: "0.01em",
-  },
-  printOrgId: {
-    fontWeight: 800,
-    fontSize: 12,
-    color: "#111827",
-  },
-  inspectorNotes: {
-    marginTop: 12,
-    paddingTop: 10,
-    borderTop: "1px dashed #cbd5e1",
-  },
-  textareaLabel: {
-    display: "block",
-    fontSize: 12,
-    fontWeight: 900,
-    color: "#111827",
-    marginBottom: 6,
-  },
-  textarea: {
-    width: "100%",
-    borderRadius: 6,
-    border: "1px solid #cbd5e1",
-    padding: 10,
-    fontSize: 12,
-    resize: "vertical",
-  },
-};
-
