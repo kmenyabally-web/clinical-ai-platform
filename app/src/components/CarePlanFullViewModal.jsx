@@ -4,12 +4,13 @@ import remarkGfm from "remark-gfm";
 import { useReactToPrint } from "react-to-print";
 
 const CLINICAL_DISCLAIMER =
-  "AI-generated content. This draft must be reviewed, amended as clinically appropriate, and signed off by a qualified clinician before use in care delivery. Not for use as the sole basis for clinical decisions.";
+  "AI-generated draft. This document must be reviewed, amended as clinically appropriate, and signed off by a qualified clinician before use in care delivery. It must not be used as the sole basis for clinical decisions.";
 
 const mdComponents = {
   h1: (props) => (
     <h1
       style={{
+        fontFamily: "system-ui, 'Segoe UI', sans-serif",
         fontSize: "1.35rem",
         marginTop: "1.25rem",
         marginBottom: "0.5rem",
@@ -23,6 +24,7 @@ const mdComponents = {
   h2: (props) => (
     <h2
       style={{
+        fontFamily: "system-ui, 'Segoe UI', sans-serif",
         fontSize: "1.15rem",
         marginTop: "1rem",
         marginBottom: "0.45rem",
@@ -36,6 +38,7 @@ const mdComponents = {
   h3: (props) => (
     <h3
       style={{
+        fontFamily: "system-ui, 'Segoe UI', sans-serif",
         fontSize: "1.05rem",
         marginTop: "0.85rem",
         marginBottom: "0.35rem",
@@ -46,10 +49,16 @@ const mdComponents = {
       {...props}
     />
   ),
-  p: (props) => <p style={{ margin: "0.5rem 0", lineHeight: 1.55, color: "#334155" }} {...props} />,
-  ul: (props) => <ul style={{ margin: "0.5rem 0", paddingLeft: "1.35rem" }} {...props} />,
-  ol: (props) => <ol style={{ margin: "0.5rem 0", paddingLeft: "1.35rem" }} {...props} />,
-  li: (props) => <li style={{ margin: "0.25rem 0", lineHeight: 1.5, color: "#334155" }} {...props} />,
+  p: (props) => <p style={{ margin: "0.5rem 0", lineHeight: 1.6, color: "#334155" }} {...props} />,
+  ul: (props) => (
+    <ul style={{ margin: "0.5rem 0", paddingLeft: "1.35rem", listStyleType: "disc" }} {...props} />
+  ),
+  ol: (props) => (
+    <ol style={{ margin: "0.5rem 0", paddingLeft: "1.35rem", listStyleType: "decimal" }} {...props} />
+  ),
+  li: (props) => (
+    <li style={{ margin: "0.3rem 0", lineHeight: 1.55, color: "#334155", display: "list-item" }} {...props} />
+  ),
   strong: (props) => <strong style={{ fontWeight: 700, color: "#0f172a" }} {...props} />,
   hr: () => <hr style={{ border: "none", borderTop: "1px solid #e2e8f0", margin: "1rem 0" }} />,
   blockquote: (props) => (
@@ -102,6 +111,46 @@ const mdComponents = {
       </code>
     );
   },
+  table: (props) => (
+    <div style={{ overflowX: "auto", margin: "1rem 0" }}>
+      <table
+        style={{
+          width: "100%",
+          borderCollapse: "collapse",
+          fontSize: 13,
+          border: "1px solid #e2e8f0",
+          borderRadius: 8,
+        }}
+        {...props}
+      />
+    </div>
+  ),
+  thead: (props) => <thead style={{ background: "#f8fafc" }} {...props} />,
+  th: (props) => (
+    <th
+      style={{
+        textAlign: "left",
+        padding: "10px 12px",
+        borderBottom: "1px solid #e2e8f0",
+        fontWeight: 800,
+        color: "#0f172a",
+      }}
+      {...props}
+    />
+  ),
+  td: (props) => (
+    <td
+      style={{
+        padding: "8px 12px",
+        borderBottom: "1px solid #f1f5f9",
+        color: "#334155",
+        verticalAlign: "top",
+      }}
+      {...props}
+    />
+  ),
+  tr: (props) => <tr {...props} />,
+  tbody: (props) => <tbody {...props} />,
 };
 
 const btnBase = {
@@ -190,7 +239,7 @@ export function CarePlanFullViewModal({ open, onClose, patientName, generatedAtL
           }}
         >
           <h2 id="cqc-care-plan-modal-title" style={{ margin: 0, fontSize: "1.05rem", fontWeight: 900, color: "#0f172a" }}>
-            Full care plan
+            Care plan — full view
           </h2>
           <button
             type="button"
@@ -225,7 +274,14 @@ export function CarePlanFullViewModal({ open, onClose, patientName, generatedAtL
               </p>
             </header>
 
-            <div style={{ fontSize: 14 }}>
+            <div
+              className="cqc-care-plan-markdown"
+              style={{
+                fontSize: 14,
+                fontFamily: "Georgia, 'Times New Roman', serif",
+                color: "#1e293b",
+              }}
+            >
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
                 {planContent || ""}
               </ReactMarkdown>
@@ -243,7 +299,7 @@ export function CarePlanFullViewModal({ open, onClose, patientName, generatedAtL
               }}
             >
               <p style={{ margin: 0, fontSize: 12, fontWeight: 900, color: "#92400e", letterSpacing: "0.02em" }}>
-                Clinical disclaimer
+                Clinical disclaimer (AI-generated draft)
               </p>
               <p style={{ margin: "0.45rem 0 0 0", fontSize: 13, lineHeight: 1.5, color: "#78350f" }}>{CLINICAL_DISCLAIMER}</p>
             </footer>
@@ -272,7 +328,7 @@ export function CarePlanFullViewModal({ open, onClose, patientName, generatedAtL
               color: "#fff",
             }}
           >
-            Print to PDF
+            Print Plan
           </button>
           <button
             type="button"

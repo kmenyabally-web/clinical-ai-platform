@@ -44,7 +44,7 @@ export default function CarePlans() {
   const [recentLoading, setRecentLoading] = useState(false);
   const [recentError, setRecentError] = useState(null);
 
-  const [fullViewPlan, setFullViewPlan] = useState(null);
+  const [selectedPlan, setSelectedPlan] = useState(null);
 
   const selectedPatient = useMemo(
     () => patients.find((p) => p.id === selectedPatientId) ?? null,
@@ -104,7 +104,7 @@ export default function CarePlans() {
   }, [loadRecentCarePlans]);
 
   useEffect(() => {
-    setFullViewPlan(null);
+    setSelectedPlan(null);
   }, [selectedPatientId]);
 
   async function handleGenerate() {
@@ -408,7 +408,7 @@ export default function CarePlans() {
                     <div style={{ fontSize: 12, fontWeight: 800, color: "#475569" }}>{formatSavedAt(plan.createdAt)}</div>
                     <button
                       type="button"
-                      onClick={() => setFullViewPlan(plan)}
+                      onClick={() => setSelectedPlan(plan)}
                       style={{
                         padding: "8px 12px",
                         borderRadius: 8,
@@ -446,15 +446,15 @@ export default function CarePlans() {
       </section>
 
       <CarePlanFullViewModal
-        open={fullViewPlan != null}
-        onClose={() => setFullViewPlan(null)}
+        open={selectedPlan != null}
+        onClose={() => setSelectedPlan(null)}
         patientName={
           selectedPatient
             ? `${selectedPatient.firstName ?? ""} ${selectedPatient.lastName ?? ""}`.trim() || "Patient"
             : "Patient"
         }
-        generatedAtLabel={fullViewPlan ? formatSavedAt(fullViewPlan.createdAt) : "—"}
-        planContent={fullViewPlan?.content ?? ""}
+        generatedAtLabel={selectedPlan ? formatSavedAt(selectedPlan.createdAt) : "—"}
+        planContent={selectedPlan?.content ?? ""}
       />
     </div>
   );
