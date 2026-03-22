@@ -2,13 +2,15 @@
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+const GEMINI_MODEL =
+  (import.meta.env.VITE_GEMINI_MODEL && String(import.meta.env.VITE_GEMINI_MODEL).trim()) ||
+  "gemini-2.5-flash";
 
 function requireApiKey() {
-  if (!apiKey || typeof apiKey !== "string" || !apiKey.trim()) {
+  const key = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!key || typeof key !== "string" || !key.trim()) {
     throw new Error("Missing VITE_GEMINI_API_KEY. Add it to your .env file.");
   }
-  return apiKey.trim();
 }
 
 const SYSTEM_PROMPT =
@@ -44,9 +46,9 @@ function buildPrompt(details) {
 }
 
 export async function generateClinicalCarePlan(details) {
-  const key = requireApiKey();
-  const genAI = new GoogleGenerativeAI(key);
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  requireApiKey();
+  const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
   const prompt = buildPrompt(details);
   const result = await model.generateContent(prompt);
@@ -58,3 +60,10 @@ export async function generateClinicalCarePlan(details) {
   return text.trim();
 }
 
+export async function generateCarePlanDraft(patientName, observations) {
+  return generateClinicalCarePlan({
+    patientName,
+    patientDob: "",
+    keyObservationsRisks: observations ?? "",
+  });
+}

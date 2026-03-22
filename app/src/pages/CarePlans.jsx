@@ -1,70 +1,28 @@
 /** [ENABLEMENT GATE: STAGE 12 - AI CARE PLAN GENERATOR] */
 
-import React, { useEffect, useMemo, useState } from "react";
-import { createCarePlanRecord } from "../services/carePlanManagementService";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  listAiCarePlanDraftsForPatient,
+  saveAiCarePlanDraft,
+} from "../services/carePlanManagementService";
 import { listPatients } from "../services/patientService";
-import { generateClinicalCarePlan } from "../services/aiService";
+import { generateCarePlanDraft } from "../services/aiService";
 import { getUserContext } from "../services/authService";
 import { useService } from "../context/ServiceContext";
-import { useAuth } from "../context/AuthContext";
+import { CarePlanFullViewModal } from "../components/CarePlanFullViewModal";
 
-function escapeRegExp(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function extractSectionText(text, heading) {
-  if (!text) return "";
-  const h = escapeRegExp(heading);
-  // Expect headings like: "## Personal Preferences" (preferred by our prompt).
-  const re = new RegExp(
-    `(?:^|\\n)#{1,3}\\s*${h}\\s*(?:\\n|\\r\\n)([\\s\\S]*?)(?=(?:\\n#{1,3}\\s*[^\\n]+\\s*)|$)`,
-    "m"
-  );
-  const m = text.match(re);
-  if (m?.[1]) return m[1].trim();
-
-  // Fallback: heading line without Markdown hashes.
-  const re2 = new RegExp(`(?:^|\\n)${h}\\s*(?:\\n|\\r\\n)([\\s\\S]*?)(?=(?:\\n[^\\n]+\\s*\\n?)|$)`, "m");
-  const m2 = text.match(re2);
-  return (m2?.[1] ?? "").trim();
-}
-
-function parseCarePlanSections(editedText) {
-  const sections = {
-    personalPreferences: "",
-    riskMitigation: "",
-    mobilitySupport: "",
-    nutritionHydration: "",
-  };
-
-  sections.personalPreferences = extractSectionText(editedText, "Personal Preferences");
-  sections.riskMitigation = extractSectionText(editedText, "Risk Mitigation");
-  sections.mobilitySupport = extractSectionText(editedText, "Mobility Support");
-  sections.nutritionHydration = extractSectionText(editedText, "Nutrition/Hydration");
-
-  const hasAny =
-    Boolean(sections.personalPreferences) ||
-    Boolean(sections.riskMitigation) ||
-    Boolean(sections.mobilitySupport) ||
-    Boolean(sections.nutritionHydration);
-
-  if (!hasAny) {
-    return {
-      careNeeds: editedText.trim(),
-      riskAssessment: "",
-      supportStrategies: "",
-    };
+function formatSavedAt(createdAt) {
+  if (!createdAt) return "—";
+  try {
+    const d = typeof createdAt.toDate === "function" ? createdAt.toDate() : new Date(createdAt);
+    if (Number.isNaN(d.getTime())) return "—";
+    return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  } catch {
+    return "—";
   }
-
-  return {
-    careNeeds: sections.personalPreferences,
-    riskAssessment: sections.riskMitigation,
-    supportStrategies: [sections.mobilitySupport, sections.nutritionHydration].filter(Boolean).join("\n\n"),
-  };
 }
 
 export default function CarePlans() {
-  const { user } = useAuth();
   const { currentServiceId } = useService();
 
   const [patients, setPatients] = useState([]);
@@ -82,10 +40,35 @@ export default function CarePlans() {
   const [saveError, setSaveError] = useState(null);
   const [saveSuccess, setSaveSuccess] = useState(null);
 
+  const [recentPlans, setRecentPlans] = useState([]);
+  const [recentLoading, setRecentLoading] = useState(false);
+  const [recentError, setRecentError] = useState(null);
+
+  const [fullViewPlan, setFullViewPlan] = useState(null);
+
   const selectedPatient = useMemo(
     () => patients.find((p) => p.id === selectedPatientId) ?? null,
     [patients, selectedPatientId]
   );
+
+  const loadRecentCarePlans = useCallback(async () => {
+    if (!selectedPatientId) {
+      setRecentPlans([]);
+      return;
+    }
+    setRecentLoading(true);
+    setRecentError(null);
+    try {
+      const { organisationId } = await getUserContext();
+      const list = await listAiCarePlanDraftsForPatient(organisationId || "dev-org-001", selectedPatientId);
+      setRecentPlans(Array.isArray(list) ? list : []);
+    } catch (err) {
+      setRecentError(err?.message ?? "Failed to load saved plans.");
+      setRecentPlans([]);
+    } finally {
+      setRecentLoading(false);
+    }
+  }, [selectedPatientId]);
 
   useEffect(() => {
     let mounted = true;
@@ -101,8 +84,7 @@ export default function CarePlans() {
         setPatientsError(err?.message ?? "Failed to load patients.");
         setPatients([]);
       } finally {
-        if (!mounted) return;
-        setPatientsLoading(false);
+        if (mounted) setPatientsLoading(false);
       }
     }
     loadPatients();
@@ -116,6 +98,14 @@ export default function CarePlans() {
       setSelectedPatientId(patients[0].id ?? "");
     }
   }, [patients, selectedPatientId]);
+
+  useEffect(() => {
+    loadRecentCarePlans();
+  }, [loadRecentCarePlans]);
+
+  useEffect(() => {
+    setFullViewPlan(null);
+  }, [selectedPatientId]);
 
   async function handleGenerate() {
     setSaveError(null);
@@ -131,12 +121,11 @@ export default function CarePlans() {
     try {
       const fullName = `${selectedPatient.firstName ?? ""} ${selectedPatient.lastName ?? ""}`.trim();
       const dob = selectedPatient.dob ? String(selectedPatient.dob) : "";
+      const observations = [dob ? `DOB: ${dob}` : null, keyObservationsRisks]
+        .filter(Boolean)
+        .join("\n\n");
 
-      const text = await generateClinicalCarePlan({
-        patientName: fullName || "Patient",
-        patientDob: dob,
-        keyObservationsRisks,
-      });
+      const text = await generateCarePlanDraft(fullName || "Patient", observations);
 
       setGeneratedText(text);
       setEditedText(text);
@@ -154,7 +143,8 @@ export default function CarePlans() {
     setSaveSuccess(null);
 
     if (!selectedPatient) return;
-    if (!editedText.trim()) {
+    const generatedPlan = editedText.trim();
+    if (!generatedPlan) {
       setSaveError("Nothing to save yet. Generate a draft first.");
       return;
     }
@@ -162,25 +152,15 @@ export default function CarePlans() {
     setSaveLoading(true);
     try {
       const { organisationId } = await getUserContext();
-      const createdBy = user?.email || user?.uid || "Unknown";
-
-      const { careNeeds, riskAssessment, supportStrategies } = parseCarePlanSections(editedText);
-      const title = `AI Care Plan Draft - ${selectedPatient.firstName ?? "Patient"} ${selectedPatient.lastName ?? ""}`.trim();
-
-      await createCarePlanRecord({
-        organisationId,
-        serviceId: currentServiceId ?? null,
+      await saveAiCarePlanDraft({
         patientId: selectedPatient.id,
-        careNeeds,
-        riskAssessment,
-        supportStrategies,
-        reviewDate: null,
-        createdBy,
+        content: generatedPlan,
+        organisationId: organisationId || "dev-org-001",
       });
-
-      setSaveSuccess("Draft saved to care plans. Please review and sign off.");
+      setSaveSuccess("Saved to patient record.");
+      await loadRecentCarePlans();
     } catch (err) {
-      setSaveError(err?.message ?? "Failed to save care plan draft.");
+      setSaveError(err?.message ?? "Failed to save care plan.");
     } finally {
       setSaveLoading(false);
     }
@@ -323,7 +303,7 @@ export default function CarePlans() {
       >
         <h2 style={{ fontSize: "1rem", marginTop: 0, marginBottom: "0.5rem" }}>Document Preview</h2>
         <p style={{ marginTop: 0, color: "#64748b", fontSize: "0.85rem", fontWeight: 800 }}>
-          You can edit the draft before saving to care plans.
+          You can edit the draft before saving to the patient record.
         </p>
 
         <textarea
@@ -348,7 +328,7 @@ export default function CarePlans() {
           <button
             type="button"
             onClick={handleSave}
-            disabled={!editedText.trim() || saveLoading || generating}
+            disabled={!generatedText?.trim() || saveLoading || generating}
             style={{
               padding: "10px 14px",
               background: "#16a34a",
@@ -360,7 +340,7 @@ export default function CarePlans() {
               opacity: saveLoading ? 0.75 : 1,
             }}
           >
-            {saveLoading ? "Saving…" : "Save to Care Plans"}
+            {saveLoading ? "Saving…" : "Save to Patient Record"}
           </button>
         </div>
 
@@ -370,7 +350,112 @@ export default function CarePlans() {
           </p>
         </div>
       </section>
+
+      <section
+        style={{
+          background: "#ffffff",
+          border: "1px solid #e2e8f0",
+          borderRadius: 12,
+          padding: "1.25rem",
+          marginBottom: 16,
+        }}
+      >
+        <h2 style={{ fontSize: "1rem", marginTop: 0, marginBottom: "0.5rem" }}>Recent Care Plans</h2>
+        <p style={{ marginTop: 0, color: "#64748b", fontSize: "0.85rem", fontWeight: 700 }}>
+          Saved AI drafts for the selected patient (Firestore <code style={{ fontSize: 12 }}>care_plans</code>, status{" "}
+          <code style={{ fontSize: 12 }}>draft</code>).
+        </p>
+
+        {recentLoading && (
+          <p style={{ margin: "0.75rem 0 0 0", color: "#64748b", fontSize: 13, fontWeight: 700 }}>Loading saved plans…</p>
+        )}
+
+        {recentError && (
+          <div role="alert" style={{ marginTop: 12, padding: "0.75rem 1rem", background: "#ffebee", border: "1px solid #ef9a9a", borderRadius: 12, color: "#b71c1c" }}>
+            {recentError}
+          </div>
+        )}
+
+        {!recentLoading && !recentError && selectedPatientId && recentPlans.length === 0 && (
+          <p style={{ margin: "0.75rem 0 0 0", color: "#64748b", fontSize: 13 }}>No saved drafts for this patient yet.</p>
+        )}
+
+        {!recentLoading && recentPlans.length > 0 && (
+          <ul style={{ listStyle: "none", margin: "12px 0 0 0", padding: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+            {recentPlans.map((plan) => {
+              const excerpt = (plan.content ?? "").trim().slice(0, 280);
+              const more = (plan.content ?? "").trim().length > 280 ? "…" : "";
+              return (
+                <li
+                  key={plan.id}
+                  style={{
+                    border: "1px solid #e2e8f0",
+                    borderRadius: 10,
+                    padding: "12px 14px",
+                    background: "#f8fafc",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      alignItems: "flex-start",
+                      justifyContent: "space-between",
+                      gap: 10,
+                      marginBottom: 8,
+                    }}
+                  >
+                    <div style={{ fontSize: 12, fontWeight: 800, color: "#475569" }}>{formatSavedAt(plan.createdAt)}</div>
+                    <button
+                      type="button"
+                      onClick={() => setFullViewPlan(plan)}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        border: "1px solid #005eb8",
+                        background: "#fff",
+                        color: "#005eb8",
+                        fontWeight: 900,
+                        fontSize: 12,
+                        cursor: "pointer",
+                        flexShrink: 0,
+                      }}
+                    >
+                      View Full Plan
+                    </button>
+                  </div>
+                  <pre
+                    style={{
+                      margin: 0,
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                      fontFamily: "inherit",
+                      fontSize: 13,
+                      lineHeight: 1.45,
+                      color: "#1e293b",
+                    }}
+                  >
+                    {excerpt}
+                    {more}
+                  </pre>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <CarePlanFullViewModal
+        open={fullViewPlan != null}
+        onClose={() => setFullViewPlan(null)}
+        patientName={
+          selectedPatient
+            ? `${selectedPatient.firstName ?? ""} ${selectedPatient.lastName ?? ""}`.trim() || "Patient"
+            : "Patient"
+        }
+        generatedAtLabel={fullViewPlan ? formatSavedAt(fullViewPlan.createdAt) : "—"}
+        planContent={fullViewPlan?.content ?? ""}
+      />
     </div>
   );
 }
-
