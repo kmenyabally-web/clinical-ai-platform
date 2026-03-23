@@ -25,6 +25,9 @@ import EvidencePack from "./pages/EvidencePack";
 import ClinicalNotes from "./pages/ClinicalNotes";
 import Documents from "./pages/Documents";
 import CarePlans from "./pages/CarePlans";
+import Incidents from "./pages/Incidents";
+import ComplianceOverview from "./pages/ComplianceOverview";
+import InspectionSimulation from "./pages/InspectionSimulation";
 
 export default function App() {
   return (
@@ -46,9 +49,12 @@ export default function App() {
           <Route path="/patients/:id" element={<PatientDetail />} />
           <Route path="/patients/:id/report-incident" element={<IncidentReportPage />} />
           <Route path="/incidents/new/:patientId" element={<IncidentFormPage />} />
+          <Route path="/incidents" element={<Incidents />} />
           <Route path="/clinical-notes" element={<ClinicalNotes />} />
           <Route path="/documents" element={<Documents />} />
           <Route path="/care-plans" element={<CarePlans />} />
+          <Route path="/compliance" element={<ComplianceOverview />} />
+          <Route path="/inspection-simulation" element={<InspectionSimulation />} />
           <Route path="/audit-log" element={<AuditLog />} />
           <Route path="/evidence-pack" element={<EvidencePack />} />
         </Route>

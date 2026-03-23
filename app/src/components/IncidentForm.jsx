@@ -227,7 +227,7 @@ export default function IncidentForm({ onSubmit, loading, legacy = false, initia
         <textarea
           id="incident-description"
           required
-          rows={3}
+          rows={6}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           style={{ ...inputStyle, resize: "vertical" }}
