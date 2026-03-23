@@ -65,8 +65,11 @@ export default function IncidentReportPage() {
 
 const styles = {
   container: {
-    maxWidth: 900,
+    width: "100%",
+    maxWidth: 1100,
     margin: "0 auto",
+    padding: "0 4px",
+    boxSizing: "border-box",
     fontFamily: "sans-serif",
   },
   headerRow: {
@@ -94,7 +97,7 @@ const styles = {
     backgroundColor: "#ffffff",
     border: "1px solid #e2e8f0",
     borderRadius: 12,
-    padding: 14,
+    padding: "1.5rem 1.75rem",
   },
   backLink: {
     textDecoration: "none",

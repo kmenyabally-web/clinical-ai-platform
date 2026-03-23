@@ -6,10 +6,11 @@ import { createIncident } from "../services/incidentService";
 
 const inputStyle = {
   width: "100%",
-  padding: "8px 12px",
-  borderRadius: 6,
+  padding: "10px 14px",
+  borderRadius: 8,
   border: "1px solid #cbd5e1",
-  fontSize: "14px",
+  fontSize: "15px",
+  boxSizing: "border-box",
 };
 
 export default function IncidentFormPage() {
@@ -53,7 +54,16 @@ export default function IncidentFormPage() {
   }
 
   return (
-    <div style={{ maxWidth: 720, margin: "0 auto", fontFamily: "sans-serif" }}>
+    <div
+      style={{
+        width: "100%",
+        maxWidth: 1100,
+        margin: "0 auto",
+        padding: "0 4px",
+        boxSizing: "border-box",
+        fontFamily: "sans-serif",
+      }}
+    >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
         <h2 style={{ margin: "8px 0 14px 0" }}>Report New Incident</h2>
         <span
@@ -108,7 +118,15 @@ export default function IncidentFormPage() {
         </div>
       ) : null}
 
-      <form onSubmit={handleSubmit} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
+      <form
+        onSubmit={handleSubmit}
+        style={{
+          background: "#fff",
+          border: "1px solid #e2e8f0",
+          borderRadius: 12,
+          padding: "1.5rem 1.75rem 1.75rem",
+        }}
+      >
         <div style={{ marginBottom: "0.75rem" }}>
           <label htmlFor="inc-title" style={{ display: "block", marginBottom: 4, fontWeight: 600 }}>
             Title *
@@ -167,10 +185,10 @@ export default function IncidentFormPage() {
           <textarea
             id="inc-desc"
             required
-            rows={4}
+            rows={8}
+            style={{ ...inputStyle, resize: "vertical", minHeight: 180 }}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            style={{ ...inputStyle, resize: "vertical" }}
             placeholder="Describe what happened"
           />
         </div>
