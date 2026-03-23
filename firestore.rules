@@ -276,5 +276,22 @@ service cloud.firestore {
         && canWriteInspection();
       allow delete: if false;
     }
+
+    // --- care_plans: structured records (careNeeds/…) or AI draft rows (content + status draft) ---
+    match /care_plans/{planId} {
+      allow read: if isActiveUser() && resource.data.organisationId == userOrgId();
+      allow create: if orgMatch(request.resource.data.organisationId) && canWriteDocuments()
+        && request.resource.data.organisationId is string
+        && request.resource.data.patientId is string
+        && (
+          (request.resource.data.status == 'draft'
+            && request.resource.data.content is string
+            && request.resource.data.content.size() > 0)
+          || request.resource.data.keys().hasAll(['careNeeds', 'riskAssessment', 'supportStrategies', 'createdBy'])
+        );
+      allow update: if orgMatch(resource.data.organisationId) && canWriteDocuments()
+        && request.resource.data.organisationId == resource.data.organisationId;
+      allow delete: if false;
+    }
   }
 }

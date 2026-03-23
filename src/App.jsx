@@ -10,6 +10,8 @@ import Dashboard from "./pages/Dashboard";
 import Actions from "./pages/Actions";
 import Documents from "./pages/Documents";
 import Evidence from "./pages/Evidence";
+import EvidencePack from "./pages/EvidencePack";
+import Incidents from "./pages/Incidents";
 import InspectionSimulation from "./pages/InspectionSimulation";
 import Reports from "./pages/Reports";
 import Notifications from "./pages/Notifications";
@@ -79,6 +81,28 @@ export default function App() {
             <ProtectedRoute>
               <Layout>
                 <Evidence />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/incidents"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <Incidents />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/evidence-pack"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <EvidencePack />
               </Layout>
             </ProtectedRoute>
           }

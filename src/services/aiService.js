@@ -1,0 +1,70 @@
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
+const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+
+// Force the SDK to use the stable v1 endpoint
+const genAI = new GoogleGenerativeAI(API_KEY);
+
+export const generateCarePlanDraft = async (patientName, observations) => {
+  if (!API_KEY) throw new Error("API Key missing from .env");
+
+  try {
+    // We use the model name exactly as required by the stable V1 API
+    const model = genAI.getGenerativeModel({
+      model:
+        (import.meta.env.VITE_GEMINI_MODEL && String(import.meta.env.VITE_GEMINI_MODEL).trim()) ||
+        "gemini-2.5-flash",
+    });
+
+    const prompt = `Draft a CQC Regulation 9 compliant care plan for ${patientName}. Risks: ${observations}`;
+
+    // The SDK version 0.11.0+ uses v1 by default. 
+    // If you are still seeing v1beta in the network tab after 'npm install', 
+    // it means a restart is required.
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    return response.text();
+  } catch (error) {
+    console.error("Clinical AI Error:", error);
+    throw new Error("Could not connect to Clinical Intelligence: " + error.message);
+  }
+};
+
+export const generateIncidentLessons = async (incident) => {
+  if (!API_KEY) throw new Error("API Key missing from .env");
+
+  try {
+    const model = genAI.getGenerativeModel({
+      model:
+        (import.meta.env.VITE_GEMINI_MODEL && String(import.meta.env.VITE_GEMINI_MODEL).trim()) ||
+        "gemini-2.5-flash",
+    });
+
+    const prompt = `
+You are a CQC compliance assistant.
+Review this incident and provide concise "Lessons Learned" and prevention actions aligned to Regulation 17 (Good governance).
+
+Incident details:
+- Type: ${incident?.type ?? "N/A"}
+- Description: ${incident?.description ?? "N/A"}
+- Witnesses: ${incident?.witnesses ?? "N/A"}
+- Immediate actions: ${incident?.immediateActions ?? "N/A"}
+- Location: ${incident?.whereOccurred ?? "N/A"}
+- Time: ${incident?.whenOccurred ?? "N/A"}
+- CQC notified: ${incident?.cqcNotified ? "Yes" : "No"}
+
+Return:
+1) Short root-cause hypothesis
+2) 4-6 lessons learned
+3) 4-6 prevention actions
+4) A 30-day governance follow-up checklist
+`.trim();
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    return response.text();
+  } catch (error) {
+    console.error("Incident AI Review Error:", error);
+    throw new Error("Could not generate incident review: " + error.message);
+  }
+};

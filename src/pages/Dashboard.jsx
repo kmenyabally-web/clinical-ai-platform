@@ -11,6 +11,7 @@ import { useService } from "../context/ServiceContext";
 import { CQC_DOCUMENT_DOMAINS } from "../config/documentDomains";
 import { evaluateAndCreateNotifications } from "../services/notificationService";
 import { fetchEvidence } from "../services/evidenceService";
+import { fetchOpenIncidents } from "../services/incidentService";
 import { calculateReadinessFromEvidence } from "../utils/readinessScore";
 import EmptyState from "../components/EmptyState";
 
@@ -91,6 +92,8 @@ export default function Dashboard() {
 
   const [evidence, setEvidence] = useState([]);
   const [evidenceLoading, setEvidenceLoading] = useState(true);
+  const [openIncidents, setOpenIncidents] = useState([]);
+  const [incidentFeedLoading, setIncidentFeedLoading] = useState(true);
 
   const [metricsLoading, setMetricsLoading] = useState(true);
   const [metrics, setMetrics] = useState({
@@ -116,6 +119,19 @@ export default function Dashboard() {
   useEffect(() => {
     loadEvidence();
   }, [loadEvidence]);
+
+  useEffect(() => {
+    if (!organisationId) {
+      setOpenIncidents([]);
+      setIncidentFeedLoading(false);
+      return;
+    }
+    setIncidentFeedLoading(true);
+    fetchOpenIncidents(organisationId, currentServiceId ?? null)
+      .then((list) => setOpenIncidents(Array.isArray(list) ? list : []))
+      .catch(() => setOpenIncidents([]))
+      .finally(() => setIncidentFeedLoading(false));
+  }, [organisationId, currentServiceId]);
 
   const evidenceReadiness = useMemo(
     () => calculateReadinessFromEvidence(evidence),
@@ -346,6 +362,45 @@ export default function Dashboard() {
               )}
             </>
           )}
+        </section>
+      )}
+
+      {!loading && !error && (
+        <section aria-label="Live incident feed" style={{ marginTop: "1.5rem" }}>
+          <h2 style={{ fontSize: "1.1rem", marginBottom: "0.75rem" }}>Live Incident Feed</h2>
+          {incidentFeedLoading ? (
+            <div style={{ color: "#666", fontSize: "0.9rem" }}>Loading open incidents…</div>
+          ) : openIncidents.length === 0 ? (
+            <div style={{ color: "#555", fontSize: "0.9rem" }}>No open incidents right now.</div>
+          ) : (
+            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+              {openIncidents.map((incident) => (
+                <li
+                  key={incident.id}
+                  style={{
+                    padding: "0.75rem 0.9rem",
+                    border: "1px solid #fee2e2",
+                    background: incident.safeguardingHighPriority ? "#fef2f2" : "#fff",
+                    borderRadius: 8,
+                    marginBottom: 8,
+                  }}
+                >
+                  <div style={{ fontWeight: 600 }}>
+                    {incident.type || "Incident"} {incident.safeguardingHighPriority ? "• High Priority Safeguarding" : ""}
+                  </div>
+                  <div style={{ fontSize: "0.875rem", color: "#555" }}>
+                    Patient: {incident.patientId || "N/A"} · Status: {incident.status || "Open"}
+                  </div>
+                  <div style={{ fontSize: "0.875rem", color: "#555" }}>
+                    {incident.description ? String(incident.description).slice(0, 180) : "No description"}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          <Link to="/incidents" style={{ display: "inline-block", marginTop: "0.5rem", fontWeight: 600 }}>
+            Go to incidents →
+          </Link>
         </section>
       )}
 
