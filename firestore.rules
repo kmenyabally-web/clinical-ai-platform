@@ -286,7 +286,11 @@ service cloud.firestore {
         && request.resource.data.organisationId is string
         && request.resource.data.staffId is string
         && request.resource.data.trainingName is string
-        && request.resource.data.expiryDate is timestamp
+        && (
+          request.resource.data.expiryDate is timestamp
+          || (request.resource.data.expiryDate is string
+              && request.resource.data.expiryDate.matches('^\\d{2}/\\d{2}/\\d{4}$'))
+        )
         && (request.resource.data.get('serviceId', null) == null || canAccessService(request.resource.data.organisationId, request.resource.data.serviceId));
       allow update: if orgMatch(resource.data.organisationId) && canWriteDocuments()
         && request.resource.data.organisationId == resource.data.organisationId

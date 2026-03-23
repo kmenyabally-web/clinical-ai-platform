@@ -1,5 +1,37 @@
+/** Strict UK calendar date: DD/MM/YYYY */
+export function parseUkDateString(value) {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (!text) return null;
+  const m = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return null;
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const year = Number(m[3]);
+  const d = new Date(year, month - 1, day);
+  if (Number.isNaN(d.getTime())) return null;
+  if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null;
+  return d;
+}
+
+/**
+ * Converts HTML date input value (YYYY-MM-DD) to UK string DD/MM/YYYY.
+ * @param {string} isoString
+ * @returns {string|null}
+ */
+export function formatToUKDate(isoString) {
+  if (!isoString || typeof isoString !== "string") return null;
+  const m = isoString.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
 function toDate(value) {
   if (!value) return null;
+  if (typeof value === "string") {
+    const uk = parseUkDateString(value);
+    if (uk) return uk;
+  }
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
   if (typeof value?.toDate === "function") {
     try {
@@ -46,3 +78,5 @@ export function formatUkDateTime(value, fallback = "—", options = {}) {
     ...options,
   });
 }
+
+export { toDate };
