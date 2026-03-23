@@ -16,7 +16,7 @@ export const NAV_ITEMS = [
   { path: "/care-plans", label: "Care Plans", ariaLabel: "Patient care plans", allowedRoles: undefined },
   { path: "/compliance", label: "Compliance", ariaLabel: "CQC compliance scores and risk", allowedRoles: undefined },
   { path: "/evidence-pack", label: "Evidence Pack", ariaLabel: "Inspection evidence pack", allowedRoles: undefined },
-  { path: "/inspection-simulation", label: "Inspection Simulator", ariaLabel: "CQC inspection simulation", allowedRoles: undefined },
+  { path: "/inspection-simulator", label: "Inspection Simulator", ariaLabel: "CQC inspection simulation", allowedRoles: undefined },
   { path: "/audit-log", label: "Audit Log", ariaLabel: "Compliance audit log", allowedRoles: undefined },
   { path: "/admin", label: "Admin", ariaLabel: "Platform admin control panel", platformAdminOnly: true },
 ];

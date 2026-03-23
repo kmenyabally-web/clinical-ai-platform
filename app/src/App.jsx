@@ -27,7 +27,7 @@ import Documents from "./pages/Documents";
 import CarePlans from "./pages/CarePlans";
 import Incidents from "./pages/Incidents";
 import ComplianceOverview from "./pages/ComplianceOverview";
-import InspectionSimulation from "./pages/InspectionSimulation";
+import InspectionSimulator from "./pages/InspectionSimulator";
 
 export default function App() {
   return (
@@ -54,7 +54,8 @@ export default function App() {
           <Route path="/documents" element={<Documents />} />
           <Route path="/care-plans" element={<CarePlans />} />
           <Route path="/compliance" element={<ComplianceOverview />} />
-          <Route path="/inspection-simulation" element={<InspectionSimulation />} />
+          <Route path="/inspection-simulation" element={<InspectionSimulator />} />
+          <Route path="/inspection-simulator" element={<InspectionSimulator />} />
           <Route path="/audit-log" element={<AuditLog />} />
           <Route path="/evidence-pack" element={<EvidencePack />} />
         </Route>
