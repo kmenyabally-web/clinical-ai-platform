@@ -8,9 +8,8 @@ import {
   createStaffTrainingRecord,
   attachCertificateFile,
   computeTrainingStatus,
-  parseUkDateString,
 } from "../services/staffTrainingService";
-import { formatUkDate } from "../utils/dateFormat";
+import { formatUkDate, formatToUKDate, parseUkDateString } from "../utils/dateFormat";
 
 const TRAINING_OPTIONS = [
   "Insulin Support",
@@ -23,17 +22,37 @@ const TRAINING_OPTIONS = [
   "Other",
 ];
 
-function formatExpiry(expiryDate) {
+/** Must match strict UK calendar string before Firestore write */
+const UK_DATE_REGEX = /^(\d{2})\/(\d{2})\/(\d{4})$/;
+
+/** Always show expiry as DD/MM/YYYY in the dashboard table. */
+function formatExpiryDisplay(expiryDate) {
+  if (typeof expiryDate === "string") {
+    const t = expiryDate.trim();
+    if (UK_DATE_REGEX.test(t) && parseUkDateString(t)) return t;
+  }
   return formatUkDate(expiryDate, "—");
 }
 
-function normaliseUkDateInput(value) {
-  const text = String(value ?? "").trim();
-  if (!text) return "";
-  // Support browser date-like input as a convenience and convert to dd/mm/yyyy.
-  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (isoMatch) return `${isoMatch[3]}/${isoMatch[2]}/${isoMatch[1]}`;
-  return text;
+/** Forces DD/MM/YYYY shape as user types (digits + auto-slashes). */
+function maskUkExpiryInput(raw) {
+  const digits = String(raw).replace(/\D/g, "").slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+}
+
+/**
+ * Paste or HTML date picker (YYYY-MM-DD) → DD/MM/YYYY before save.
+ * Manual typing uses the digit mask.
+ */
+function normaliseExpiryInput(value) {
+  const t = String(value ?? "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) {
+    const uk = formatToUKDate(t);
+    return uk || maskUkExpiryInput(t);
+  }
+  return maskUkExpiryInput(t);
 }
 
 function TrafficDot({ status }) {
@@ -110,7 +129,7 @@ export default function StaffTraining() {
     return Array.from(map.values()).sort((a, b) => a.displayName.localeCompare(b.displayName));
   }, [rows]);
 
-  async function handleUploadCertificate(e) {
+  async function handleSave(e) {
     e.preventDefault();
     setFormError(null);
     setFormSuccess(null);
@@ -132,10 +151,9 @@ export default function StaffTraining() {
       setFormError("Expiry date is required.");
       return;
     }
-    const expiryDateUk = normaliseUkDateInput(expiryDate);
-    const parsedExpiry = parseUkDateString(expiryDateUk);
-    if (!parsedExpiry) {
-      setFormError("Expiry date must be in UK format dd/mm/yyyy (e.g. 31/12/2026).");
+    const expiryDateUk = normaliseExpiryInput(expiryDate).trim();
+    if (!UK_DATE_REGEX.test(expiryDateUk) || !parseUkDateString(expiryDateUk)) {
+      setFormError("Please use the UK date format: DD/MM/YYYY.");
       return;
     }
 
@@ -151,7 +169,6 @@ export default function StaffTraining() {
         evidenceUrl: evidenceUrl.trim(),
       });
 
-      const optimisticExpiry = parsedExpiry;
       const optimisticRecord = {
         id,
         organisationId,
@@ -159,8 +176,8 @@ export default function StaffTraining() {
         staffId: staffId.trim(),
         staffName: staffName.trim(),
         trainingName: resolvedTraining,
-        expiryDate: optimisticExpiry,
-        status: computeTrainingStatus(optimisticExpiry),
+        expiryDate: expiryDateUk,
+        status: computeTrainingStatus(expiryDateUk),
         evidenceUrl: evidenceUrl.trim(),
         createdAt: new Date(),
       };
@@ -237,7 +254,7 @@ export default function StaffTraining() {
           to Storage.
         </p>
 
-        <form onSubmit={handleUploadCertificate} style={{ display: "grid", gap: 12, maxWidth: 560 }}>
+        <form onSubmit={handleSave} style={{ display: "grid", gap: 12, maxWidth: 560 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div>
               <label style={{ display: "block", fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Staff ID *</label>
@@ -279,12 +296,34 @@ export default function StaffTraining() {
               <input
                 type="text"
                 value={expiryDate}
-                onChange={(e) => setExpiryDate(normaliseUkDateInput(e.target.value))}
-                placeholder="dd/mm/yyyy"
+                onChange={(e) => setExpiryDate(normaliseExpiryInput(e.target.value))}
+                placeholder="DD/MM/YYYY"
                 inputMode="numeric"
+                autoComplete="off"
+                spellCheck={false}
+                maxLength={10}
+                pattern="^\\d{2}/\\d{2}/\\d{4}$"
+                title="DD/MM/YYYY"
+                aria-describedby="staff-training-expiry-hint"
                 style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1" }}
               />
-              <p style={{ margin: "4px 0 0 0", fontSize: 12, color: "#64748b" }}>Use UK format: dd/mm/yyyy</p>
+              <p id="staff-training-expiry-hint" style={{ margin: "4px 0 0 0", fontSize: 12, color: "#64748b" }}>
+                Type in UK format <strong>DD/MM/YYYY</strong> (slashes added automatically). Invalid dates are rejected on save.
+              </p>
+              <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+                <label style={{ fontSize: 12, fontWeight: 700, color: "#475569" }} htmlFor="staff-training-expiry-picker">
+                  Or pick (calendar)
+                </label>
+                <input
+                  id="staff-training-expiry-picker"
+                  type="date"
+                  onChange={(e) => {
+                    const uk = formatToUKDate(e.target.value);
+                    if (uk) setExpiryDate(uk);
+                  }}
+                  style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #cbd5e1", fontSize: 13 }}
+                />
+              </div>
             </div>
           </div>
 
@@ -396,7 +435,7 @@ export default function StaffTraining() {
                     return (
                       <tr key={r.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
                         <td style={{ padding: "8px 12px", fontWeight: 700 }}>{r.trainingName}</td>
-                        <td style={{ padding: "8px 12px" }}>{formatExpiry(r.expiryDate)}</td>
+                        <td style={{ padding: "8px 12px" }}>{formatExpiryDisplay(r.expiryDate)}</td>
                         <td style={{ padding: "8px 12px" }}>
                           <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                             <TrafficDot status={live} />

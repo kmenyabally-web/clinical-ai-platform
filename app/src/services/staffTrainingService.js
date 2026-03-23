@@ -13,27 +13,14 @@ import {
   serverTimestamp,
   updateDoc,
   doc,
-  Timestamp,
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../firebase";
+import { parseUkDateString } from "../utils/dateFormat";
 
 const COLLECTION = "staff_training";
 
-export function parseUkDateString(value) {
-  if (typeof value !== "string") return null;
-  const text = value.trim();
-  if (!text) return null;
-  const m = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (!m) return null;
-  const day = Number(m[1]);
-  const month = Number(m[2]);
-  const year = Number(m[3]);
-  const d = new Date(year, month - 1, day);
-  if (Number.isNaN(d.getTime())) return null;
-  if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null;
-  return d;
-}
+export { parseUkDateString };
 
 function coerceDate(expiryDate) {
   if (expiryDate == null) return null;
@@ -122,22 +109,32 @@ export function countValidStaffByTraining(records) {
 /**
  * @param {{ organisationId: string, serviceId?: string|null, staffId: string, staffName?: string, trainingName: string, expiryDate: Date|string, evidenceUrl?: string }} payload
  */
+const UK_DATE_STRING_PATTERN = /^(\d{2})\/(\d{2})\/(\d{4})$/;
+
 export async function createStaffTrainingRecord(payload) {
   const org = (payload.organisationId ?? "").trim();
   if (!org) throw new Error("organisationId required");
   if (!(payload.staffId ?? "").trim()) throw new Error("staffId required");
   if (!(payload.trainingName ?? "").trim()) throw new Error("trainingName required");
 
-  let expiry = payload.expiryDate;
-  if (typeof expiry === "string") {
-    expiry = parseUkDateString(expiry) ?? new Date(expiry);
-  }
-  if (!(expiry instanceof Date) || Number.isNaN(expiry.getTime())) {
-    throw new Error("expiryDate must be a valid date");
+  let expiryUkStr;
+  const raw = payload.expiryDate;
+  if (typeof raw === "string") {
+    const t = raw.trim();
+    if (!UK_DATE_STRING_PATTERN.test(t)) {
+      throw new Error("expiryDate must be UK DD/MM/YYYY");
+    }
+    if (!parseUkDateString(t)) {
+      throw new Error("expiryDate must be a valid calendar date");
+    }
+    expiryUkStr = t;
+  } else if (raw instanceof Date && !Number.isNaN(raw.getTime())) {
+    expiryUkStr = `${String(raw.getDate()).padStart(2, "0")}/${String(raw.getMonth() + 1).padStart(2, "0")}/${raw.getFullYear()}`;
+  } else {
+    throw new Error("expiryDate must be a valid UK date string (DD/MM/YYYY)");
   }
 
-  const expiryTs = Timestamp.fromDate(expiry);
-  const status = computeTrainingStatus(expiryTs);
+  const status = computeTrainingStatus(expiryUkStr);
 
   const docData = {
     organisationId: org,
@@ -145,7 +142,7 @@ export async function createStaffTrainingRecord(payload) {
     staffId: payload.staffId.trim(),
     staffName: String(payload.staffName ?? "").trim(),
     trainingName: payload.trainingName.trim(),
-    expiryDate: expiryTs,
+    expiryDate: expiryUkStr,
     status,
     evidenceUrl: String(payload.evidenceUrl ?? "").trim(),
     createdAt: serverTimestamp(),

@@ -49,7 +49,7 @@ export async function getOrgDisplayName(providedOrgId) {
     const snapshot = await getDoc(orgDocRef);
 
     if (!snapshot.exists()) {
-      return "Development Organisation (Bypassed)";
+      return "Organisation";
     }
 
     const data = snapshot.data() || {};
@@ -58,11 +58,10 @@ export async function getOrgDisplayName(providedOrgId) {
         ? data.name
         : null;
 
-    return name || "Development Organisation (Bypassed)";
+    return name || "Organisation";
   } catch (err) {
-    // If anything goes wrong (missing collection, permission, etc.),
-    // fall back to a clear development-only label.
-    return "Development Organisation (Bypassed)";
+    // If anything goes wrong (missing collection, permission, etc.), use a neutral label.
+    return "Organisation";
   }
 }
 

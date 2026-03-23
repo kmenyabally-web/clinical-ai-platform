@@ -13,32 +13,11 @@
 
 import { auth } from "../firebase";
 
-/** [ENABLEMENT GATE: STAGE 2 - NON-CLINICAL]
- *
+/**
  * getUserContext()
  *
- * TEMPORARY DEV BYPASS:
- * For local development, this function has been overridden to ALWAYS return
- * a fixed manager/dev-org-001 context, regardless of the underlying token.
- *
- * The original strict governance logic is preserved below in comments and
- * must be restored before any regulated/testing use.
+ * Reads role and organisationId from Firebase Auth custom claims (ID token).
  */
-export async function getUserContext() {
-  // eslint-disable-next-line no-console
-  console.warn(
-    "⚠️ GOVERNANCE BYPASS ACTIVE: Using mock dev-org-001 context."
-  );
-
-  return {
-    role: "manager",
-    organisationId: "dev-org-001",
-    serviceIds: ["service-001"],
-  };
-}
-
-/*
-// ORIGINAL STRICT IMPLEMENTATION (REINSTATE FOR REAL GOVERNANCE)
 export async function getUserContext() {
   const user = auth.currentUser;
 
@@ -59,8 +38,7 @@ export async function getUserContext() {
       : null;
 
   const organisationId =
-    typeof claims.organisationId === "string" &&
-    claims.organisationId.trim().length > 0
+    typeof claims.organisationId === "string" && claims.organisationId.trim().length > 0
       ? claims.organisationId
       : null;
 
@@ -78,5 +56,3 @@ export async function getUserContext() {
     serviceIds,
   };
 }
-*/
-

@@ -1,6 +1,7 @@
 /** [ENABLEMENT GATE: STAGE 12 - AI CARE PLAN GENERATOR] */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { CheckCircle2, AlertTriangle } from "lucide-react";
 import { getDocs, collection, query, where } from "firebase/firestore";
 import {
   listAiCarePlanDraftsForPatient,
@@ -27,6 +28,23 @@ const clinicalMapping = {
   choking: "First Aid",
   injury: "First Aid",
 };
+
+/** Map UI category → possible lowercase trainingName keys in Firestore */
+const CATEGORY_TRAINING_ALIASES = {
+  Safeguarding: ["safeguarding", "safeguarding adults"],
+  "First Aid": ["first aid"],
+};
+
+function getStaffCountForCategory(validStaffByTraining, category) {
+  const primary = category.toLowerCase();
+  const extra = CATEGORY_TRAINING_ALIASES[category] ?? [];
+  const keys = new Set([primary, ...extra.map((k) => k.toLowerCase())]);
+  let max = 0;
+  for (const k of keys) {
+    max = Math.max(max, validStaffByTraining.get(k)?.size ?? 0);
+  }
+  return max;
+}
 
 const parseUKDate = (dateStr) => {
   if (!dateStr || typeof dateStr !== "string") return null;
@@ -91,6 +109,8 @@ export default function CarePlans() {
   const [trainingRows, setTrainingRows] = useState([]);
   const [trainingLoading, setTrainingLoading] = useState(false);
   const [trainingError, setTrainingError] = useState(null);
+  /** Debounced observations text for competency keyword matching (500ms) */
+  const [debouncedKeyObs, setDebouncedKeyObs] = useState("");
 
   const selectedPatient = useMemo(
     () => patients.find((p) => p.id === selectedPatientId) ?? null,
@@ -140,47 +160,45 @@ export default function CarePlans() {
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function loadTrainingRecords() {
-      setTrainingLoading(true);
-      setTrainingError(null);
-      try {
-        const claims = await getUserContext().catch(() => ({}));
-        const org = (organisationContextId || claims?.organisationId || "dev-org-001").toString();
-        if (cancelled) return;
-        setActiveOrganisationId(org);
-        const q = query(collection(db, "staff_training"), where("organisationId", "==", org));
-        const snap = await getDocs(q);
-        if (cancelled) return;
-        const records = (snap.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
-        const scoped = currentServiceId
-          ? records.filter((r) => r.serviceId === currentServiceId || r.serviceId == null)
-          : records;
-        const nowMs = Date.now();
-        const validOnly = scoped.filter((r) => {
-          const expiryDate = resolveExpiryDate(r.expiryDate);
-          if (!expiryDate) return false;
-          const isExpired = expiryDate.getTime() < nowMs;
-          return isExpired === false;
-        });
-        setTrainingRows(validOnly);
-      } catch (err) {
-        if (cancelled) return;
-        setTrainingRows([]);
-        setTrainingError(err?.message ?? "Failed to load staff training records.");
-      } finally {
-        if (!cancelled) setTrainingLoading(false);
-      }
+  const refreshTrainingRows = useCallback(async () => {
+    setTrainingLoading(true);
+    setTrainingError(null);
+    try {
+      const claims = await getUserContext().catch(() => ({}));
+      const org = (organisationContextId || claims?.organisationId || "dev-org-001").toString();
+      setActiveOrganisationId(org);
+      const q = query(collection(db, "staff_training"), where("organisationId", "==", org));
+      const snap = await getDocs(q);
+      const records = (snap.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
+      const scoped = currentServiceId
+        ? records.filter((r) => r.serviceId === currentServiceId || r.serviceId == null)
+        : records;
+      const nowMs = Date.now();
+      const validOnly = scoped.filter((r) => {
+        const expiryDate = resolveExpiryDate(r.expiryDate);
+        if (!expiryDate) return false;
+        return expiryDate.getTime() >= nowMs;
+      });
+      setTrainingRows(validOnly);
+    } catch (err) {
+      setTrainingRows([]);
+      setTrainingError(err?.message ?? "Failed to load staff training records.");
+    } finally {
+      setTrainingLoading(false);
     }
-    loadTrainingRecords();
-    return () => {
-      cancelled = true;
-    };
   }, [currentServiceId, organisationContextId]);
 
+  useEffect(() => {
+    refreshTrainingRows();
+  }, [refreshTrainingRows]);
+
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedKeyObs(keyObservationsRisks), 500);
+    return () => clearTimeout(id);
+  }, [keyObservationsRisks]);
+
   const competencyCheckResults = useMemo(() => {
-    const text = String(keyObservationsRisks ?? "").toLowerCase();
+    const text = String(debouncedKeyObs ?? "").toLowerCase();
     if (!text.trim()) return [];
 
     const validStaffByTraining = new Map(); // key: lowercase trainingName -> Set(staffId)
@@ -208,9 +226,9 @@ export default function CarePlans() {
     return Array.from(categoryToKeywords.entries()).map(([category, keywords]) => ({
       label: Array.from(keywords).join(", "),
       trainingName: category,
-      count: validStaffByTraining.get(category.toLowerCase())?.size ?? 0,
+      count: getStaffCountForCategory(validStaffByTraining, category),
     }));
-  }, [keyObservationsRisks, trainingRows]);
+  }, [debouncedKeyObs, trainingRows]);
 
   useEffect(() => {
     if (!selectedPatientId && patients.length > 0) {
@@ -441,69 +459,119 @@ export default function CarePlans() {
 
       <section
         style={{
-          background: "#ffffff",
-          border: "1px solid #e2e8f0",
-          borderRadius: 12,
-          padding: "1.25rem",
-          marginBottom: 16,
+          background: "linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)",
+          border: "2px solid #cbd5e1",
+          borderRadius: 14,
+          padding: "1.25rem 1.35rem",
+          marginBottom: 20,
+          boxShadow: "0 4px 24px rgba(15, 23, 42, 0.06)",
         }}
       >
-        <h2 style={{ fontSize: "1rem", marginTop: 0, marginBottom: "0.5rem" }}>Safety & Competency Check</h2>
-        <p style={{ marginTop: 0, color: "#64748b", fontSize: "0.85rem", fontWeight: 700 }}>
-          Live check against <code style={{ fontSize: 12 }}>staff_training</code> for org {activeOrganisationId || "—"}.
-        </p>
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: 12,
+            marginBottom: "0.65rem",
+          }}
+        >
+          <div>
+            <h2 style={{ fontSize: "1.1rem", margin: 0, marginBottom: 6, fontWeight: 900, color: "#0f172a" }}>
+              Safety &amp; Competency Check
+            </h2>
+            <p style={{ margin: 0, color: "#64748b", fontSize: "0.85rem", fontWeight: 600, maxWidth: 520 }}>
+              Live match against <code style={{ fontSize: 12 }}>staff_training</code> for your organisation
+              {activeOrganisationId ? ` (${activeOrganisationId})` : ""}. Dates verified in UK format (DD/MM/YYYY).
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => refreshTrainingRows()}
+            disabled={trainingLoading}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 10,
+              border: "1px solid #005eb8",
+              background: "#fff",
+              color: "#005eb8",
+              fontWeight: 800,
+              fontSize: 13,
+              cursor: trainingLoading ? "wait" : "pointer",
+              flexShrink: 0,
+            }}
+          >
+            {trainingLoading ? "Refreshing…" : "Refresh training data"}
+          </button>
+        </div>
         {trainingLoading && (
-          <p style={{ margin: 0, color: "#64748b", fontSize: 13, fontWeight: 700 }}>Checking current competency records…</p>
+          <p style={{ margin: "0.5rem 0 0 0", color: "#64748b", fontSize: 13, fontWeight: 700 }}>
+            Checking current competency records…
+          </p>
         )}
         {trainingError && (
           <div role="alert" style={{ marginTop: 10, padding: "0.75rem 1rem", background: "#ffebee", border: "1px solid #ef9a9a", borderRadius: 10, color: "#b71c1c", fontSize: 13 }}>
             {trainingError}
           </div>
         )}
-        {!trainingLoading && !trainingError && !keyObservationsRisks.trim() && (
-          <p style={{ margin: 0, color: "#64748b", fontSize: 13 }}>
-            Enter observations/risks (e.g., mobility, medication, dementia) to run competency matching.
+        {!trainingLoading && !trainingError && !debouncedKeyObs.trim() && (
+          <p style={{ margin: "0.75rem 0 0 0", color: "#64748b", fontSize: 13 }}>
+            Enter observations/risks (e.g., mobility, medication) — the check updates 500ms after you stop typing.
           </p>
         )}
-        {!trainingLoading && !trainingError && keyObservationsRisks.trim() && competencyCheckResults.length === 0 && (
-          <p style={{ margin: 0, color: "#64748b", fontSize: 13 }}>
-            No configured competency keywords detected yet in the risk text.
+        {!trainingLoading && !trainingError && debouncedKeyObs.trim() && competencyCheckResults.length === 0 && (
+          <p style={{ margin: "0.75rem 0 0 0", color: "#64748b", fontSize: 13 }}>
+            No configured competency keywords detected in the risk text yet.
           </p>
         )}
         {!trainingLoading && !trainingError && competencyCheckResults.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 6 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
             {competencyCheckResults.map((item) =>
               item.count > 0 ? (
                 <div
                   key={item.label}
                   role="status"
                   style={{
-                    background: "#f0fdf4",
-                    border: "1px solid #86efac",
-                    color: "#166534",
-                    borderRadius: 10,
-                    padding: "0.75rem 1rem",
-                    fontSize: 13,
-                    fontWeight: 800,
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 12,
+                    background: "#ecfdf5",
+                    border: "1px solid #6ee7b7",
+                    color: "#14532d",
+                    borderRadius: 12,
+                    padding: "1rem 1.1rem",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    lineHeight: 1.45,
                   }}
                 >
-                  {`✅ Safe to Deliver: ${item.count} staff member${item.count === 1 ? "" : "s"} have valid ${item.trainingName} training (UK format verified).`}
+                  <CheckCircle2 size={22} strokeWidth={2.25} color="#16a34a" style={{ flexShrink: 0, marginTop: 2 }} aria-hidden />
+                  <span>
+                    Safe to Deliver: {item.count} staff member{item.count === 1 ? "" : "s"} have valid {item.trainingName}{" "}
+                    training (UK format verified).
+                  </span>
                 </div>
               ) : (
                 <div
                   key={item.label}
                   role="alert"
                   style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 12,
                     background: "#fef2f2",
-                    border: "1px solid #fca5a5",
-                    color: "#b91c1c",
-                    borderRadius: 10,
-                    padding: "0.75rem 1rem",
-                    fontSize: 13,
-                    fontWeight: 800,
+                    border: "1px solid #fecaca",
+                    color: "#991b1b",
+                    borderRadius: 12,
+                    padding: "1rem 1.1rem",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    lineHeight: 1.45,
                   }}
                 >
-                  ⚠️ Risk: No staff currently have valid training for this specific need on file.
+                  <AlertTriangle size={22} strokeWidth={2.25} color="#dc2626" style={{ flexShrink: 0, marginTop: 2 }} aria-hidden />
+                  <span>Risk: No staff currently have valid training for this specific need on file.</span>
                 </div>
               )
             )}

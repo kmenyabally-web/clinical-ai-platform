@@ -205,11 +205,9 @@ export async function uploadDocument(organisationIdOrFile, payload, auditContext
  * @returns {Promise<Array<{id:string,fileName:string,fileUrl:string,category:string,expiryDate:any,uploadedAt:any}>>}
  */
 export async function fetchManagedDocuments(organisationId) {
-  // DEBUG / VERIFICATION MODE (temporary):
-  // Hardcode collection and orgId to validate that UI reads the correct top-level collection.
-  // If this returns 0 but no-filter debug returns documents, then stored organisationId is different.
   const collectionName = "documents";
-  const scopedOrgId = "dev-org-001";
+  const scopedOrgId = (organisationId ?? "").toString().trim();
+  if (!scopedOrgId) return [];
   const q = query(
     collection(db, collectionName),
     where("organisationId", "==", scopedOrgId)

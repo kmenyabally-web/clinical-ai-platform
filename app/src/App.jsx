@@ -29,6 +29,7 @@ import Incidents from "./pages/Incidents";
 import ComplianceOverview from "./pages/ComplianceOverview";
 import InspectionSimulator from "./pages/InspectionSimulator";
 import StaffTraining from "./pages/StaffTraining";
+import AdminPanel from "./pages/AdminPanel";
 
 export default function App() {
   return (
@@ -60,6 +61,7 @@ export default function App() {
           <Route path="/inspection-simulator" element={<InspectionSimulator />} />
           <Route path="/audit-log" element={<AuditLog />} />
           <Route path="/evidence-pack" element={<EvidencePack />} />
+          <Route path="/admin" element={<AdminPanel />} />
         </Route>
 
         {/* For any other path, redirect to the Stage 2 safe screen. */}

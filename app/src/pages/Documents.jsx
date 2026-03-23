@@ -6,8 +6,6 @@ import { useRole } from "../context/RoleContext";
 import {
   uploadDocument,
   fetchManagedDocuments,
-  fetchAllManagedDocumentsNoFilterDebug,
-  fetchOrgDocumentsSubcollectionDebugNoFilter,
   getSupportedAcceptString,
   isSupportedFileType,
 } from "../services/documentService";
@@ -179,30 +177,8 @@ export default function Documents() {
     }
     setError(null);
     try {
-      const collectionName = "documents";
-      // eslint-disable-next-line no-console
-      console.log("Documents Collection Name used:", collectionName);
       const list = await fetchManagedDocuments(organisationId);
-      // eslint-disable-next-line no-console
-      console.log("Raw documents from Firestore:", list);
       setDocuments(Array.isArray(list) ? list : []);
-
-      if (Array.isArray(list) && list.length === 0) {
-        // Debug fallback: confirm whether there are records in DB at all (no filters).
-        // eslint-disable-next-line no-console
-        console.warn("Scoped fetch returned 0. Running no-filter debug query…");
-        const raw = await fetchAllManagedDocumentsNoFilterDebug(10);
-        // eslint-disable-next-line no-console
-        console.log("No-filter debug documents (first 10):", raw);
-
-        if (Array.isArray(raw) && raw.length === 0) {
-          // eslint-disable-next-line no-console
-          console.warn("No top-level documents found. Trying subcollection organisations/{orgId}/documents…");
-          const sub = await fetchOrgDocumentsSubcollectionDebugNoFilter(organisationId, 10);
-          // eslint-disable-next-line no-console
-          console.log("Subcollection debug documents (first 10):", sub);
-        }
-      }
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("Documents fetch failed:", err);
