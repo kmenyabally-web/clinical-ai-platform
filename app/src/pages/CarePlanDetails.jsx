@@ -6,20 +6,10 @@ import { getCarePlanById, listCarePlanVersions, updateCarePlanRecord } from "../
 import { listStaffTraining, countValidStaffByTraining } from "../services/staffTrainingService";
 import { getCompetencyGapWarning } from "../services/aiService";
 import { getPatientById } from "../services/patientService";
+import { formatUkDate } from "../utils/dateFormat";
 
 function formatDate(value) {
-  if (!value) return "—";
-  if (typeof value.toDate === "function") {
-    try {
-      return value.toDate().toLocaleDateString();
-    } catch {
-      return "—";
-    }
-  }
-  const d = new Date(value);
-  // eslint-disable-next-line no-restricted-globals
-  if (isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString();
+  return formatUkDate(value, "—");
 }
 
 export default function CarePlanDetails() {

@@ -5,6 +5,7 @@ import { Link, useParams } from "react-router-dom";
 import { getPatientById } from "../services/patientService";
 import { fetchIncidentsForPatient } from "../services/incidentService";
 import { fetchClinicalNotesForPatient } from "../services/noteService";
+import { formatUkDateTime } from "../utils/dateFormat";
 
 export default function PatientDetail() {
   const { id } = useParams();
@@ -241,19 +242,7 @@ function formatDob(value) {
 }
 
 function formatWhen(value) {
-  if (!value) return "";
-  if (value instanceof Date) return value.toLocaleString();
-  if (typeof value?.toDate === "function") {
-    try {
-      return value.toDate().toLocaleString();
-    } catch {
-      return "";
-    }
-  }
-  const d = new Date(value);
-  // eslint-disable-next-line no-restricted-globals
-  if (isNaN(d.getTime())) return "";
-  return d.toLocaleString();
+  return formatUkDateTime(value, "");
 }
 
 const styles = {

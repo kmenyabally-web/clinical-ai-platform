@@ -4,19 +4,10 @@ import { useOrganisation } from "../context/OrganisationContext";
 import { useService } from "../context/ServiceContext";
 import { listPatients, createPatient } from "../services/patientService";
 import { isIndexError, INDEX_ERROR_MESSAGE } from "../lib/firestoreIndexError";
+import { formatUkDate } from "../utils/dateFormat";
 
 function formatDate(value) {
-  if (!value) return "—";
-  if (typeof value?.toDate === "function") {
-    try {
-      return value.toDate().toLocaleDateString();
-    } catch {
-      return "—";
-    }
-  }
-  const d = new Date(value);
-  if (isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString();
+  return formatUkDate(value, "—");
 }
 
 export default function Patients() {

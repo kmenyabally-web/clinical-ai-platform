@@ -4,6 +4,7 @@ import { AlertTriangle, Activity, ShieldCheck } from "lucide-react";
 import { useOrganisation } from "../context/OrganisationContext";
 import { useService } from "../context/ServiceContext";
 import { getComplianceScore } from "../services/complianceEngine";
+import { formatUkDateTime } from "../utils/dateFormat";
 import { getLatestSimulation, getInspectionRiskLevel } from "../services/inspectionSimulator";
 import { listPatients } from "../services/patientService";
 import { fetchIncidents } from "../services/incidentService";
@@ -626,19 +627,7 @@ export default function Dashboard() {
 }
 
 function formatWhen(value) {
-  if (!value) return "";
-  if (value instanceof Date) return value.toLocaleString();
-  if (typeof value?.toDate === "function") {
-    try {
-      return value.toDate().toLocaleString();
-    } catch {
-      return "";
-    }
-  }
-  const d = new Date(value);
-  // eslint-disable-next-line no-restricted-globals
-  if (isNaN(d.getTime())) return "";
-  return d.toLocaleString();
+  return formatUkDateTime(value, "");
 }
 
 const tableStyles = {

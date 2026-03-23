@@ -6,6 +6,7 @@ import { listCarePlans } from "../services/carePlanManagementService";
 import CreateCarePlanModal from "../components/CreateCarePlanModal";
 import { createCarePlanRecord } from "../services/carePlanManagementService";
 import { isIndexError, INDEX_ERROR_MESSAGE } from "../lib/firestoreIndexError";
+import { formatUkDate } from "../utils/dateFormat";
 
 export default function CarePlansList() {
   const { organisationId, organisation } = useOrganisation();
@@ -114,18 +115,7 @@ export default function CarePlansList() {
   };
 
   const formatDate = (value) => {
-    if (!value) return "—";
-    if (typeof value.toDate === "function") {
-      try {
-        return value.toDate().toLocaleDateString();
-      } catch {
-        return "—";
-      }
-    }
-    const d = new Date(value);
-    // eslint-disable-next-line no-restricted-globals
-    if (isNaN(d.getTime())) return "—";
-    return d.toLocaleDateString();
+    return formatUkDate(value, "—");
   };
 
   return (

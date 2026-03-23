@@ -2,19 +2,10 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useOrganisation } from "../context/OrganisationContext";
 import { getPatientSummary } from "../services/patientService";
+import { formatUkDate } from "../utils/dateFormat";
 
 function formatDate(value) {
-  if (!value) return "—";
-  if (typeof value?.toDate === "function") {
-    try {
-      return value.toDate().toLocaleDateString();
-    } catch {
-      return "—";
-    }
-  }
-  const d = new Date(value);
-  if (isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString();
+  return formatUkDate(value, "—");
 }
 
 export default function PatientDetail() {

@@ -11,6 +11,7 @@ import {
   seedTimelineTestData,
 } from "../services/patientTimelineService";
 import { getPatientSummary } from "../services/patientService";
+import { formatUkDate } from "../utils/dateFormat";
 
 const inputStyle = {
   padding: "6px 10px",
@@ -155,7 +156,7 @@ export default function PatientTimeline() {
         </p>
         {patient?.dateOfBirth && (
           <p style={{ margin: "0.25rem 0 0 0", fontSize: "0.9rem", color: "#64748b" }}>
-            DOB: {patient.dateOfBirth instanceof Date ? patient.dateOfBirth.toLocaleDateString() : String(patient.dateOfBirth)}
+            DOB: {formatUkDate(patient.dateOfBirth, String(patient.dateOfBirth))}
           </p>
         )}
         {organisation && (

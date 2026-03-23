@@ -4,12 +4,10 @@ import { useService } from "../context/ServiceContext";
 import { useAuth } from "../context/AuthContext";
 import { subscribeEvidence, uploadEvidence, isSupportedFileType } from "../services/evidenceService";
 import { EVIDENCE_DOMAINS } from "../config/evidenceDomains";
+import { formatUkDate } from "../utils/dateFormat";
 
 function formatUploadDate(uploadedAt) {
-  if (uploadedAt == null) return "—";
-  const date = uploadedAt?.toDate?.() ?? (uploadedAt?.seconds ? new Date(uploadedAt.seconds * 1000) : null);
-  if (!date || !(date instanceof Date) || isNaN(date.getTime())) return "—";
-  return date.toLocaleDateString(undefined, { dateStyle: "medium" });
+  return formatUkDate(uploadedAt, "—");
 }
 
 const sectionStyle = {

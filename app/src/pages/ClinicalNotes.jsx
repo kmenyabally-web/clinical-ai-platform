@@ -10,19 +10,10 @@ import { isIndexError, INDEX_ERROR_MESSAGE } from "../lib/firestoreIndexError";
 import { useRole } from "../context/RoleContext";
 import { addClinicalNote, fetchClinicalNotesForOrganisation } from "../services/noteService";
 import ClinicalNoteForm from "../components/ClinicalNoteForm";
+import { formatUkDateTime } from "../utils/dateFormat";
 
 function formatDate(value) {
-  if (!value) return "—";
-  if (typeof value?.toDate === "function") {
-    try {
-      return value.toDate().toLocaleString();
-    } catch {
-      return "—";
-    }
-  }
-  const d = new Date(value);
-  if (isNaN(d.getTime())) return "—";
-  return d.toLocaleString();
+  return formatUkDateTime(value, "—");
 }
 
 export default function ClinicalNotes() {

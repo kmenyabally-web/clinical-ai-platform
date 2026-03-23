@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { formatUkDate, formatUkDateTime } from "../utils/dateFormat";
 
 const STATUS_OPTIONS = [
   { value: "open", label: "Open" },
@@ -7,23 +8,11 @@ const STATUS_OPTIONS = [
 ];
 
 function formatDate(value) {
-  if (!value) return "—";
-  const ts = value?.toMillis ? value.toMillis() : (value instanceof Date ? value.getTime() : null);
-  if (!ts) return "—";
-  return new Date(ts).toLocaleDateString(undefined, {
-    dateStyle: "short",
-    timeZone: "UTC",
-  });
+  return formatUkDate(value, "—");
 }
 
 function formatDateTime(value) {
-  if (!value) return "—";
-  const ts = value?.toMillis ? value.toMillis() : (value instanceof Date ? value.getTime() : null);
-  if (!ts) return "—";
-  return new Date(ts).toLocaleString(undefined, {
-    dateStyle: "short",
-    timeStyle: "short",
-  });
+  return formatUkDateTime(value, "—");
 }
 
 /**

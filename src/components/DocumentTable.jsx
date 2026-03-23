@@ -1,10 +1,8 @@
 import { CQC_DOCUMENT_DOMAINS, DOCUMENT_TYPES } from "../config/documentDomains";
+import { formatUkDate } from "../utils/dateFormat";
 
 function formatDate(value) {
-  if (!value) return "—";
-  const ts = value?.toMillis ? value.toMillis() : null;
-  if (!ts) return "—";
-  return new Date(ts).toLocaleDateString(undefined, { dateStyle: "short" });
+  return formatUkDate(value, "—");
 }
 
 const domainLabel = (value) => CQC_DOCUMENT_DOMAINS.find((d) => d.value === value)?.label ?? value ?? "—";

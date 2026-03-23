@@ -20,15 +20,45 @@ import { db, storage } from "../firebase";
 
 const COLLECTION = "staff_training";
 
+export function parseUkDateString(value) {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (!text) return null;
+  const m = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return null;
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const year = Number(m[3]);
+  const d = new Date(year, month - 1, day);
+  if (Number.isNaN(d.getTime())) return null;
+  if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null;
+  return d;
+}
+
+function coerceDate(expiryDate) {
+  if (expiryDate == null) return null;
+  if (typeof expiryDate?.toDate === "function") {
+    try {
+      const d = expiryDate.toDate();
+      return Number.isNaN(d.getTime()) ? null : d;
+    } catch {
+      return null;
+    }
+  }
+  if (expiryDate instanceof Date) {
+    return Number.isNaN(expiryDate.getTime()) ? null : expiryDate;
+  }
+  if (typeof expiryDate === "string") {
+    const uk = parseUkDateString(expiryDate);
+    if (uk) return uk;
+  }
+  const d = new Date(expiryDate);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export function computeTrainingStatus(expiryDate) {
-  if (expiryDate == null) return "Expired";
-  const d =
-    typeof expiryDate?.toDate === "function"
-      ? expiryDate.toDate()
-      : expiryDate instanceof Date
-        ? expiryDate
-        : new Date(expiryDate);
-  if (Number.isNaN(d.getTime())) return "Expired";
+  const d = coerceDate(expiryDate);
+  if (!d) return "Expired";
   const endOfExpiryDay = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
   return endOfExpiryDay.getTime() >= Date.now() ? "Valid" : "Expired";
 }
@@ -62,8 +92,8 @@ export async function listStaffTraining(organisationId, serviceId = null) {
     rows = rows.filter((r) => r.serviceId === serviceId || r.serviceId == null);
   }
   rows.sort((a, b) => {
-    const ta = a.expiryDate?.toMillis?.() ?? 0;
-    const tb = b.expiryDate?.toMillis?.() ?? 0;
+    const ta = coerceDate(a.expiryDate)?.getTime?.() ?? 0;
+    const tb = coerceDate(b.expiryDate)?.getTime?.() ?? 0;
     return tb - ta;
   });
   return rows;
@@ -100,7 +130,7 @@ export async function createStaffTrainingRecord(payload) {
 
   let expiry = payload.expiryDate;
   if (typeof expiry === "string") {
-    expiry = new Date(expiry);
+    expiry = parseUkDateString(expiry) ?? new Date(expiry);
   }
   if (!(expiry instanceof Date) || Number.isNaN(expiry.getTime())) {
     throw new Error("expiryDate must be a valid date");

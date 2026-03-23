@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { db } from "../firebase";
 import { getUserContext } from "../services/authService";
+import { formatUkDateTime } from "../utils/dateFormat";
 
 export default function AuditLog() {
   const [rows, setRows] = useState([]);
@@ -130,19 +131,7 @@ export default function AuditLog() {
 }
 
 function formatWhen(value) {
-  if (!value) return "";
-  if (value instanceof Date) return value.toLocaleString();
-  if (typeof value?.toDate === "function") {
-    try {
-      return value.toDate().toLocaleString();
-    } catch {
-      return "";
-    }
-  }
-  const d = new Date(value);
-  // eslint-disable-next-line no-restricted-globals
-  if (isNaN(d.getTime())) return "";
-  return d.toLocaleString();
+  return formatUkDateTime(value, "");
 }
 
 function renderMetadata(meta) {

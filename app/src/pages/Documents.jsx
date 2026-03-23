@@ -12,6 +12,7 @@ import {
   isSupportedFileType,
 } from "../services/documentService";
 import { logAuditEventNonBlocking } from "../services/auditService";
+import { formatUkDate } from "../utils/dateFormat";
 
 const CATEGORY_TILES = ["Insurance", "Policies", "ID", "Training", "Other"];
 
@@ -26,7 +27,7 @@ function toMillis(value) {
 function formatWhen(value) {
   const ms = toMillis(value);
   if (!ms) return "—";
-  return new Date(ms).toLocaleDateString();
+  return formatUkDate(ms, "—");
 }
 
 function expiryWarning(expiryDate) {

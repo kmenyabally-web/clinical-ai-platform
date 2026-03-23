@@ -1,4 +1,5 @@
 import React from "react";
+import { formatUkDateTime } from "../utils/dateFormat";
 
 /** Event type to icon mapping (spec). */
 const EVENT_ICONS = {
@@ -71,15 +72,11 @@ export default function TimelineEvent({ event }) {
   const description = e.eventDescription ?? e.description ?? "";
   const createdBy = e.createdBy ?? "Unknown user";
   const createdAtDate = resolveCreatedAt(e.createdAt);
-  const createdAtLabel = createdAtDate
-    ? createdAtDate.toLocaleString("en-GB", {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    : "Unknown time";
+  const createdAtLabel = formatUkDateTime(createdAtDate, "Unknown time", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
   const metadata = e.metadata ?? {};
   const severity = metadata.severity ?? e.severity;
   const location = metadata.location ?? e.location;

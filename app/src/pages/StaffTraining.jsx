@@ -8,7 +8,9 @@ import {
   createStaffTrainingRecord,
   attachCertificateFile,
   computeTrainingStatus,
+  parseUkDateString,
 } from "../services/staffTrainingService";
+import { formatUkDate } from "../utils/dateFormat";
 
 const TRAINING_OPTIONS = [
   "Insulin Support",
@@ -22,14 +24,16 @@ const TRAINING_OPTIONS = [
 ];
 
 function formatExpiry(expiryDate) {
-  if (!expiryDate) return "—";
-  try {
-    const d = typeof expiryDate.toDate === "function" ? expiryDate.toDate() : new Date(expiryDate);
-    if (Number.isNaN(d.getTime())) return "—";
-    return d.toLocaleDateString();
-  } catch {
-    return "—";
-  }
+  return formatUkDate(expiryDate, "—");
+}
+
+function normaliseUkDateInput(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  // Support browser date-like input as a convenience and convert to dd/mm/yyyy.
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) return `${isoMatch[3]}/${isoMatch[2]}/${isoMatch[1]}`;
+  return text;
 }
 
 function TrafficDot({ status }) {
@@ -128,6 +132,12 @@ export default function StaffTraining() {
       setFormError("Expiry date is required.");
       return;
     }
+    const expiryDateUk = normaliseUkDateInput(expiryDate);
+    const parsedExpiry = parseUkDateString(expiryDateUk);
+    if (!parsedExpiry) {
+      setFormError("Expiry date must be in UK format dd/mm/yyyy (e.g. 31/12/2026).");
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -137,18 +147,39 @@ export default function StaffTraining() {
         staffId: staffId.trim(),
         staffName: staffName.trim(),
         trainingName: resolvedTraining,
-        expiryDate,
+        expiryDate: expiryDateUk,
         evidenceUrl: evidenceUrl.trim(),
       });
 
+      const optimisticExpiry = parsedExpiry;
+      const optimisticRecord = {
+        id,
+        organisationId,
+        serviceId: currentServiceId ?? null,
+        staffId: staffId.trim(),
+        staffName: staffName.trim(),
+        trainingName: resolvedTraining,
+        expiryDate: optimisticExpiry,
+        status: computeTrainingStatus(optimisticExpiry),
+        evidenceUrl: evidenceUrl.trim(),
+        createdAt: new Date(),
+      };
+      setRows((prev) => [optimisticRecord, ...(Array.isArray(prev) ? prev : [])]);
+
       if (certificateFile) {
-        await attachCertificateFile(organisationId, id, certificateFile);
+        const uploadedUrl = await attachCertificateFile(organisationId, id, certificateFile);
+        setRows((prev) =>
+          (Array.isArray(prev) ? prev : []).map((r) => (r.id === id ? { ...r, evidenceUrl: uploadedUrl } : r))
+        );
       }
 
       setFormSuccess("Training record saved.");
       setEvidenceUrl("");
       setCertificateFile(null);
       setExpiryDate("");
+      setStaffId("");
+      setStaffName("");
+      setTrainingOther("");
       await load();
     } catch (err) {
       setFormError(err?.message ?? "Could not save training record.");
@@ -246,11 +277,14 @@ export default function StaffTraining() {
             <div>
               <label style={{ display: "block", fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Expiry date *</label>
               <input
-                type="date"
+                type="text"
                 value={expiryDate}
-                onChange={(e) => setExpiryDate(e.target.value)}
+                onChange={(e) => setExpiryDate(normaliseUkDateInput(e.target.value))}
+                placeholder="dd/mm/yyyy"
+                inputMode="numeric"
                 style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1" }}
               />
+              <p style={{ margin: "4px 0 0 0", fontSize: 12, color: "#64748b" }}>Use UK format: dd/mm/yyyy</p>
             </div>
           </div>
 

@@ -7,6 +7,7 @@ import { markNotificationRead } from "../services/notificationService";
 import { evaluateAndCreateNotifications } from "../services/notificationService";
 import { NOTIFICATION_TYPES } from "../services/notificationService";
 import { Link } from "react-router-dom";
+import { formatUkDateTime } from "../utils/dateFormat";
 
 const cardStyle = {
   background: "#fff",
@@ -24,13 +25,7 @@ const severityBorder = {
 };
 
 function formatDate(ts) {
-  if (!ts) return "—";
-  try {
-    const d = ts.toMillis ? ts.toMillis() : (ts.seconds ?? 0) * 1000;
-    return new Date(d).toLocaleString();
-  } catch {
-    return "—";
-  }
+  return formatUkDateTime(ts, "—");
 }
 
 export default function Notifications() {

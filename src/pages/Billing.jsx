@@ -9,6 +9,7 @@ import {
   PLANS,
   getPlanLimits,
 } from "../services/billingService";
+import { formatUkDate } from "../utils/dateFormat";
 
 const cardStyle = {
   background: "#fff",
@@ -19,13 +20,7 @@ const cardStyle = {
 };
 
 function formatDate(ts) {
-  if (!ts) return "—";
-  try {
-    const d = ts.toMillis ? ts.toMillis() : (ts.seconds ?? 0) * 1000;
-    return new Date(d).toLocaleDateString(undefined, { dateStyle: "medium" });
-  } catch {
-    return "—";
-  }
+  return formatUkDate(ts, "—");
 }
 
 /**

@@ -9,6 +9,7 @@ import {
 } from "../services/complianceEngine";
 import ComplianceScoreCard from "../components/ComplianceScoreCard";
 import { isIndexError, INDEX_ERROR_MESSAGE } from "../lib/firestoreIndexError";
+import { formatUkDateTime } from "../utils/dateFormat";
 
 const BAND_COLORS = {
   green: "#22c55e",
@@ -17,18 +18,7 @@ const BAND_COLORS = {
 };
 
 function formatCalculatedAt(calculatedAt) {
-  if (!calculatedAt) return "—";
-  if (typeof calculatedAt?.toDate === "function") {
-    try {
-      return calculatedAt.toDate().toLocaleString();
-    } catch {
-      return "—";
-    }
-  }
-  if (calculatedAt instanceof Date) return calculatedAt.toLocaleString();
-  const d = new Date(calculatedAt);
-  if (isNaN(d.getTime())) return "—";
-  return d.toLocaleString();
+  return formatUkDateTime(calculatedAt, "—");
 }
 
 export default function ComplianceOverview() {

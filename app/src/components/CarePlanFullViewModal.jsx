@@ -1,7 +1,10 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useReactToPrint } from "react-to-print";
+import { useOrganisation } from "../context/OrganisationContext";
+import { useService } from "../context/ServiceContext";
+import { listStaffTraining, computeTrainingStatus } from "../services/staffTrainingService";
 
 const CLINICAL_DISCLAIMER =
   "AI-generated draft. This document must be reviewed, amended as clinically appropriate, and signed off by a qualified clinician before use in care delivery. It must not be used as the sole basis for clinical decisions.";
@@ -168,9 +171,25 @@ export function CarePlanFullViewModal({
   patientName,
   generatedAtLabel,
   planContent,
-  competencyWarning = null,
-  competencyLoading = false,
 }) {
+  const { organisationId } = useOrganisation();
+  const { currentServiceId } = useService();
+  const [safetyLoading, setSafetyLoading] = useState(false);
+  const [safetyMessage, setSafetyMessage] = useState("");
+  const [safetyTone, setSafetyTone] = useState("neutral");
+
+  const extractedNeedsText = useMemo(() => {
+    const content = String(planContent ?? "");
+    const headingPattern = /(^|\n)#{1,6}\s*(Needs|Requirements)[^\n]*\n([\s\S]*?)(?=\n#{1,6}\s|\s*$)/i;
+    const match = content.match(headingPattern);
+    return (match?.[3] ?? content).trim();
+  }, [planContent]);
+
+  const manualHandlingRequired = useMemo(() => {
+    const text = extractedNeedsText.toLowerCase();
+    return /\b(hoist|transfer|manual handling|moving and handling)\b/i.test(text);
+  }, [extractedNeedsText]);
+
   const printRef = useRef(null);
   const handlePrint = useReactToPrint({
     contentRef: printRef,
@@ -186,6 +205,64 @@ export function CarePlanFullViewModal({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function runSafetyCheck() {
+      if (!open) {
+        setSafetyMessage("");
+        setSafetyLoading(false);
+        return;
+      }
+      if (!manualHandlingRequired) {
+        setSafetyTone("neutral");
+        setSafetyMessage("Competency Safety Check: No manual-handling requirements keywords detected in this plan.");
+        setSafetyLoading(false);
+        return;
+      }
+      if (!organisationId) {
+        setSafetyTone("risk");
+        setSafetyMessage("Risk Warning: Organisation context missing. Unable to verify valid Manual Handling training.");
+        setSafetyLoading(false);
+        return;
+      }
+      setSafetyLoading(true);
+      try {
+        const rows = await listStaffTraining(organisationId, currentServiceId ?? null);
+        if (cancelled) return;
+        const validStaffIds = new Set();
+        for (const row of rows) {
+          const training = String(row.trainingName ?? "").toLowerCase();
+          const isManualHandling = training === "manual handling";
+          if (!isManualHandling) continue;
+          const isValid = computeTrainingStatus(row.expiryDate) === "Valid";
+          if (!isValid) continue;
+          const sid = String(row.staffId ?? "").trim();
+          if (sid) validStaffIds.add(sid);
+        }
+        const count = validStaffIds.size;
+        if (count > 0) {
+          setSafetyTone("safe");
+          setSafetyMessage(
+            `Safe to Deliver: ${count} staff member${count === 1 ? "" : "s"} are currently trained for the requirements in this plan.`
+          );
+        } else {
+          setSafetyTone("risk");
+          setSafetyMessage("Risk Warning: No staff currently have valid Manual Handling training on file for this patient's needs.");
+        }
+      } catch {
+        if (cancelled) return;
+        setSafetyTone("risk");
+        setSafetyMessage("Risk Warning: Could not verify Manual Handling competency records at this time.");
+      } finally {
+        if (!cancelled) setSafetyLoading(false);
+      }
+    }
+    runSafetyCheck();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, organisationId, currentServiceId, manualHandlingRequired]);
 
   if (!open) return null;
 
@@ -282,27 +359,6 @@ export function CarePlanFullViewModal({
               </p>
             </header>
 
-            {(competencyLoading || competencyWarning) && (
-              <div
-                role="status"
-                style={{
-                  marginBottom: "1rem",
-                  padding: "0.85rem 1rem",
-                  background: competencyWarning ? "#fffbeb" : "#f1f5f9",
-                  borderRadius: 10,
-                  border: `1px solid ${competencyWarning ? "#fde68a" : "#e2e8f0"}`,
-                  color: competencyWarning ? "#92400e" : "#64748b",
-                  fontWeight: 800,
-                  fontSize: 13,
-                  lineHeight: 1.45,
-                }}
-              >
-                {competencyLoading && !competencyWarning
-                  ? "Checking staff training coverage against this plan…"
-                  : competencyWarning}
-              </div>
-            )}
-
             <div
               className="cqc-care-plan-markdown"
               style={{
@@ -332,6 +388,31 @@ export function CarePlanFullViewModal({
               </p>
               <p style={{ margin: "0.45rem 0 0 0", fontSize: 13, lineHeight: 1.5, color: "#78350f" }}>{CLINICAL_DISCLAIMER}</p>
             </footer>
+
+            <section
+              style={{
+                marginTop: "1rem",
+                border: "1px solid #e2e8f0",
+                borderRadius: 10,
+                padding: "0.9rem 1rem",
+                background: safetyTone === "safe" ? "#f0fdf4" : safetyTone === "risk" ? "#fef2f2" : "#f8fafc",
+              }}
+            >
+              <p style={{ margin: 0, fontSize: 12, fontWeight: 900, color: "#334155", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                Competency Safety Check
+              </p>
+              <p
+                style={{
+                  margin: "0.45rem 0 0 0",
+                  fontSize: 14,
+                  lineHeight: 1.5,
+                  fontWeight: 700,
+                  color: safetyTone === "safe" ? "#166534" : safetyTone === "risk" ? "#b91c1c" : "#475569",
+                }}
+              >
+                {safetyLoading ? "Checking staff training records..." : safetyMessage}
+              </p>
+            </section>
           </div>
         </div>
 

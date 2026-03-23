@@ -1,6 +1,7 @@
 /** [ENABLEMENT GATE: STAGE 12 - AI CARE PLAN GENERATOR] */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { getDocs, collection, query, where } from "firebase/firestore";
 import {
   listAiCarePlanDraftsForPatient,
   saveAiCarePlanDraft,
@@ -10,21 +11,60 @@ import { generateCarePlanDraft, getCompetencyGapWarning } from "../services/aiSe
 import { getUserContext } from "../services/authService";
 import { listStaffTraining, countValidStaffByTraining } from "../services/staffTrainingService";
 import { useService } from "../context/ServiceContext";
+import { useOrganisation } from "../context/OrganisationContext";
 import { CarePlanFullViewModal } from "../components/CarePlanFullViewModal";
+import { db } from "../firebase";
+import { formatUkDateTime } from "../utils/dateFormat";
+
+const clinicalMapping = {
+  mobility: "Manual Handling",
+  lifting: "Manual Handling",
+  transfer: "Manual Handling",
+  medication: "Medication Administration",
+  pills: "Medication Administration",
+  abuse: "Safeguarding",
+  safety: "Safeguarding",
+  choking: "First Aid",
+  injury: "First Aid",
+};
+
+const parseUKDate = (dateStr) => {
+  if (!dateStr || typeof dateStr !== "string") return null;
+  const parts = dateStr.split("/").map(Number);
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return null;
+  const [day, month, year] = parts;
+  const d = new Date(year, month - 1, day);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+function resolveExpiryDate(rawExpiry) {
+  if (!rawExpiry) return null;
+  if (typeof rawExpiry?.toDate === "function") {
+    try {
+      const d = rawExpiry.toDate();
+      return Number.isNaN(d.getTime()) ? null : d;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof rawExpiry === "string") {
+    const ukDate = parseUKDate(rawExpiry);
+    if (ukDate) return ukDate;
+    const fallback = new Date(rawExpiry);
+    return Number.isNaN(fallback.getTime()) ? null : fallback;
+  }
+  const d = new Date(rawExpiry);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
 
 function formatSavedAt(createdAt) {
-  if (!createdAt) return "—";
-  try {
-    const d = typeof createdAt.toDate === "function" ? createdAt.toDate() : new Date(createdAt);
-    if (Number.isNaN(d.getTime())) return "—";
-    return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-  } catch {
-    return "—";
-  }
+  return formatUkDateTime(createdAt, "—");
 }
 
 export default function CarePlans() {
   const { currentServiceId } = useService();
+  const { organisationId: organisationContextId } = useOrganisation();
+  const [activeOrganisationId, setActiveOrganisationId] = useState("");
 
   const [patients, setPatients] = useState([]);
   const [patientsLoading, setPatientsLoading] = useState(false);
@@ -48,6 +88,9 @@ export default function CarePlans() {
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [competencyWarning, setCompetencyWarning] = useState(null);
   const [competencyLoading, setCompetencyLoading] = useState(false);
+  const [trainingRows, setTrainingRows] = useState([]);
+  const [trainingLoading, setTrainingLoading] = useState(false);
+  const [trainingError, setTrainingError] = useState(null);
 
   const selectedPatient = useMemo(
     () => patients.find((p) => p.id === selectedPatientId) ?? null,
@@ -62,8 +105,9 @@ export default function CarePlans() {
     setRecentLoading(true);
     setRecentError(null);
     try {
-      const { organisationId } = await getUserContext();
-      const list = await listAiCarePlanDraftsForPatient(organisationId || "dev-org-001", selectedPatientId);
+      const claims = await getUserContext().catch(() => ({}));
+      const org = (organisationContextId || claims?.organisationId || "dev-org-001").toString();
+      const list = await listAiCarePlanDraftsForPatient(org, selectedPatientId);
       setRecentPlans(Array.isArray(list) ? list : []);
     } catch (err) {
       setRecentError(err?.message ?? "Failed to load saved plans.");
@@ -97,6 +141,78 @@ export default function CarePlans() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    async function loadTrainingRecords() {
+      setTrainingLoading(true);
+      setTrainingError(null);
+      try {
+        const claims = await getUserContext().catch(() => ({}));
+        const org = (organisationContextId || claims?.organisationId || "dev-org-001").toString();
+        if (cancelled) return;
+        setActiveOrganisationId(org);
+        const q = query(collection(db, "staff_training"), where("organisationId", "==", org));
+        const snap = await getDocs(q);
+        if (cancelled) return;
+        const records = (snap.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
+        const scoped = currentServiceId
+          ? records.filter((r) => r.serviceId === currentServiceId || r.serviceId == null)
+          : records;
+        const nowMs = Date.now();
+        const validOnly = scoped.filter((r) => {
+          const expiryDate = resolveExpiryDate(r.expiryDate);
+          if (!expiryDate) return false;
+          const isExpired = expiryDate.getTime() < nowMs;
+          return isExpired === false;
+        });
+        setTrainingRows(validOnly);
+      } catch (err) {
+        if (cancelled) return;
+        setTrainingRows([]);
+        setTrainingError(err?.message ?? "Failed to load staff training records.");
+      } finally {
+        if (!cancelled) setTrainingLoading(false);
+      }
+    }
+    loadTrainingRecords();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentServiceId, organisationContextId]);
+
+  const competencyCheckResults = useMemo(() => {
+    const text = String(keyObservationsRisks ?? "").toLowerCase();
+    if (!text.trim()) return [];
+
+    const validStaffByTraining = new Map(); // key: lowercase trainingName -> Set(staffId)
+    const now = new Date();
+    for (const row of trainingRows) {
+      const trainingName = String(row.trainingName ?? "").trim().toLowerCase();
+      const staffId = String(row.staffId ?? "").trim();
+      if (!trainingName || !staffId) continue;
+      const expiryDate = resolveExpiryDate(row.expiryDate);
+      if (!expiryDate) continue;
+      const isExpired = expiryDate < now;
+      if (isExpired) continue;
+      if (!validStaffByTraining.has(trainingName)) validStaffByTraining.set(trainingName, new Set());
+      validStaffByTraining.get(trainingName).add(staffId);
+    }
+
+    // Case-insensitive keyword detection based on clinicalMapping.
+    const categoryToKeywords = new Map();
+    for (const [keyword, category] of Object.entries(clinicalMapping)) {
+      if (!text.includes(keyword.toLowerCase())) continue;
+      if (!categoryToKeywords.has(category)) categoryToKeywords.set(category, new Set());
+      categoryToKeywords.get(category).add(keyword);
+    }
+
+    return Array.from(categoryToKeywords.entries()).map(([category, keywords]) => ({
+      label: Array.from(keywords).join(", "),
+      trainingName: category,
+      count: validStaffByTraining.get(category.toLowerCase())?.size ?? 0,
+    }));
+  }, [keyObservationsRisks, trainingRows]);
+
+  useEffect(() => {
     if (!selectedPatientId && patients.length > 0) {
       setSelectedPatientId(patients[0].id ?? "");
     }
@@ -121,8 +237,9 @@ export default function CarePlans() {
       setCompetencyLoading(true);
       setCompetencyWarning(null);
       try {
-        const { organisationId } = await getUserContext();
-        const trainingRows = await listStaffTraining(organisationId || "dev-org-001", currentServiceId ?? null);
+        const claims = await getUserContext().catch(() => ({}));
+        const org = (organisationContextId || claims?.organisationId || "dev-org-001").toString();
+        const trainingRows = await listStaffTraining(org, currentServiceId ?? null);
         const validCounts = countValidStaffByTraining(trainingRows);
         const patientName = selectedPatient
           ? `${selectedPatient.firstName ?? ""} ${selectedPatient.lastName ?? ""}`.trim() || "Patient"
@@ -146,7 +263,7 @@ export default function CarePlans() {
     return () => {
       cancelled = true;
     };
-  }, [selectedPlan, selectedPatientId, selectedPatient, currentServiceId]);
+  }, [selectedPlan, selectedPatientId, selectedPatient, currentServiceId, organisationContextId]);
 
   async function handleGenerate() {
     setSaveError(null);
@@ -192,11 +309,12 @@ export default function CarePlans() {
 
     setSaveLoading(true);
     try {
-      const { organisationId } = await getUserContext();
+      const claims = await getUserContext().catch(() => ({}));
+      const org = (organisationContextId || claims?.organisationId || "dev-org-001").toString();
       await saveAiCarePlanDraft({
         patientId: selectedPatient.id,
         content: generatedPlan,
-        organisationId: organisationId || "dev-org-001",
+        organisationId: org,
       });
       setSaveSuccess("Saved to patient record.");
       await loadRecentCarePlans();
@@ -319,6 +437,78 @@ export default function CarePlans() {
             )}
           </button>
         </div>
+      </section>
+
+      <section
+        style={{
+          background: "#ffffff",
+          border: "1px solid #e2e8f0",
+          borderRadius: 12,
+          padding: "1.25rem",
+          marginBottom: 16,
+        }}
+      >
+        <h2 style={{ fontSize: "1rem", marginTop: 0, marginBottom: "0.5rem" }}>Safety & Competency Check</h2>
+        <p style={{ marginTop: 0, color: "#64748b", fontSize: "0.85rem", fontWeight: 700 }}>
+          Live check against <code style={{ fontSize: 12 }}>staff_training</code> for org {activeOrganisationId || "—"}.
+        </p>
+        {trainingLoading && (
+          <p style={{ margin: 0, color: "#64748b", fontSize: 13, fontWeight: 700 }}>Checking current competency records…</p>
+        )}
+        {trainingError && (
+          <div role="alert" style={{ marginTop: 10, padding: "0.75rem 1rem", background: "#ffebee", border: "1px solid #ef9a9a", borderRadius: 10, color: "#b71c1c", fontSize: 13 }}>
+            {trainingError}
+          </div>
+        )}
+        {!trainingLoading && !trainingError && !keyObservationsRisks.trim() && (
+          <p style={{ margin: 0, color: "#64748b", fontSize: 13 }}>
+            Enter observations/risks (e.g., mobility, medication, dementia) to run competency matching.
+          </p>
+        )}
+        {!trainingLoading && !trainingError && keyObservationsRisks.trim() && competencyCheckResults.length === 0 && (
+          <p style={{ margin: 0, color: "#64748b", fontSize: 13 }}>
+            No configured competency keywords detected yet in the risk text.
+          </p>
+        )}
+        {!trainingLoading && !trainingError && competencyCheckResults.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 6 }}>
+            {competencyCheckResults.map((item) =>
+              item.count > 0 ? (
+                <div
+                  key={item.label}
+                  role="status"
+                  style={{
+                    background: "#f0fdf4",
+                    border: "1px solid #86efac",
+                    color: "#166534",
+                    borderRadius: 10,
+                    padding: "0.75rem 1rem",
+                    fontSize: 13,
+                    fontWeight: 800,
+                  }}
+                >
+                  {`✅ Safe to Deliver: ${item.count} staff member${item.count === 1 ? "" : "s"} have valid ${item.trainingName} training (UK format verified).`}
+                </div>
+              ) : (
+                <div
+                  key={item.label}
+                  role="alert"
+                  style={{
+                    background: "#fef2f2",
+                    border: "1px solid #fca5a5",
+                    color: "#b91c1c",
+                    borderRadius: 10,
+                    padding: "0.75rem 1rem",
+                    fontSize: 13,
+                    fontWeight: 800,
+                  }}
+                >
+                  ⚠️ Risk: No staff currently have valid training for this specific need on file.
+                </div>
+              )
+            )}
+          </div>
+        )}
       </section>
 
       {saveError && (
