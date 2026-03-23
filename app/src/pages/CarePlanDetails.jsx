@@ -3,6 +3,9 @@ import { useParams } from "react-router-dom";
 import { useOrganisation } from "../context/OrganisationContext";
 import { useService } from "../context/ServiceContext";
 import { getCarePlanById, listCarePlanVersions, updateCarePlanRecord } from "../services/carePlanManagementService";
+import { listStaffTraining, countValidStaffByTraining } from "../services/staffTrainingService";
+import { getCompetencyGapWarning } from "../services/aiService";
+import { getPatientById } from "../services/patientService";
 
 function formatDate(value) {
   if (!value) return "—";
@@ -35,6 +38,9 @@ export default function CarePlanDetails() {
   const [supportStrategies, setSupportStrategies] = useState("");
   const [reviewDate, setReviewDate] = useState("");
   const [status, setStatus] = useState("active");
+
+  const [competencyWarning, setCompetencyWarning] = useState(null);
+  const [competencyLoading, setCompetencyLoading] = useState(false);
 
   const serviceNameById = useMemo(() => {
     const map = {};
@@ -93,6 +99,46 @@ export default function CarePlanDetails() {
       cancelled = true;
     };
   }, [organisationId, carePlanId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function runMatch() {
+      if (!organisationId || !carePlan?.patientId) {
+        setCompetencyWarning(null);
+        return;
+      }
+      setCompetencyLoading(true);
+      setCompetencyWarning(null);
+      try {
+        const [patient, trainingRows] = await Promise.all([
+          getPatientById(carePlan.patientId).catch(() => null),
+          listStaffTraining(organisationId, currentServiceId ?? null),
+        ]);
+        if (cancelled) return;
+        const validCounts = countValidStaffByTraining(trainingRows);
+        const displayName = patient
+          ? `${patient.firstName ?? ""} ${patient.lastName ?? ""}`.trim() || carePlan.patientId
+          : carePlan.patientId;
+        const msg = await getCompetencyGapWarning({
+          patientDisplayName: displayName,
+          careNeeds,
+          riskAssessment,
+          supportStrategies,
+          planContent: "",
+          validCountsByTraining: validCounts,
+        });
+        if (!cancelled) setCompetencyWarning(msg);
+      } catch {
+        if (!cancelled) setCompetencyWarning(null);
+      } finally {
+        if (!cancelled) setCompetencyLoading(false);
+      }
+    }
+    runMatch();
+    return () => {
+      cancelled = true;
+    };
+  }, [organisationId, carePlan?.id, carePlan?.patientId, careNeeds, riskAssessment, supportStrategies, currentServiceId]);
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -174,6 +220,26 @@ export default function CarePlanDetails() {
           }}
         >
           {error}
+        </div>
+      )}
+
+      {(competencyLoading || competencyWarning) && (
+        <div
+          role="status"
+          style={{
+            marginBottom: "1rem",
+            padding: "1rem",
+            background: competencyWarning ? "#fffbeb" : "#f8fafc",
+            borderRadius: 12,
+            border: `1px solid ${competencyWarning ? "#fde68a" : "#e2e8f0"}`,
+            color: competencyWarning ? "#92400e" : "#64748b",
+            fontWeight: 700,
+            fontSize: "0.95rem",
+          }}
+        >
+          {competencyLoading && !competencyWarning
+            ? "Checking staff training coverage against this care plan…"
+            : competencyWarning || ""}
         </div>
       )}
 

@@ -28,6 +28,7 @@ import CarePlans from "./pages/CarePlans";
 import Incidents from "./pages/Incidents";
 import ComplianceOverview from "./pages/ComplianceOverview";
 import InspectionSimulator from "./pages/InspectionSimulator";
+import StaffTraining from "./pages/StaffTraining";
 
 export default function App() {
   return (
@@ -53,6 +54,7 @@ export default function App() {
           <Route path="/clinical-notes" element={<ClinicalNotes />} />
           <Route path="/documents" element={<Documents />} />
           <Route path="/care-plans" element={<CarePlans />} />
+          <Route path="/staff-training" element={<StaffTraining />} />
           <Route path="/compliance" element={<ComplianceOverview />} />
           <Route path="/inspection-simulation" element={<InspectionSimulator />} />
           <Route path="/inspection-simulator" element={<InspectionSimulator />} />

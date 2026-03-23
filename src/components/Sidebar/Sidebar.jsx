@@ -4,7 +4,6 @@ import { useRole } from "../../context/RoleContext";
 import { NAV_ITEMS } from "../../config/routes";
 import {
   NHS_BLUE,
-  NHS_BLUE_HOVER,
   SIDEBAR_WIDTH_EXPANDED,
   SIDEBAR_WIDTH_COLLAPSED,
   FOCUS_OUTLINE,

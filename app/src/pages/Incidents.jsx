@@ -6,7 +6,15 @@ import { useAuth } from "../context/AuthContext";
 import { useRole } from "../context/RoleContext";
 import IncidentForm from "../components/IncidentForm";
 import { fetchIncidents, createIncidentLegacy, INCIDENT_SEVERITY } from "../services/incidentService";
+import { getPatientById } from "../services/patientService";
+import { generateCandourLetter } from "../services/aiService";
 import { isIndexError, INDEX_ERROR_MESSAGE } from "../lib/firestoreIndexError";
+
+/** Regulation 20 candour: show draft letter for medium/high severity incidents. */
+function isDutyOfCandourSeverity(severity) {
+  const s = String(severity ?? "").toLowerCase();
+  return s === "medium" || s === "high";
+}
 
 function formatDate(value) {
   if (!value) return "—";
@@ -38,6 +46,11 @@ export default function Incidents() {
   const [filterSeverity, setFilterSeverity] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterServiceId, setFilterServiceId] = useState("");
+
+  const [candourModalOpen, setCandourModalOpen] = useState(false);
+  const [candourLetterText, setCandourLetterText] = useState("");
+  const [candourLoadingId, setCandourLoadingId] = useState(null);
+  const [candourError, setCandourError] = useState(null);
 
   const effectiveServiceId = filterServiceId || currentServiceId || null;
 
@@ -95,6 +108,82 @@ export default function Incidents() {
 
   const safeServices = Array.isArray(services) ? services : [];
   const reportSectionRef = useRef(null);
+
+  /** Draft from the report form (before/without relying on the saved row). */
+  async function handleDraftCandourFromForm(payload) {
+    setCandourError(null);
+    setCandourLoadingId("preview-form");
+    try {
+      let patientData = { id: payload.patientId || "", firstName: "", lastName: "" };
+      if (payload.patientId) {
+        try {
+          patientData = await getPatientById(payload.patientId);
+        } catch {
+          /* minimal metadata */
+        }
+      }
+      const incident = {
+        id: "preview",
+        type: payload.type,
+        severity: payload.severity,
+        description: payload.description,
+        actionsTaken: payload.actionsTaken,
+        status: "open",
+        patientId: payload.patientId,
+        reportedBy: user?.email || user?.uid,
+        reportedAt: new Date(),
+      };
+      const letter = await generateCandourLetter(incident, patientData);
+      setCandourLetterText(letter);
+      setCandourModalOpen(true);
+    } catch (err) {
+      setCandourError(err?.message ?? "Could not generate Duty of Candour letter.");
+      setCandourModalOpen(true);
+      setCandourLetterText("");
+    } finally {
+      setCandourLoadingId(null);
+    }
+  }
+
+  async function handleDraftCandourLetter(incident) {
+    if (!incident?.id) return;
+    setCandourError(null);
+    setCandourLoadingId(incident.id);
+    try {
+      let patientData = { id: incident.patientId || "", firstName: "", lastName: "" };
+      if (incident.patientId) {
+        try {
+          patientData = await getPatientById(incident.patientId);
+        } catch {
+          /* use minimal metadata if patient fetch fails */
+        }
+      }
+      const letter = await generateCandourLetter(incident, patientData);
+      setCandourLetterText(letter);
+      setCandourModalOpen(true);
+    } catch (err) {
+      setCandourError(err?.message ?? "Could not generate Duty of Candour letter.");
+      setCandourModalOpen(true);
+      setCandourLetterText("");
+    } finally {
+      setCandourLoadingId(null);
+    }
+  }
+
+  function closeCandourModal() {
+    setCandourModalOpen(false);
+    setCandourLetterText("");
+    setCandourError(null);
+  }
+
+  async function copyCandourLetter() {
+    if (!candourLetterText.trim()) return;
+    try {
+      await navigator.clipboard.writeText(candourLetterText);
+    } catch {
+      setCandourError("Copy failed. Select the text and copy manually.");
+    }
+  }
 
   return (
     <div style={{ padding: "2rem" }}>
@@ -203,7 +292,18 @@ export default function Incidents() {
         }}
       >
         <h2 style={{ fontSize: "1rem", margin: 0, marginBottom: "0.75rem" }}>Report an incident</h2>
-        <IncidentForm onSubmit={handleCreateIncident} loading={creating} legacy />
+        <p style={{ margin: "0 0 0.75rem 0", fontSize: "0.85rem", color: "#475569", lineHeight: 1.45 }}>
+          <strong>Duty of Candour (Regulation 20):</strong> For <strong>Medium</strong> or <strong>High</strong> severity, use{" "}
+          <strong>Draft Duty of Candour letter</strong> below (works from this form), or after saving use the same control in
+          the incidents table. It does not appear for Low severity.
+        </p>
+        <IncidentForm
+          onSubmit={handleCreateIncident}
+          loading={creating}
+          legacy
+          onDraftCandour={handleDraftCandourFromForm}
+          draftCandourLoading={candourLoadingId === "preview-form"}
+        />
       </section>
 
       <section aria-label="Incidents list">
@@ -265,6 +365,7 @@ export default function Incidents() {
                   <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Status</th>
                   <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Reported by</th>
                   <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Description</th>
+                  <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Duty of Candour</th>
                   <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Timeline</th>
                 </tr>
               </thead>
@@ -288,6 +389,29 @@ export default function Incidents() {
                     <td style={{ padding: "0.5rem 0.75rem" }}>
                       {incident.description || "No description"}
                     </td>
+                    <td style={{ padding: "0.5rem 0.75rem", verticalAlign: "top" }}>
+                      {isDutyOfCandourSeverity(incident.severity) ? (
+                        <button
+                          type="button"
+                          onClick={() => handleDraftCandourLetter(incident)}
+                          disabled={candourLoadingId === incident.id}
+                          style={{
+                            padding: "6px 10px",
+                            borderRadius: 6,
+                            border: "1px solid #cbd5e1",
+                            background: "#fff",
+                            fontSize: "0.8rem",
+                            fontWeight: 600,
+                            cursor: candourLoadingId === incident.id ? "wait" : "pointer",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {candourLoadingId === incident.id ? "Drafting…" : "Draft Duty of Candour Letter"}
+                        </button>
+                      ) : (
+                        <span style={{ color: "#94a3b8", fontSize: "0.8rem" }}>—</span>
+                      )}
+                    </td>
                     <td style={{ padding: "0.5rem 0.75rem" }}>
                       {incident.patientId ? (
                         <Link
@@ -305,6 +429,112 @@ export default function Incidents() {
           </div>
         )}
       </section>
+
+      {candourModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="candour-modal-title"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: "1rem",
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 12,
+              maxWidth: 720,
+              width: "100%",
+              maxHeight: "90vh",
+              display: "flex",
+              flexDirection: "column",
+              boxShadow: "0 20px 40px rgba(0,0,0,0.15)",
+            }}
+          >
+            <div style={{ padding: "1rem 1.25rem", borderBottom: "1px solid #e2e8f0" }}>
+              <h2 id="candour-modal-title" style={{ margin: 0, fontSize: "1.1rem" }}>
+                Duty of Candour letter (draft)
+              </h2>
+              <p style={{ margin: "0.35rem 0 0 0", fontSize: "0.8rem", color: "#64748b" }}>
+                Regulation 20 — edit before sending. This is a draft; review with your governance lead.
+              </p>
+            </div>
+            <div style={{ padding: "1rem 1.25rem", flex: 1, overflow: "auto" }}>
+              {candourError && !candourLetterText ? (
+                <p role="alert" style={{ color: "#b91c1c", margin: 0 }}>
+                  {candourError}
+                </p>
+              ) : (
+                <textarea
+                  value={candourLetterText}
+                  onChange={(e) => setCandourLetterText(e.target.value)}
+                  rows={18}
+                  style={{
+                    width: "100%",
+                    minHeight: 320,
+                    padding: "12px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    fontSize: "0.9rem",
+                    lineHeight: 1.5,
+                    fontFamily: "inherit",
+                    resize: "vertical",
+                  }}
+                  placeholder="Letter will appear here…"
+                />
+              )}
+            </div>
+            <div
+              style={{
+                padding: "1rem 1.25rem",
+                borderTop: "1px solid #e2e8f0",
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                justifyContent: "flex-end",
+              }}
+            >
+              <button
+                type="button"
+                onClick={copyCandourLetter}
+                disabled={!candourLetterText.trim()}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  border: "1px solid #cbd5e1",
+                  background: "#f8fafc",
+                  fontWeight: 600,
+                  cursor: !candourLetterText.trim() ? "default" : "pointer",
+                }}
+              >
+                Copy to clipboard
+              </button>
+              <button
+                type="button"
+                onClick={closeCandourModal}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: "#005eb8",
+                  color: "#fff",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

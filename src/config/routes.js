@@ -1,3 +1,5 @@
+import { ShieldAlert } from "lucide-react";
+
 /**
  * Route–role mapping. Single source of truth for ProtectedRoute and Sidebar.
  * Sidebar uses label, ariaLabel (optional), path, and allowedRoles.
@@ -6,14 +8,14 @@
 /** Roles that can access readiness sections (Governance, Safeguarding, etc.). Viewer sees Overview only. */
 export const READINESS_SECTION_ROLES = ["Manager", "QualityLead"];
 
-/** @type {{ path: string, label: string, ariaLabel?: string, allowedRoles?: string[], platformAdminOnly?: boolean }[]} */
+/** @type {{ path: string, label: string, ariaLabel?: string, icon?: unknown, allowedRoles?: string[], platformAdminOnly?: boolean }[]} */
 export const NAV_ITEMS = [
   { path: "/admin", label: "Admin", ariaLabel: "Platform admin control panel", platformAdminOnly: true },
   { path: "/dashboard", label: "Overview", ariaLabel: "Dashboard overview", allowedRoles: undefined },
   { path: "/actions", label: "Actions", ariaLabel: "Compliance actions", allowedRoles: undefined },
   { path: "/documents", label: "Documents", ariaLabel: "Evidence and policy documents", allowedRoles: undefined },
   { path: "/evidence", label: "Evidence", ariaLabel: "Evidence management", allowedRoles: undefined },
-  { path: "/incidents", label: "Incidents & Safeguarding", ariaLabel: "Incidents and safeguarding", allowedRoles: undefined },
+  { path: "/incidents", label: "Incidents & Safeguarding", ariaLabel: "Incidents and safeguarding", icon: ShieldAlert, allowedRoles: undefined },
   { path: "/evidence-pack", label: "Evidence Pack", ariaLabel: "CQC evidence pack generator", allowedRoles: undefined },
   { path: "/inspection-simulation", label: "Inspection simulation", ariaLabel: "CQC inspection simulation", allowedRoles: undefined },
   { path: "/reports", label: "Reports", ariaLabel: "CQC Readiness Report", allowedRoles: undefined },

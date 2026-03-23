@@ -24,7 +24,19 @@ const inputStyle = {
  * - set legacy=true to use the previous payload shape used by Incidents page
  * - loading (boolean) to disable submit while saving
  */
-export default function IncidentForm({ onSubmit, loading, legacy = false, initialPatientId = "" }) {
+function isDutyOfCandourSeverity(severity) {
+  const s = String(severity ?? "").toLowerCase();
+  return s === "medium" || s === "high";
+}
+
+export default function IncidentForm({
+  onSubmit,
+  loading,
+  legacy = false,
+  initialPatientId = "",
+  onDraftCandour,
+  draftCandourLoading = false,
+}) {
   const [patientId, setPatientId] = useState(initialPatientId || "");
 
   // Stage 6 fields
@@ -66,6 +78,19 @@ export default function IncidentForm({ onSubmit, loading, legacy = false, initia
       mounted = false;
     };
   }, [legacy]);
+
+  function handleDraftCandourClick(e) {
+    e.preventDefault();
+    if (!legacy || !onDraftCandour) return;
+    if (!patientId.trim() || !type || !severity || !description.trim()) return;
+    onDraftCandour({
+      patientId: patientId.trim(),
+      type,
+      severity,
+      description: description.trim(),
+      actionsTaken: actionsTaken.trim(),
+    });
+  }
 
   function handleSubmit(e) {
     e.preventDefault();
@@ -251,22 +276,50 @@ export default function IncidentForm({ onSubmit, loading, legacy = false, initia
         </div>
       ) : null}
 
-      <button
-        type="submit"
-        disabled={loading}
-        style={{
-          padding: "8px 16px",
-          borderRadius: 6,
-          border: "none",
-          background: "#1976d2",
-          color: "#fff",
-          fontSize: "14px",
-          fontWeight: 600,
-          cursor: loading ? "default" : "pointer",
-        }}
-      >
-        {loading ? "Submitting…" : "Submit incident report"}
-      </button>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+        <button
+          type="submit"
+          disabled={loading}
+          style={{
+            padding: "8px 16px",
+            borderRadius: 6,
+            border: "none",
+            background: "#1976d2",
+            color: "#fff",
+            fontSize: "14px",
+            fontWeight: 600,
+            cursor: loading ? "default" : "pointer",
+          }}
+        >
+          {loading ? "Submitting…" : "Submit incident report"}
+        </button>
+
+        {legacy && onDraftCandour && isDutyOfCandourSeverity(severity) && (
+          <button
+            type="button"
+            onClick={handleDraftCandourClick}
+            disabled={loading || draftCandourLoading}
+            style={{
+              padding: "8px 16px",
+              borderRadius: 6,
+              border: "1px solid #0f766e",
+              background: "#f0fdfa",
+              color: "#0f766e",
+              fontSize: "14px",
+              fontWeight: 600,
+              cursor: loading || draftCandourLoading ? "default" : "pointer",
+            }}
+          >
+            {draftCandourLoading ? "Drafting…" : "Draft Duty of Candour letter"}
+          </button>
+        )}
+      </div>
+      {legacy && onDraftCandour && isDutyOfCandourSeverity(severity) && (
+        <p style={{ margin: "0.75rem 0 0 0", fontSize: "0.8rem", color: "#64748b", maxWidth: 520 }}>
+          Uses the details above (you can draft before or after submitting). For Low severity, Regulation 20 candour may not
+          apply — use the table below after save if severity is upgraded.
+        </p>
+      )}
     </form>
   );
 }

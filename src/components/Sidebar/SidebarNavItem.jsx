@@ -9,6 +9,7 @@ export default function SidebarNavItem({ item, collapsed }) {
   if (!item) return null;
   const path = item.path ?? "/dashboard";
   const ariaLabel = item.ariaLabel ?? item.label ?? "";
+  const Icon = item.icon;
   const displayText = collapsed ? (item.label ?? "").charAt(0) : (item.label ?? "");
 
   return (
@@ -23,13 +24,20 @@ export default function SidebarNavItem({ item, collapsed }) {
       })}
       className="sidebar-nav-link"
     >
+      {Icon ? (
+        <span style={iconWrap}>
+          <Icon size={16} />
+        </span>
+      ) : null}
       <span style={collapsed ? charOnly : undefined}>{displayText}</span>
     </NavLink>
   );
 }
 
 const linkBase = {
-  display: "block",
+  display: "flex",
+  alignItems: "center",
+  gap: "8px",
   padding: "12px 16px",
   borderRadius: "4px",
   textDecoration: "none",
@@ -50,7 +58,14 @@ const linkActive = {
 const charOnly = {
   display: "inline-block",
   textAlign: "center",
-  width: "100%",
+  width: "auto",
+};
+
+const iconWrap = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: 16,
 };
 
 // Focus visible styles applied via global or wrapper; NavLink doesn't accept :focus-visible in inline style.

@@ -277,6 +277,23 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // --- staff_training: per-staff certificates / competencies (Valid|Expired from expiryDate in app) ---
+    match /staff_training/{recordId} {
+      allow read: if isActiveUser() && resource.data.organisationId == userOrgId()
+        && (resource.data.get('serviceId', null) == null || canAccessService(resource.data.organisationId, resource.data.serviceId));
+      allow create: if orgMatch(request.resource.data.organisationId) && canWriteDocuments()
+        && request.resource.data.keys().hasAll(['organisationId', 'staffId', 'trainingName', 'expiryDate'])
+        && request.resource.data.organisationId is string
+        && request.resource.data.staffId is string
+        && request.resource.data.trainingName is string
+        && request.resource.data.expiryDate is timestamp
+        && (request.resource.data.get('serviceId', null) == null || canAccessService(request.resource.data.organisationId, request.resource.data.serviceId));
+      allow update: if orgMatch(resource.data.organisationId) && canWriteDocuments()
+        && request.resource.data.organisationId == resource.data.organisationId
+        && (resource.data.get('serviceId', null) == null || canAccessService(resource.data.organisationId, resource.data.serviceId));
+      allow delete: if false;
+    }
+
     // --- care_plans: structured records (careNeeds/…) or AI draft rows (content + status draft) ---
     match /care_plans/{planId} {
       allow read: if isActiveUser() && resource.data.organisationId == userOrgId();

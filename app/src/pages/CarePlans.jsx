@@ -6,8 +6,9 @@ import {
   saveAiCarePlanDraft,
 } from "../services/carePlanManagementService";
 import { listPatients } from "../services/patientService";
-import { generateCarePlanDraft } from "../services/aiService";
+import { generateCarePlanDraft, getCompetencyGapWarning } from "../services/aiService";
 import { getUserContext } from "../services/authService";
+import { listStaffTraining, countValidStaffByTraining } from "../services/staffTrainingService";
 import { useService } from "../context/ServiceContext";
 import { CarePlanFullViewModal } from "../components/CarePlanFullViewModal";
 
@@ -45,6 +46,8 @@ export default function CarePlans() {
   const [recentError, setRecentError] = useState(null);
 
   const [selectedPlan, setSelectedPlan] = useState(null);
+  const [competencyWarning, setCompetencyWarning] = useState(null);
+  const [competencyLoading, setCompetencyLoading] = useState(false);
 
   const selectedPatient = useMemo(
     () => patients.find((p) => p.id === selectedPatientId) ?? null,
@@ -106,6 +109,44 @@ export default function CarePlans() {
   useEffect(() => {
     setSelectedPlan(null);
   }, [selectedPatientId]);
+
+  useEffect(() => {
+    if (!selectedPlan || !selectedPatientId) {
+      setCompetencyWarning(null);
+      setCompetencyLoading(false);
+      return;
+    }
+    let cancelled = false;
+    async function runCompetencyMatch() {
+      setCompetencyLoading(true);
+      setCompetencyWarning(null);
+      try {
+        const { organisationId } = await getUserContext();
+        const trainingRows = await listStaffTraining(organisationId || "dev-org-001", currentServiceId ?? null);
+        const validCounts = countValidStaffByTraining(trainingRows);
+        const patientName = selectedPatient
+          ? `${selectedPatient.firstName ?? ""} ${selectedPatient.lastName ?? ""}`.trim() || "Patient"
+          : "Patient";
+        const msg = await getCompetencyGapWarning({
+          patientDisplayName: patientName,
+          careNeeds: "",
+          riskAssessment: "",
+          supportStrategies: "",
+          planContent: selectedPlan.content ?? "",
+          validCountsByTraining: validCounts,
+        });
+        if (!cancelled) setCompetencyWarning(msg);
+      } catch {
+        if (!cancelled) setCompetencyWarning(null);
+      } finally {
+        if (!cancelled) setCompetencyLoading(false);
+      }
+    }
+    runCompetencyMatch();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPlan, selectedPatientId, selectedPatient, currentServiceId]);
 
   async function handleGenerate() {
     setSaveError(null);
@@ -455,6 +496,8 @@ export default function CarePlans() {
         }
         generatedAtLabel={selectedPlan ? formatSavedAt(selectedPlan.createdAt) : "—"}
         planContent={selectedPlan?.content ?? ""}
+        competencyWarning={competencyWarning}
+        competencyLoading={competencyLoading}
       />
     </div>
   );

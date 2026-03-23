@@ -188,3 +188,151 @@ export async function generateInspectorAuditFeedback(data, managerResponse) {
   }
   return text.trim();
 }
+
+/**
+ * Duty of Candour letter (draft) for families — Regulation 20 (Health and Social Care Act 2008 (Regulated Activities) Regulations 2014).
+ * @param {Record<string, unknown>} incidentData
+ * @param {Record<string, unknown>} patientData
+ */
+function buildCandourLetterPrompt(incidentData, patientData) {
+  const inc = incidentData && typeof incidentData === "object" ? incidentData : {};
+  const pat = patientData && typeof patientData === "object" ? patientData : {};
+
+  const patientName = [pat.firstName, pat.lastName].filter(Boolean).join(" ").trim() || pat.id || "the person we support";
+  const patientLine = `Patient / service user: ${patientName}${pat.id ? ` (ID: ${pat.id})` : ""}${pat.dob ? `; DOB: ${formatRecord(pat.dob)}` : ""}`;
+
+  const incidentBlock = [
+    `Incident type: ${inc.type ?? inc.incidentType ?? "N/A"}`,
+    `Severity: ${inc.severity ?? "N/A"}`,
+    `Status: ${inc.status ?? "N/A"}`,
+    `Reported at: ${formatRecord(inc.reportedAt ?? inc.createdAt)}`,
+    `Description (facts as recorded): ${inc.description ?? "N/A"}`,
+    `Immediate actions taken: ${inc.actionsTaken ?? inc.immediateActions ?? "N/A"}`,
+    `Reported by: ${inc.reportedBy ?? "N/A"}`,
+  ].join("\n");
+
+  return [
+    "You are an experienced Care Manager writing a formal letter to the family or representative of a person using the service.",
+    "",
+    "Legal and regulatory tone: The letter must align with the Duty of Candour requirements under Regulation 20 of the Health and Social Care Act 2008 (Regulated Activities) Regulations 2014:",
+    "- Be open and transparent; offer a sincere apology where harm or distress has occurred or could have occurred.",
+    "- Set out clearly the facts known at the time of writing (do not speculate).",
+    "- Explain what immediate actions were taken to keep people safe and support those affected.",
+    "- Commit to providing further information after any investigation concludes, and how the family can ask questions or raise concerns.",
+    "- Use respectful, compassionate, professional language; avoid blame, jargon, or admissions of legal liability beyond factual transparency.",
+    "",
+    "Structure the letter as:",
+    "1) Date and salutation (Dear …)",
+    "2) Opening: sincere apology and regret where appropriate",
+    "3) Factual account: what happened, as known",
+    "4) Immediate safety and support actions",
+    "5) What happens next and follow-up after investigation",
+    "6) Closing and contact for questions",
+    "",
+    "Do not invent clinical details not in the data. If something is unknown, say so.",
+    "",
+    patientLine,
+    "",
+    "Incident / event details:",
+    incidentBlock,
+  ].join("\n");
+}
+
+export async function generateCandourLetter(incidentData, patientData) {
+  requireApiKey();
+  const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+  const prompt = buildCandourLetterPrompt(incidentData, patientData);
+  const result = await model.generateContent(prompt);
+  const text = result?.response?.text?.() ?? "";
+  if (!text.trim()) {
+    throw new Error("Gemini returned an empty Duty of Candour letter.");
+  }
+  return text.trim();
+}
+
+// --- Staff competency vs care plan needs (clinical governance) ---
+
+/**
+ * Deterministic fallback: match care text to training types and warn if valid staff count is below threshold.
+ * @param {{ combinedCareText: string, validCountsByTraining: Record<string, number> }} args
+ * @returns {string|null}
+ */
+export function heuristicCompetencyGapWarning({ combinedCareText, validCountsByTraining }) {
+  const text = (combinedCareText ?? "").toLowerCase();
+  const counts = validCountsByTraining ?? {};
+  const rules = [
+    { keywords: ["insulin support", "insulin administration", "insulin"], training: "Insulin Support", min: 3 },
+    { keywords: ["manual handling", "moving and handling"], training: "Manual Handling", min: 3 },
+    { keywords: ["peg feeding", "peg tube"], training: "PEG Feeding", min: 3 },
+    { keywords: ["catheter care", "catheter"], training: "Catheter Care", min: 3 },
+    { keywords: ["tracheostomy"], training: "Tracheostomy Care", min: 3 },
+  ];
+  for (const r of rules) {
+    if (!r.keywords.some((k) => text.includes(k))) continue;
+    const n = counts[r.training] ?? 0;
+    if (n < r.min) {
+      return `Warning: Only ${n} staff member${n === 1 ? "" : "s"} ${n === 1 ? "is" : "are"} currently trained for ${r.training}. Update training records soon.`;
+    }
+  }
+  return null;
+}
+
+function buildCompetencyGapPrompt(patientDisplayName, combinedCareText, trainingSummaryLines) {
+  return [
+    "You are a clinical governance assistant for a UK care service.",
+    "Compare the person's documented care needs with how many distinct staff currently hold VALID training certificates for each skill.",
+    "",
+    "Rules:",
+    "- If a required skill appears to be needed (e.g. insulin administration, manual handling, PEG feeding) but fewer than 3 staff are trained for the matching training record name, output ONE short warning sentence in this style:",
+    '  Warning: Only N staff members are currently trained for [Training Name]. Update training records soon.',
+    "- If training coverage is adequate or needs are unclear, respond with exactly: NONE",
+    "- Do not invent training names that are not listed in the coverage summary unless they clearly match a described need (e.g. map insulin care to Insulin Support).",
+    "",
+    `Person: ${patientDisplayName || "Service user"}`,
+    "",
+    "Care needs / plan text:",
+    (combinedCareText || "—").slice(0, 8000),
+    "",
+    "Valid training coverage (distinct staff with current certificates per training name):",
+    trainingSummaryLines || "—",
+  ].join("\n");
+}
+
+/**
+ * Uses Gemini when VITE_GEMINI_API_KEY is set; otherwise falls back to {@link heuristicCompetencyGapWarning}.
+ * @param {{ patientDisplayName?: string, careNeeds?: string, riskAssessment?: string, supportStrategies?: string, planContent?: string, validCountsByTraining: Record<string, number> }} args
+ * @returns {Promise<string|null>}
+ */
+export async function getCompetencyGapWarning({
+  patientDisplayName,
+  careNeeds,
+  riskAssessment,
+  supportStrategies,
+  planContent,
+  validCountsByTraining,
+}) {
+  const combined = [careNeeds, riskAssessment, supportStrategies, planContent].filter(Boolean).join("\n\n");
+  const trainingSummaryLines = Object.entries(validCountsByTraining ?? {})
+    .sort(([a], [b]) => String(a).localeCompare(String(b)))
+    .map(([k, v]) => `${k}: ${v} staff`)
+    .join("\n");
+
+  let aiText = "";
+  try {
+    requireApiKey();
+    const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+    const prompt = buildCompetencyGapPrompt(patientDisplayName, combined, trainingSummaryLines);
+    const result = await model.generateContent(prompt);
+    aiText = (result?.response?.text?.() ?? "").trim();
+  } catch {
+    aiText = "";
+  }
+
+  if (aiText && !/^NONE$/i.test(aiText) && !/^no warning\.?$/i.test(aiText)) {
+    return aiText.replace(/^["']|["']$/g, "").trim();
+  }
+
+  return heuristicCompetencyGapWarning({ combinedCareText: combined, validCountsByTraining });
+}

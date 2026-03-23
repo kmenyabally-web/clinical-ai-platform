@@ -30,6 +30,62 @@ export const generateCarePlanDraft = async (patientName, observations) => {
   }
 };
 
+/**
+ * Duty of Candour letter (draft) for families — Regulation 20.
+ */
+export const generateCandourLetter = async (incidentData, patientData) => {
+  if (!API_KEY) throw new Error("API Key missing from .env");
+
+  const inc = incidentData && typeof incidentData === "object" ? incidentData : {};
+  const pat = patientData && typeof patientData === "object" ? patientData : {};
+  const patientName =
+    [pat.firstName, pat.lastName].filter(Boolean).join(" ").trim() ||
+    pat.fullName ||
+    pat.id ||
+    "the person we support";
+
+  const prompt = `
+You are an experienced Care Manager writing a formal letter to the family or representative of a person using the service.
+
+Legal tone: Align with the Duty of Candour under Regulation 20 of the Health and Social Care Act 2008 (Regulated Activities) Regulations 2014:
+- Sincere apology and regret where appropriate.
+- Clear facts known at the time (no speculation).
+- Immediate actions taken for safety and support.
+- Commitment to follow up with more information when the investigation is closed, and how to raise questions.
+- Respectful, professional, compassionate language; avoid blame and legal admissions beyond factual transparency.
+
+Structure: salutation; apology; facts; immediate actions; next steps and follow-up after investigation; closing.
+
+Patient: ${patientName}${pat.id ? ` (ID: ${pat.id})` : ""}
+
+Incident:
+- Type: ${inc.type ?? inc.incidentType ?? "N/A"}
+- Severity: ${inc.severity ?? "N/A"}
+- Status: ${inc.status ?? "N/A"}
+- Description: ${inc.description ?? "N/A"}
+- Immediate actions: ${inc.immediateActions ?? inc.actionsTaken ?? "N/A"}
+- CQC notified: ${inc.cqcNotified ? "Yes" : "No"}
+
+Write the full letter in plain text.
+`.trim();
+
+  try {
+    const model = genAI.getGenerativeModel({
+      model:
+        (import.meta.env.VITE_GEMINI_MODEL && String(import.meta.env.VITE_GEMINI_MODEL).trim()) ||
+        "gemini-2.5-flash",
+    });
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
+    if (!text?.trim()) throw new Error("Empty response");
+    return text.trim();
+  } catch (error) {
+    console.error("Duty of Candour letter error:", error);
+    throw new Error("Could not generate Duty of Candour letter: " + error.message);
+  }
+};
+
 export const generateIncidentLessons = async (incident) => {
   if (!API_KEY) throw new Error("API Key missing from .env");
 

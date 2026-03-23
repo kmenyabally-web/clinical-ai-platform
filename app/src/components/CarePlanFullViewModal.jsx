@@ -162,7 +162,15 @@ const btnBase = {
   border: "none",
 };
 
-export function CarePlanFullViewModal({ open, onClose, patientName, generatedAtLabel, planContent }) {
+export function CarePlanFullViewModal({
+  open,
+  onClose,
+  patientName,
+  generatedAtLabel,
+  planContent,
+  competencyWarning = null,
+  competencyLoading = false,
+}) {
   const printRef = useRef(null);
   const handlePrint = useReactToPrint({
     contentRef: printRef,
@@ -273,6 +281,27 @@ export function CarePlanFullViewModal({ open, onClose, patientName, generatedAtL
                 <span style={{ color: "#64748b", fontWeight: 700 }}>Date generated:</span> {generatedAtLabel || "—"}
               </p>
             </header>
+
+            {(competencyLoading || competencyWarning) && (
+              <div
+                role="status"
+                style={{
+                  marginBottom: "1rem",
+                  padding: "0.85rem 1rem",
+                  background: competencyWarning ? "#fffbeb" : "#f1f5f9",
+                  borderRadius: 10,
+                  border: `1px solid ${competencyWarning ? "#fde68a" : "#e2e8f0"}`,
+                  color: competencyWarning ? "#92400e" : "#64748b",
+                  fontWeight: 800,
+                  fontSize: 13,
+                  lineHeight: 1.45,
+                }}
+              >
+                {competencyLoading && !competencyWarning
+                  ? "Checking staff training coverage against this plan…"
+                  : competencyWarning}
+              </div>
+            )}
 
             <div
               className="cqc-care-plan-markdown"

@@ -18,6 +18,12 @@ service firebase.storage {
         && request.auth.token.organisationId == organisationId;
     }
 
+    // Staff training certificates (evidence uploads)
+    match /organisations/{organisationId}/staff_training/{allPaths=**} {
+      allow read, write: if request.auth != null
+        && request.auth.token.organisationId == organisationId;
+    }
+
     // Deny all other paths by default
     match /{allPaths=**} {
       allow read, write: if false;

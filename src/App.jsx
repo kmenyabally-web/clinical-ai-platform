@@ -11,7 +11,6 @@ import Actions from "./pages/Actions";
 import Documents from "./pages/Documents";
 import Evidence from "./pages/Evidence";
 import EvidencePack from "./pages/EvidencePack";
-import Incidents from "./pages/Incidents";
 import InspectionSimulation from "./pages/InspectionSimulation";
 import Reports from "./pages/Reports";
 import Notifications from "./pages/Notifications";
@@ -19,6 +18,7 @@ import Services from "./pages/Services";
 import Billing from "./pages/Billing";
 import AdminPanel from "./pages/AdminPanel";
 import Unauthorised from "./pages/Unauthorised";
+import IncidentFormPage from "./components/IncidentFormPage";
 
 const Governance = () => <h1>Governance</h1>;
 const Safeguarding = () => <h1>Safeguarding</h1>;
@@ -86,16 +86,7 @@ export default function App() {
           }
         />
 
-        <Route
-          path="/incidents"
-          element={
-            <ProtectedRoute>
-              <Layout>
-                <Incidents />
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
+        <Route path="/incidents" element={<IncidentFormPage />} />
 
         <Route
           path="/evidence-pack"

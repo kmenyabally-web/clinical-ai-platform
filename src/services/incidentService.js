@@ -33,11 +33,13 @@ export async function createIncident(payload) {
     whenOccurred,
     reportedBy,
     serviceId,
+    severity,
   } = payload ?? {};
 
   if (!organisationId?.trim()) throw new Error("organisationId required");
   if (!patientId?.trim()) throw new Error("patientId required");
   if (!type?.trim()) throw new Error("incident type required");
+  if (!severity?.trim()) throw new Error("severity required");
   if (!description?.trim()) throw new Error("description required");
   if (!whereOccurred?.trim()) throw new Error("where occurred is required");
   if (!whenOccurred) throw new Error("when occurred is required");
@@ -48,6 +50,7 @@ export async function createIncident(payload) {
     organisationId: organisationId.trim(),
     patientId: patientId.trim(),
     type: type.trim(),
+    severity: severity.trim(),
     description: description.trim(),
     witnesses: String(witnesses ?? "").trim(),
     immediateActions: String(immediateActions ?? "").trim(),
@@ -73,6 +76,18 @@ export async function fetchOpenIncidents(organisationId, serviceId = null) {
     where("status", "==", "Open"),
     orderBy("createdAt", "desc"),
     limit(MAX_FEED_ITEMS),
+  ];
+  if (serviceId) constraints.push(where("serviceId", "==", serviceId));
+  const snap = await getDocs(query(collection(db, INCIDENTS_COLLECTION), ...constraints));
+  return (snap.docs ?? []).map((d) => ({ id: d.id, ...d.data() }));
+}
+
+export async function fetchRecentIncidents(organisationId, serviceId = null, maxItems = 25) {
+  if (!organisationId?.trim()) return [];
+  const constraints = [
+    where("organisationId", "==", organisationId),
+    orderBy("createdAt", "desc"),
+    limit(maxItems),
   ];
   if (serviceId) constraints.push(where("serviceId", "==", serviceId));
   const snap = await getDocs(query(collection(db, INCIDENTS_COLLECTION), ...constraints));
