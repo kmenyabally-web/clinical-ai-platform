@@ -1,12 +1,15 @@
 /** [ENABLEMENT GATE: STAGE 9 / 14 - EVIDENCE PACK EXPORT] */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { useOrganisation } from "../context/OrganisationContext";
 import { listPatients } from "../services/patientService";
 import { getUserContext } from "../services/authService";
 import { buildEvidencePackZip } from "../services/evidencePackService";
-import { logAuditEventNonBlocking } from "../services/auditService";
+import { logAuditEvent } from "../services/auditService";
 
 export default function EvidencePack() {
+  const { hasFeature } = useOrganisation();
   const [patients, setPatients] = useState([]);
   const [loadingPatients, setLoadingPatients] = useState(true);
   const [patientsError, setPatientsError] = useState(null);
@@ -26,6 +29,10 @@ export default function EvidencePack() {
     : "";
 
   useEffect(() => {
+    if (!hasFeature("reports")) {
+      setLoadingPatients(false);
+      return;
+    }
     let mounted = true;
     async function load() {
       setLoadingPatients(true);
@@ -46,13 +53,27 @@ export default function EvidencePack() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [hasFeature]);
 
   useEffect(() => {
     if (!selectedPatientId && patients.length > 0) {
       setSelectedPatientId(patients[0].id ?? "");
     }
   }, [patients, selectedPatientId]);
+
+  if (!hasFeature("reports")) {
+    return (
+      <div style={{ padding: "2rem", maxWidth: 560, margin: "0 auto" }}>
+        <h1 style={{ marginTop: 0 }}>CQC Evidence Pack</h1>
+        <p style={{ color: "#64748b" }}>
+          Evidence pack export is available on the Enterprise plan.{" "}
+          <Link to="/billing" style={{ color: "#005eb8", fontWeight: 700 }}>
+            View billing &amp; plans
+          </Link>
+        </p>
+      </div>
+    );
+  }
 
   async function handleGenerateBundle() {
     setError(null);
@@ -85,12 +106,11 @@ export default function EvidencePack() {
       URL.revokeObjectURL(url);
 
       setLastSummary({ rootFolderName, counts, filename });
-      logAuditEventNonBlocking({
-        action: "EVIDENCE_PACK_GENERATED",
-        entityType: "EVIDENCE_PACK",
+      void logAuditEvent("REPORT_GENERATED", {
         organisationId: org,
-        metadata: { patientId: selectedPatient.id, counts },
-      }).catch(() => {});
+        patientId: selectedPatient.id,
+        metadata: { kind: "evidence_pack_zip", counts },
+      });
     } catch (e) {
       setError(e?.message ?? "Failed to build evidence pack.");
     } finally {
@@ -231,7 +251,7 @@ export default function EvidencePack() {
         <h3 style={{ marginTop: 0, fontSize: "0.95rem", fontWeight: 900, color: "#334155" }}>What is included</h3>
         <ul style={{ margin: 0, paddingLeft: "1.25rem", color: "#475569", fontSize: 14, lineHeight: 1.6 }}>
           <li>
-            <strong>clinical_notes/</strong> — one <code>.txt</code> per note (category, author, content).
+            <strong>notes/</strong> — one <code>.txt</code> per note (category, author, content).
           </li>
           <li>
             <strong>care_plans/</strong> — AI drafts and structured plans as readable <code>.txt</code> (not binary PDF).

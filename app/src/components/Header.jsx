@@ -1,11 +1,13 @@
 import { useAuth } from "../context/AuthContext";
 import { useOrganisation } from "../context/OrganisationContext";
+import { useRole } from "../context/RoleContext";
 import NotificationBell from "./NotificationBell";
 import ServiceSwitcher from "./ServiceSwitcher";
 
 export default function Header() {
   const { user, logout } = useAuth();
   const { organisation, organisationId } = useOrganisation();
+  const { mdtRole } = useRole();
 
   return (
     <div style={styles.header}>
@@ -16,7 +18,25 @@ export default function Header() {
 
       <div style={styles.user}>
         {organisationId && <NotificationBell />}
-        <span>{user?.email}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {mdtRole ? (
+            <span
+              title="MDT / clinical role"
+              style={{
+                fontSize: 12,
+                fontWeight: 800,
+                color: "#0f172a",
+                backgroundColor: "#e0f2fe",
+                border: "1px solid #7dd3fc",
+                padding: "2px 8px",
+                borderRadius: 6,
+              }}
+            >
+              [{mdtRole}]
+            </span>
+          ) : null}
+          {user?.email}
+        </span>
         <button style={styles.button} onClick={logout}>
           Log out
         </button>

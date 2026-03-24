@@ -12,6 +12,7 @@ import {
 import { db } from "../firebase";
 import { logAuditEventNonBlocking } from "./auditService";
 import { updateSubscriptionPlan, cancelSubscription, getSubscription, PLANS } from "./billingService";
+import { normalizePlanKey } from "../utils/featureAccess";
 
 const ORGANISATIONS_COLLECTION = "organisations";
 const USERS_COLLECTION = "users";
@@ -77,7 +78,7 @@ export async function listOrganisationsWithDetails() {
       id,
       name: data.name ?? "",
       status: data.status ?? "active",
-      planName: sub?.planName ?? PLANS.STARTER,
+      planName: normalizePlanKey(sub?.planName ?? PLANS.BASIC),
       subscriptionStatus: sub ? "active" : "none",
       numberOfServices: serviceCountByOrg.get(id) ?? 0,
     };

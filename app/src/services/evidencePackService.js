@@ -97,7 +97,7 @@ export async function buildEvidencePackZip({ organisationId, patientId, patientN
     `Patient name: ${patientName || "—"}`,
     "",
     "Contents:",
-    `- clinical_notes/: ${notes.length} text export(s)`,
+    `- notes/ (clinical notes): ${notes.length} text export(s)`,
     `- care_plans/: ${carePlans.length} text export(s)`,
     `- organisation_documents/: up to ${documents.length} file(s) from organisation evidence/policy stores`,
     "",
@@ -106,7 +106,7 @@ export async function buildEvidencePackZip({ organisationId, patientId, patientN
 
   zip.file(`${root}/README.txt`, readme);
 
-  const notesFolder = zip.folder(`${root}/clinical_notes`);
+  const notesFolder = zip.folder(`${root}/notes`);
   for (const n of notes) {
     const body = [
       `Clinical note`,

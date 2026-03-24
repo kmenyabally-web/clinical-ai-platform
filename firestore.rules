@@ -24,19 +24,21 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
-    // Prefer custom claim for org; fallback to users doc (set on signup/login).
+    // Prefer Firestore users/{uid}.orgId (tenant source of truth); token claims can lag after signup/onboarding.
     function userOrgId() {
-      return request.auth.token.organisationId != null
-        ? request.auth.token.organisationId
-        : (getUserDoc().exists && getUserDoc().data.get('orgId', null) != null
-            ? getUserDoc().data.orgId
-            : null);
+      return getUserDoc().exists && getUserDoc().data.get('orgId', null) != null
+        ? getUserDoc().data.orgId
+        : (getUserDoc().exists && getUserDoc().data.get('organisationId', null) != null
+            ? getUserDoc().data.organisationId
+            : (request.auth.token.organisationId != null
+                ? request.auth.token.organisationId
+                : null));
     }
 
     function userRole() {
-      return request.auth.token.role != null
-        ? request.auth.token.role
-        : (getUserDoc().exists ? getUserDoc().data.get('role', null) : null);
+      return getUserDoc().exists && getUserDoc().data.get('role', null) != null
+        ? getUserDoc().data.get('role', null)
+        : (request.auth.token.role != null ? request.auth.token.role : null);
     }
 
     function isActiveUser() {
@@ -59,7 +61,7 @@ service cloud.firestore {
     function isManager() { return userRole() == 'Manager'; }
     function isQualityLead() { return userRole() == 'QualityLead'; }
     function isStaff() { return userRole() == 'Staff'; }
-    function isAuditor() { return userRole() == 'Auditor'; }
+    function isAuditor() { return userRole() == 'Auditor' || userRole() == 'Inspector'; }
 
     // Service-level access: Admin sees all; Manager/QualityLead only if assigned (managerId == uid).
     function canAccessService(orgId, serviceId) {
@@ -87,20 +89,31 @@ service cloud.firestore {
       return isAdmin() || isManager() || isQualityLead();
     }
 
+    // --- DEV: connection test collection (open — tighten or remove before production hardening) ---
+    match /test/{docId} {
+      allow read, write: if true;
+    }
+
     // --- Default deny ---
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // --- users: read own; create own (signup); no update/delete from client ---
+    // --- users: read own; org directory for Admin/Manager; create own (signup); updates for Admin/Manager / platform admin ---
     match /users/{userId} {
-      allow read: if isSignedIn() && (request.auth.uid == userId || isPlatformAdmin());
+      allow read: if isSignedIn() && (
+        request.auth.uid == userId ||
+        isPlatformAdmin() ||
+        (isActiveUser() && userOrgId() != null && resource.data.get('orgId', null) == userOrgId() && (isAdmin() || isManager()))
+      );
       allow create: if request.auth.uid == userId
         && request.resource.data.keys().hasAll(['orgId', 'role', 'status'])
         && request.resource.data.orgId is string
         && request.resource.data.role is string
         && request.resource.data.status is string;
-      allow update, delete: if false;
+      allow update: if isPlatformAdmin()
+        || (isActiveUser() && userOrgId() != null && resource.data.get('orgId', null) == userOrgId() && (isAdmin() || isManager()));
+      allow delete: if false;
     }
 
     // --- platform_admins: read only doc where userId == uid (for client-side check). Writes by backend only. ---
@@ -112,13 +125,49 @@ service cloud.firestore {
     // --- organisations: read own org or platform admin; update (e.g. status) Admin or platform admin ---
     match /organisations/{orgId} {
       allow read: if orgMatch(orgId) || isPlatformAdmin();
-      allow create: if isSignedIn()
-        && !getUserDoc().exists()
-        && request.resource.data.keys().hasAll(['name', 'status'])
-        && request.resource.data.name is string
-        && request.resource.data.name.size() > 0;
-      allow update: if (orgMatch(orgId) && isAdmin()) || isPlatformAdmin();
+      allow create: if isSignedIn() && (
+        (!getUserDoc().exists()
+          && request.resource.data.keys().hasAll(['name', 'status'])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0)
+        || (isPlatformAdmin()
+          && request.resource.data.keys().hasAll(['name', 'status'])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0)
+      );
+      allow update: if (orgMatch(orgId) && (isAdmin() || isManager())) || isPlatformAdmin();
       allow delete: if false;
+    }
+
+    // --- hospitals & wards: tenant structure (Admin/Manager create) ---
+    match /hospitals/{hospitalId} {
+      allow read: if (isActiveUser() && resource.data.organisationId == userOrgId()) || isPlatformAdmin();
+      allow create: if orgMatch(request.resource.data.organisationId) && (isAdmin() || isManager())
+        && request.resource.data.keys().hasAll(['name', 'organisationId'])
+        && request.resource.data.organisationId is string
+        && request.resource.data.name is string;
+      allow update, delete: if false;
+    }
+
+    match /wards/{wardId} {
+      allow read: if (isActiveUser() && resource.data.organisationId == userOrgId()) || isPlatformAdmin();
+      allow create: if orgMatch(request.resource.data.organisationId) && (isAdmin() || isManager())
+        && request.resource.data.keys().hasAll(['name', 'organisationId', 'hospitalId'])
+        && request.resource.data.organisationId is string
+        && request.resource.data.hospitalId is string
+        && request.resource.data.name is string;
+      allow update, delete: if false;
+    }
+
+    // --- patients: Stage 3 metadata; org + hospital + ward required on create ---
+    match /patients/{patientId} {
+      allow read: if isActiveUser() && resource.data.organisationId == userOrgId();
+      allow create: if orgMatch(request.resource.data.organisationId) && canWriteCompliance()
+        && request.resource.data.keys().hasAll(['organisationId', 'hospitalId', 'wardId', 'firstName', 'lastName'])
+        && request.resource.data.organisationId is string
+        && request.resource.data.hospitalId is string
+        && request.resource.data.wardId is string;
+      allow update, delete: if false;
     }
 
     // Subcollection: readiness (dashboard)
@@ -129,10 +178,13 @@ service cloud.firestore {
     // --- subscriptions: org-scoped; Admin or platform admin ---
     match /subscriptions/{subId} {
       allow read: if (isActiveUser() && resource.data.organisationId == userOrgId()) || isPlatformAdmin();
-      allow create: if (orgMatch(request.resource.data.organisationId) && isAdmin())
-        && request.resource.data.keys().hasAll(['organisationId', 'planName', 'status', 'billingCycle'])
+      allow create: if request.resource.data.keys().hasAll(['organisationId', 'planName', 'status', 'billingCycle'])
         && request.resource.data.organisationId is string
-        && request.resource.data.status == 'active';
+        && request.resource.data.status == 'active'
+        && (
+          (orgMatch(request.resource.data.organisationId) && isAdmin())
+          || isPlatformAdmin()
+        );
       allow update: if (isActiveUser() && resource.data.organisationId == userOrgId() && isAdmin()) || isPlatformAdmin();
       allow delete: if false;
     }

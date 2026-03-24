@@ -1,0 +1,16 @@
+// =============================================================================
+// FULL OPEN RULES — LOCAL / STAGING DEBUG ONLY
+// Replace firestore.rules with this file temporarily (firebase.json "rules" key)
+// or deploy: firebase deploy --only firestore:rules
+// NEVER deploy to production with these rules.
+// =============================================================================
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

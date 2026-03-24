@@ -1,12 +1,17 @@
-import { createContext, useContext, useMemo } from "react";
+import { createContext, useContext, useMemo, useState, useEffect } from "react";
+import { useAuth } from "./AuthContext";
 import { useOrganisation } from "./OrganisationContext";
-import { getPermissionsForRole } from "../config/rbac";
+import { getPermissionsForRole, normalizeRole } from "../config/rbac";
+import {
+  mapSystemRoleToEnterpriseCode,
+  canViewClinicalNotesAccess,
+  canEditClinicalNotesAccess,
+  canViewReportsFromSystemRole,
+  isInspectorSystemRole,
+} from "../utils/rbac";
 
 /**
- * RoleContext – RBAC derived from OrganisationContext (see docs/rbac.md).
- * Role comes from Firestore users/{uid}.role via OrganisationContext.userProfile.
- * No separate fetch: role and permissions are available when org is ready, so no UI flicker.
- * Depends on AuthContext and OrganisationContext being ready.
+ * RoleContext – RBAC uses `role` (system) only. Clinical identity is `mdtRole` on userProfile.
  */
 const RoleContext = createContext(null);
 
@@ -17,13 +22,53 @@ export function useRole() {
 }
 
 export function RoleProvider({ children }) {
-  const { userProfile, loading: orgLoading } = useOrganisation();
-  const role = userProfile?.role ?? null;
+  const { user } = useAuth();
+  const { userProfile, loading: orgLoading, organisationId } = useOrganisation();
+  const [claimRole, setClaimRole] = useState(null);
+
+  useEffect(() => {
+    if (!user) {
+      setClaimRole(null);
+      return;
+    }
+    let cancelled = false;
+    user
+      .getIdTokenResult(true)
+      .then((r) => {
+        const cr = r?.claims?.role;
+        if (cancelled) return;
+        setClaimRole(typeof cr === "string" && cr.trim() ? cr.trim() : null);
+      })
+      .catch(() => {
+        if (!cancelled) setClaimRole(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.uid]);
+
+  const role = useMemo(() => {
+    const raw = userProfile?.role ?? claimRole ?? null;
+    return normalizeRole(raw) ?? raw;
+  }, [userProfile?.role, claimRole]);
+
+  const mdtRole = userProfile?.mdtRole ?? null;
+
   const permissions = useMemo(() => getPermissionsForRole(role), [role]);
+  const enterpriseRoleCode = useMemo(() => mapSystemRoleToEnterpriseCode(role), [role]);
 
   const value = useMemo(
     () => ({
       role,
+      /** Clinical MDT label (Nurse, Psychologist, …). Not used for RBAC. */
+      mdtRole,
+      /** ADMIN | MANAGER | STAFF | INSPECTOR for display / analytics. */
+      enterpriseRoleCode,
+      /** @deprecated Use enterpriseRoleCode / mdtRole instead. */
+      canonicalRole: enterpriseRoleCode,
+      organisationId: organisationId ?? null,
+      currentUser: user ?? null,
+      currentUserId: user?.uid ?? null,
       permissions,
       loading: orgLoading,
       hasRole: (r) => role === r,
@@ -31,9 +76,13 @@ export function RoleProvider({ children }) {
         typeof permission === "string" && permissions.includes(permission),
       isAllowed: (allowedRoles) =>
         !allowedRoles ||
-        (Array.isArray(allowedRoles) && role && allowedRoles.includes(role)),
+        (Array.isArray(allowedRoles) && role != null && allowedRoles.includes(role)),
+      canViewNotes: () => canViewClinicalNotesAccess(role, mdtRole),
+      canEditNotes: () => canEditClinicalNotesAccess(role, mdtRole),
+      canViewReports: () => canViewReportsFromSystemRole(role),
+      isInspectorRole: () => isInspectorSystemRole(role),
     }),
-    [role, permissions, orgLoading]
+    [role, mdtRole, permissions, orgLoading, enterpriseRoleCode, organisationId, user]
   );
 
   return (

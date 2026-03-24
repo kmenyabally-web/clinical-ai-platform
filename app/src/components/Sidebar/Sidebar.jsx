@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useOrganisation } from "../../context/OrganisationContext";
 import { useRole } from "../../context/RoleContext";
-import { NAV_ITEMS } from "../../config/routes";
+import { NAV_ITEMS, MANAGEMENT_NAV_ITEMS, MANAGEMENT_ALLOWED_ROLES } from "../../config/routes";
 import {
   NHS_BLUE,
   NHS_BLUE_HOVER,
@@ -14,7 +14,7 @@ import SidebarNavItem from "./SidebarNavItem";
 
 export default function Sidebar() {
   const { organisation, organisationId, isPlatformAdmin } = useOrganisation();
-  const { isAllowed } = useRole();
+  const { isAllowed, role } = useRole();
   const [collapsed, setCollapsed] = useState(false);
 
   const visibleItems = useMemo(
@@ -25,6 +25,18 @@ export default function Sidebar() {
           : organisationId && isAllowed(item.allowedRoles)
       ),
     [isAllowed, isPlatformAdmin, organisationId]
+  );
+
+  const showManagementSection = useMemo(() => {
+    const roleOk =
+      isPlatformAdmin ||
+      (role != null && MANAGEMENT_ALLOWED_ROLES.includes(role));
+    return (organisationId || isPlatformAdmin) && roleOk;
+  }, [isPlatformAdmin, organisationId, role]);
+
+  const managementItems = useMemo(
+    () => (showManagementSection ? MANAGEMENT_NAV_ITEMS : []),
+    [showManagementSection]
   );
 
   const width = collapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH_EXPANDED;
@@ -81,6 +93,35 @@ export default function Sidebar() {
           {(visibleItems ?? []).map((item, idx) => (
             item ? <SidebarNavItem key={item.path ?? idx} item={item} collapsed={collapsed} /> : null
           ))}
+          {managementItems.length > 0 ? (
+            <div
+              style={{
+                marginTop: 12,
+                paddingTop: 12,
+                borderTop: "1px solid #e8edf2",
+              }}
+            >
+              {!collapsed ? (
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 800,
+                    letterSpacing: "0.02em",
+                    color: "#64748b",
+                    textTransform: "uppercase",
+                    padding: "4px 8px 8px",
+                  }}
+                >
+                  Management
+                </div>
+              ) : (
+                <div style={{ height: 8 }} aria-hidden />
+              )}
+              {managementItems.map((item, idx) => (
+                <SidebarNavItem key={`mgmt-${item.path ?? idx}`} item={item} collapsed={collapsed} />
+              ))}
+            </div>
+          ) : null}
         </nav>
       </aside>
     </>

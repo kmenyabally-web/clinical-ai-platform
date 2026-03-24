@@ -8,19 +8,22 @@ import { useAuth } from "../context/AuthContext";
 import { listPatients } from "../services/patientService";
 import { isIndexError, INDEX_ERROR_MESSAGE } from "../lib/firestoreIndexError";
 import { useRole } from "../context/RoleContext";
+import { analyseNote } from "../services/aiService";
 import { addClinicalNote, fetchClinicalNotesForOrganisation } from "../services/noteService";
+import { logAuditEvent } from "../services/auditService";
 import ClinicalNoteForm from "../components/ClinicalNoteForm";
 import { formatUkDateTime } from "../utils/dateFormat";
+import { MDT_OTHER, MDT_ROLES } from "../constants/mdtRoles";
 
 function formatDate(value) {
   return formatUkDateTime(value, "—");
 }
 
 export default function ClinicalNotes() {
-  const { organisationId, organisation } = useOrganisation();
+  const { organisationId, organisation, hasFeature, userProfile } = useOrganisation();
   const { currentServiceId, services } = useService();
   const { user } = useAuth();
-  const { role } = useRole();
+  const { role, canViewNotes, canEditNotes, loading: roleLoading } = useRole();
   const isManager = (role ?? "").toString().toLowerCase() === "manager";
 
   const [notes, setNotes] = useState([]);
@@ -28,23 +31,32 @@ export default function ClinicalNotes() {
   const [error, setError] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [analysing, setAnalysing] = useState(false);
   const [createError, setCreateError] = useState(null);
   const [patients, setPatients] = useState([]);
   const [patientsLoading, setPatientsLoading] = useState(true);
   const [filterPatientId, setFilterPatientId] = useState("");
 
   const load = useCallback(() => {
-    if (!organisationId) return;
+    if (!organisationId) {
+      return Promise.resolve();
+    }
+
+    if (!canViewNotes()) {
+      setNotes([]);
+      setLoading(false);
+      return Promise.resolve();
+    }
 
     if (isManager && !filterPatientId) {
       setNotes([]);
       setLoading(false);
-      return;
+      return Promise.resolve();
     }
 
     setLoading(true);
     setError(null);
-    fetchClinicalNotesForOrganisation({
+    return fetchClinicalNotesForOrganisation({
       patientId: isManager ? filterPatientId : null,
       limitCount: 300,
     })
@@ -55,7 +67,7 @@ export default function ClinicalNotes() {
         setNotes([]);
       })
       .finally(() => setLoading(false));
-  }, [organisationId, isManager, filterPatientId]);
+  }, [organisationId, isManager, filterPatientId, canViewNotes]);
 
   useEffect(() => {
     if (!organisationId) return;
@@ -70,13 +82,13 @@ export default function ClinicalNotes() {
   }, [organisationId]);
 
   useEffect(() => {
-    if (!organisationId) return;
+    if (!organisationId || roleLoading) return;
     if (isManager && !filterPatientId && patients.length > 0) {
       setFilterPatientId(patients[0].id ?? "");
       return;
     }
     load();
-  }, [organisationId, isManager, filterPatientId, patients, load]);
+  }, [organisationId, isManager, filterPatientId, patients, load, roleLoading]);
 
   const currentServiceName =
     currentServiceId && Array.isArray(services)
@@ -87,6 +99,23 @@ export default function ClinicalNotes() {
 
   const createdBy = user?.email || user?.displayName || "Unknown";
 
+  if (roleLoading) {
+    return (
+      <div style={{ padding: 40 }}>
+        <p style={{ color: "#666" }}>Loading…</p>
+      </div>
+    );
+  }
+
+  if (!canViewNotes()) {
+    return (
+      <div style={{ padding: 40, maxWidth: 560 }}>
+        <h1 style={{ marginTop: 0 }}>Clinical Notes</h1>
+        <p style={{ color: "#64748b" }}>Your role does not have access to clinical notes for this organisation.</p>
+      </div>
+    );
+  }
+
   return (
     <div style={{ padding: 40 }}>
       <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
@@ -96,22 +125,24 @@ export default function ClinicalNotes() {
             {organisation?.name ? `${organisation.name}${currentServiceId ? ` · ${currentServiceName}` : ""}` : "Manage clinical notes for this organisation."}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => { setShowCreateModal(true); setCreateError(null); }}
-          style={{
-            padding: "8px 16px",
-            borderRadius: 8,
-            border: "none",
-            background: "#005eb8",
-            color: "#fff",
-            fontWeight: 600,
-            fontSize: "0.9rem",
-            cursor: "pointer",
-          }}
-        >
-          Add Clinical Note
-        </button>
+        {canEditNotes() ? (
+          <button
+            type="button"
+            onClick={() => { setShowCreateModal(true); setCreateError(null); }}
+            style={{
+              padding: "8px 16px",
+              borderRadius: 8,
+              border: "none",
+              background: "#005eb8",
+              color: "#fff",
+              fontWeight: 600,
+              fontSize: "0.9rem",
+              cursor: "pointer",
+            }}
+          >
+            Add Clinical Note
+          </button>
+        ) : null}
       </div>
 
       {isManager && (
@@ -176,8 +207,24 @@ export default function ClinicalNotes() {
                 borderRadius: 12,
               }}
             >
-              <div style={{ marginBottom: 4 }}>
+              <div style={{ marginBottom: 4, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                 <strong>{n.category || "Clinical note"}</strong>
+                {n.discipline ? (
+                  <span
+                    style={{
+                      fontSize: "0.75rem",
+                      fontWeight: 800,
+                      color: "#0f172a",
+                      backgroundColor: "#e0f2fe",
+                      border: "1px solid #7dd3fc",
+                      padding: "3px 10px",
+                      borderRadius: 6,
+                    }}
+                    title="MDT role"
+                  >
+                    [{n.discipline}]
+                  </span>
+                ) : null}
                 {n.mood && (
                   <span style={{ marginLeft: 8, fontSize: "0.95rem" }} aria-hidden="true">
                     {n.mood}
@@ -192,10 +239,35 @@ export default function ClinicalNotes() {
                   Patient: <Link to={`/patients/${n.patientId}`}>{n.patientId}</Link>
                 </p>
               )}
+              {n.structured?.summary && (
+                <p style={{ margin: "6px 0 0 0", color: "#1e3a5f", fontSize: "0.85rem", fontStyle: "italic" }}>
+                  {n.structured.summary}
+                </p>
+              )}
               {n.content && (
                 <p style={{ margin: "8px 0 0 0", color: "#334155", fontSize: "0.9rem", whiteSpace: "pre-wrap" }}>
                   {n.content}
                 </p>
+              )}
+              {n.structured?.riskIndicators?.length > 0 && (
+                <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {n.structured.riskIndicators.map((tag) => (
+                    <span
+                      key={tag}
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 800,
+                        color: "#9a3412",
+                        backgroundColor: "#ffedd5",
+                        border: "1px solid #fdba74",
+                        padding: "2px 8px",
+                        borderRadius: 999,
+                      }}
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                </div>
               )}
             </li>
           ))}
@@ -208,30 +280,70 @@ export default function ClinicalNotes() {
           patients={patients}
           patientsLoading={patientsLoading}
           filterPatientId={filterPatientId}
+          defaultMdtFromProfile={typeof userProfile?.mdtRole === "string" ? userProfile.mdtRole : ""}
           currentServiceId={currentServiceId}
           createdBy={createdBy}
           onClose={() => { setShowCreateModal(false); setCreateError(null); }}
-          onSubmit={async ({ patientId, category, content, mood }) => {
+          onSubmit={async ({ patientId, category, content, mood, discipline }) => {
+            const resolvedDiscipline = (discipline ?? "").toString().trim();
+            if (!resolvedDiscipline) {
+              setCreateError("Please select a role");
+              return;
+            }
+
             setCreating(true);
             setCreateError(null);
+
+            let analysis = null;
+            if (hasFeature("ai")) {
+              setAnalysing(true);
+              try {
+                try {
+                  analysis = await analyseNote(content, resolvedDiscipline, patientId);
+                } catch (aiErr) {
+                  console.error("AI failed:", aiErr);
+                  analysis = null;
+                }
+              } finally {
+                setAnalysing(false);
+              }
+            }
+
             try {
+              const structured = analysis
+                ? {
+                    behaviour: analysis.behaviour,
+                    mood: analysis.mood,
+                    engagement: analysis.engagement,
+                    physicalHealth: analysis.physicalHealth,
+                    medicationIssues: analysis.medicationIssues,
+                    incidents: analysis.incidents,
+                    riskIndicators: analysis.riskIndicators,
+                    summary: analysis.summary,
+                  }
+                : undefined;
+
               await addClinicalNote(patientId, {
                 category,
                 content,
-                mood,
+                mood: mood ?? analysis?.mood ?? null,
                 authorEmail: createdBy,
                 serviceId: currentServiceId ?? null,
+                discipline: resolvedDiscipline,
+                ...(structured ? { structured } : {}),
               });
+              void logAuditEvent("NOTE_CREATED", { patientId });
               setShowCreateModal(false);
-              load();
+              await load();
             } catch (err) {
-              console.error("Firestore write failed:", err);
+              console.error("Clinical note pipeline failed:", err);
               setCreateError(isIndexError(err) ? INDEX_ERROR_MESSAGE : (err?.message ?? "Failed to create clinical note."));
             } finally {
               setCreating(false);
             }
           }}
-          loading={creating}
+          loading={creating || analysing}
+          analysing={analysing}
           error={createError}
         />
       )}
@@ -244,15 +356,32 @@ function CreateClinicalNoteModal({
   patients,
   patientsLoading,
   filterPatientId,
+  defaultMdtFromProfile = "",
   currentServiceId,
   createdBy,
   onClose,
   onSubmit,
   loading,
+  analysing = false,
   error,
 }) {
   const [patientId, setPatientId] = useState(filterPatientId || "");
   const [category, setCategory] = useState("Routine");
+  const [mdtRole, setMdtRole] = useState("");
+  const [customRole, setCustomRole] = useState("");
+  const [roleError, setRoleError] = useState(null);
+
+  useEffect(() => {
+    const p = (defaultMdtFromProfile ?? "").trim();
+    if (!p) return;
+    if (MDT_ROLES.includes(p)) {
+      setMdtRole(p);
+      setCustomRole("");
+    } else {
+      setMdtRole(MDT_OTHER);
+      setCustomRole(p);
+    }
+  }, [defaultMdtFromProfile]);
 
   useEffect(() => {
     if (isManager) {
@@ -295,9 +424,15 @@ function CreateClinicalNoteModal({
           </button>
         </div>
 
-        {error && (
+        {(error || roleError) && (
           <p role="alert" style={{ color: "#b91c1c", marginBottom: "0.75rem", fontSize: "0.9rem" }}>
-            {error}
+            {roleError || error}
+          </p>
+        )}
+
+        {analysing && (
+          <p style={{ marginBottom: "0.75rem", fontSize: "0.9rem", color: "#0369a1", fontWeight: 700 }}>
+            Analysing note (AI Studio mock)…
           </p>
         )}
 
@@ -325,6 +460,46 @@ function CreateClinicalNoteModal({
         </div>
 
         <div style={{ marginBottom: "1rem" }}>
+          <label style={{ display: "block", fontSize: "0.85rem", marginBottom: 4, fontWeight: 700 }}>
+            MDT role / clinical role *
+          </label>
+          <select
+            required
+            value={mdtRole}
+            onChange={(e) => {
+              setMdtRole(e.target.value);
+              setRoleError(null);
+            }}
+            style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1" }}
+          >
+            <option value="">Select role…</option>
+            {MDT_ROLES.map((role) => (
+              <option key={role} value={role}>
+                {role}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {mdtRole === MDT_OTHER && (
+          <div style={{ marginBottom: "1rem" }}>
+            <label style={{ display: "block", fontSize: "0.85rem", marginBottom: 4, fontWeight: 700 }}>
+              Enter role *
+            </label>
+            <input
+              type="text"
+              value={customRole}
+              onChange={(e) => {
+                setCustomRole(e.target.value);
+                setRoleError(null);
+              }}
+              placeholder="e.g. Art Therapist"
+              style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1", boxSizing: "border-box" }}
+            />
+          </div>
+        )}
+
+        <div style={{ marginBottom: "1rem" }}>
           <label style={{ display: "block", fontSize: "0.85rem", marginBottom: 4 }}>Category</label>
           <select
             value={category}
@@ -338,10 +513,31 @@ function CreateClinicalNoteModal({
         </div>
 
         <ClinicalNoteForm
-          loading={loading}
+          loading={loading || analysing}
           onSubmit={({ content, mood }) => {
             if (!patientId?.trim()) return;
-            onSubmit({ patientId: patientId.trim(), category, content, mood: mood ?? null, currentServiceId, createdBy });
+
+            if (!mdtRole) {
+              setRoleError("Please select a role");
+              return;
+            }
+            if (mdtRole === MDT_OTHER && !customRole.trim()) {
+              setRoleError("Please enter your role");
+              return;
+            }
+            setRoleError(null);
+
+            const discipline = mdtRole === MDT_OTHER ? customRole.trim() : mdtRole;
+
+            onSubmit({
+              patientId: patientId.trim(),
+              category,
+              content,
+              mood: mood ?? null,
+              discipline,
+              currentServiceId,
+              createdBy,
+            });
           }}
         />
       </div>

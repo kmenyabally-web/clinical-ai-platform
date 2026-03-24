@@ -5,15 +5,24 @@ import { useRole } from "../context/RoleContext";
 
 /**
  * Protects routes by auth, organisation, and optional role.
- * Use allowedRoles to restrict by role (e.g. <ProtectedRoute allowedRoles={["Manager"]}>).
- * If allowPlatformAdmin is true, platform admins can access without an organisation (e.g. /admin).
+ * - allowMissingOrganisationForPlatformAdmin: platform admins may access without a tenant org (others still need organisationId).
+ * - platformAdminOnly: only platform admins (e.g. /admin).
+ * - allowedRoles: e.g. ["Admin","Manager"]; platform admins are treated as allowed for management routes.
+ * - requireOrganisation: when false, signed-in users may access without organisationId (e.g. /unauthorised).
  */
-export default function ProtectedRoute({ children, allowedRoles, allowPlatformAdmin }) {
+export default function ProtectedRoute({
+  children,
+  allowedRoles,
+  platformAdminOnly,
+  allowMissingOrganisationForPlatformAdmin,
+  requireOrganisation = true,
+}) {
   const { user, loading: authLoading } = useAuth();
   const { organisationId, loading: orgLoading, error: orgError, isPlatformAdmin } = useOrganisation();
   const { role, isAllowed } = useRole();
 
-  const canAccessWithoutOrg = allowPlatformAdmin && isPlatformAdmin;
+  const canBypassMissingOrg =
+    Boolean(allowMissingOrganisationForPlatformAdmin) && isPlatformAdmin;
 
   if (authLoading) {
     return <div style={{ padding: 32 }}>Loading...</div>;
@@ -27,7 +36,7 @@ export default function ProtectedRoute({ children, allowedRoles, allowPlatformAd
     return <div style={{ padding: 32 }}>Loading organisation...</div>;
   }
 
-  if (!canAccessWithoutOrg && !organisationId) {
+  if (requireOrganisation !== false && !canBypassMissingOrg && !organisationId) {
     return (
       <div style={{ padding: 32 }}>
         <p style={{ color: "#c62828" }}>{orgError ?? "No organisation assigned."}</p>
@@ -36,12 +45,22 @@ export default function ProtectedRoute({ children, allowedRoles, allowPlatformAd
     );
   }
 
-  if (allowPlatformAdmin && !isPlatformAdmin) {
+  if (platformAdminOnly && !isPlatformAdmin) {
     return <Navigate to="/unauthorised" replace />;
   }
 
-  if (!canAccessWithoutOrg && allowedRoles != null && Array.isArray(allowedRoles) && allowedRoles.length > 0 && !isAllowed(allowedRoles)) {
-    return <Navigate to="/unauthorised" replace />;
+  if (
+    !canBypassMissingOrg &&
+    allowedRoles != null &&
+    Array.isArray(allowedRoles) &&
+    allowedRoles.length > 0
+  ) {
+    const managementBypass =
+      isPlatformAdmin &&
+      allowedRoles.some((r) => r === "Admin" || r === "Manager");
+    if (!isAllowed(allowedRoles) && !managementBypass) {
+      return <Navigate to="/unauthorised" replace />;
+    }
   }
 
   return children;

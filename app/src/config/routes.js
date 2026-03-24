@@ -6,9 +6,14 @@
 /** Roles that can access readiness sections (Governance, Safeguarding, etc.). Viewer sees Overview only. */
 export const READINESS_SECTION_ROLES = ["Manager", "QualityLead"];
 
+/** Admin / Manager access to tenant management screens. */
+export const MANAGEMENT_ALLOWED_ROLES = ["Admin", "Manager"];
+
 /** @type {{ path: string, label: string, ariaLabel?: string, allowedRoles?: string[], platformAdminOnly?: boolean }[]} */
 export const NAV_ITEMS = [
   { path: "/dashboard", label: "Dashboard", ariaLabel: "Dashboard overview", allowedRoles: undefined },
+  { path: "/billing", label: "Billing", ariaLabel: "Subscription and billing", allowedRoles: undefined },
+  { path: "/organisation-dashboard", label: "Organisation", ariaLabel: "Organisation operational dashboard", allowedRoles: undefined },
   { path: "/patients", label: "Patients", ariaLabel: "Patient list", allowedRoles: undefined },
   { path: "/clinical-notes", label: "Clinical Notes", ariaLabel: "Clinical notes by service", allowedRoles: undefined },
   { path: "/incidents", label: "Incidents & Safeguarding", ariaLabel: "Incidents and safeguarding", allowedRoles: undefined },
@@ -16,8 +21,18 @@ export const NAV_ITEMS = [
   { path: "/care-plans", label: "Care Plans", ariaLabel: "Patient care plans", allowedRoles: undefined },
   { path: "/staff-training", label: "Staff Training", ariaLabel: "Staff competency and training records", allowedRoles: undefined },
   { path: "/compliance", label: "Compliance", ariaLabel: "CQC compliance scores and risk", allowedRoles: undefined },
+  { path: "/reports", label: "Readiness report", ariaLabel: "CQC readiness report", allowedRoles: undefined },
   { path: "/evidence-pack", label: "Evidence Pack", ariaLabel: "Inspection evidence pack", allowedRoles: undefined },
   { path: "/inspection-simulator", label: "Inspection Simulator", ariaLabel: "CQC inspection simulation", allowedRoles: undefined },
   { path: "/audit-log", label: "Audit Log", ariaLabel: "Compliance audit log", allowedRoles: undefined },
   { path: "/admin", label: "Admin", ariaLabel: "Platform admin control panel", platformAdminOnly: true },
+];
+
+/** Sidebar subsection: Management (Admin / Manager + platform admin). */
+export const MANAGEMENT_NAV_ITEMS = [
+  { path: "/management/organisations", label: "Organisations", ariaLabel: "Organisations", allowedRoles: MANAGEMENT_ALLOWED_ROLES },
+  { path: "/management/hospitals", label: "Hospitals", ariaLabel: "Hospitals", allowedRoles: MANAGEMENT_ALLOWED_ROLES },
+  { path: "/management/wards", label: "Wards", ariaLabel: "Wards", allowedRoles: MANAGEMENT_ALLOWED_ROLES },
+  { path: "/management/users", label: "Users", ariaLabel: "Users", allowedRoles: MANAGEMENT_ALLOWED_ROLES },
+  { path: "/patients", label: "Patients", ariaLabel: "Patient list", allowedRoles: MANAGEMENT_ALLOWED_ROLES },
 ];

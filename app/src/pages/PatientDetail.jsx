@@ -9,7 +9,7 @@ function formatDate(value) {
 }
 
 export default function PatientDetail() {
-  const { patientId } = useParams();
+  const { id: patientId } = useParams();
   const { organisationId } = useOrganisation();
   const [patient, setPatient] = useState(null);
   const [loading, setLoading] = useState(true);

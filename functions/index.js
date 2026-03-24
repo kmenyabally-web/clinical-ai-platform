@@ -1,88 +1,37 @@
-/**
- * PHASE B – Cloud Functions Audit Bridge
- *
- * Trusted backend implementation for append-only audit logging.
- * This file defines a callable Cloud Function that accepts an
- * audit payload from the client, enriches it with trusted
- * identity and scope from the caller's auth context, and writes
- * an immutable record to the auditLog collection.
- *
- * No deletes. No client-controlled organisationId. All timestamps
- * use server-side values.
- */
-
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 
-if (!admin.apps.length) {
-  admin.initializeApp();
-}
+admin.initializeApp();
 
-const db = admin.firestore();
+exports.createOrganisationUser = functions.https.onRequest(async (req, res) => {
 
-/**
- * onAuditEventCreated
- *
- * Callable function for trusted audit event creation.
- *
- * Security and enforcement:
- * - context.auth MUST be present (no unauthenticated callers).
- * - organisationId and role are taken from context.auth.token;
- *   the client payload is ignored for these fields.
- * - serverTimestamp() is injected on the backend.
- * - Writes to the auditLog collection only; no updates or deletes.
- */
-exports.onAuditEventCreated = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError(
-      "unauthenticated",
-      "Authentication is required to write audit events."
-    );
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    return res.status(204).send("");
   }
 
-  const token = context.auth.token || {};
-  const organisationId = token.organisationId;
-  const userRole = token.role || "";
-  const userId = context.auth.uid;
+  try {
+    const { name, email, password } = req.body;
 
-  if (!organisationId) {
-    throw new functions.https.HttpsError(
-      "failed-precondition",
-      "Missing organisation context in user claims."
-    );
+    const userRecord = await admin.auth().createUser({
+      email,
+      password,
+      displayName: name
+    });
+
+    await admin.firestore().collection("users").doc(userRecord.uid).set({
+      name,
+      email,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    return res.status(200).send({ success: true });
+
+  } catch (error) {
+    console.error(error);
+    return res.status(500).send(error.message);
   }
-
-  // Whitelist of allowed client-supplied fields.
-  const {
-    action = "",
-    entityType = "",
-    entityId = "",
-    entityName = "",
-    previousValue = null,
-    newValue = null,
-    serviceId = null,
-  } = data || {};
-
-  const payload = {
-    organisationId: String(organisationId),
-    userId: String(userId),
-    userRole: String(userRole),
-    action: String(action),
-    entityType: String(entityType),
-    entityId: String(entityId),
-    entityName: String(entityName),
-    previousValue: previousValue !== undefined ? previousValue : null,
-    newValue: newValue !== undefined ? newValue : null,
-    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-  };
-
-  if (serviceId) {
-    payload.serviceId = String(serviceId);
-  }
-
-  await db.collection("auditLog").add(payload);
-
-  // Return a minimal acknowledgement with no sensitive data.
-  return { ok: true };
 });
-

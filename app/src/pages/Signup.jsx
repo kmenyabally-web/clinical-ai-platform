@@ -2,12 +2,16 @@ import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { registerWithOrganisation } from "../services/signupService";
+import { PLANS } from "../constants/plans";
+
+const PLAN_ORDER = /** @type {const} */ (["BASIC", "PRO", "ENTERPRISE"]);
 
 export default function Signup() {
   const { user, loading } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [organisationName, setOrganisationName] = useState("");
+  const [planKey, setPlanKey] = useState("BASIC");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -25,7 +29,9 @@ export default function Signup() {
     setSubmitting(true);
 
     try {
-      const { uid, organisationId } = await registerWithOrganisation(email, password, organisationName);
+      const { uid, organisationId } = await registerWithOrganisation(email, password, organisationName, {
+        planKey,
+      });
       productionLogger.auth.signUpSuccess(uid, organisationId);
       navigate("/dashboard", { replace: true });
     } catch (err) {
@@ -46,7 +52,7 @@ export default function Signup() {
     <div style={{ padding: "2rem", maxWidth: 420 }}>
       <h1>Create account</h1>
       <p style={{ color: "#666", marginBottom: "1rem" }}>
-        Create your organisation and start with a Starter plan (1 service). You can upgrade from Billing later.
+        Create your organisation, choose a starting plan, and assign yourself as admin. You can change plans anytime under Billing.
       </p>
 
       {error && (
@@ -100,6 +106,36 @@ export default function Signup() {
             }}
           />
         </div>
+
+        <fieldset style={{ marginBottom: "1rem", border: "1px solid #ddd", borderRadius: 8, padding: "0.75rem" }}>
+          <legend style={{ fontSize: "0.9rem", padding: "0 4px" }}>Organisation plan</legend>
+          <p style={{ margin: "0 0 0.5rem 0", fontSize: "0.85rem", color: "#555" }}>
+            Billing applies to the whole organisation. Default is Basic; paid tiers unlock AI, risk, reports, and audit features.
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {PLAN_ORDER.map((key) => {
+              const def = PLANS[key];
+              return (
+                <label key={key} style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="planKey"
+                    value={key}
+                    checked={planKey === key}
+                    onChange={() => setPlanKey(key)}
+                  />
+                  <span>
+                    <strong>{def.name}</strong>
+                    {def.price > 0 ? ` — £${def.price}/mo` : " — Free"}
+                    <span style={{ display: "block", fontSize: "0.8rem", color: "#666" }}>
+                      Includes: {def.features.join(", ")}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
 
         <div style={{ marginBottom: "1rem" }}>
           <label>Password</label>

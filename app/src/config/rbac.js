@@ -12,13 +12,41 @@ export const ROLE_PERMISSIONS = {
     "user:manage",
     "organisation:manage",
   ],
-  Manager: ["audit:create", "audit:update", "audit:view"],
+  Manager: ["audit:create", "audit:update", "audit:view", "user:manage", "organisation:manage"],
   QualityLead: ["audit:create", "audit:update", "audit:view"],
   Staff: ["audit:create", "audit:view"],
-  Auditor: ["audit:view"],
+  /** System read-only / inspection (replaces legacy Auditor). */
+  Inspector: ["audit:view"],
 };
 
-const ROLE_ALIASES = { ADMIN: "Admin", admin: "Admin", Manager: "Manager", QualityLead: "QualityLead", Staff: "Staff", Auditor: "Auditor" };
+const ROLE_ALIASES = {
+  ADMIN: "Admin",
+  admin: "Admin",
+  manager: "Manager",
+  Manager: "Manager",
+  qualitylead: "QualityLead",
+  QualityLead: "QualityLead",
+  staff: "Staff",
+  Staff: "Staff",
+  INSPECTOR: "Inspector",
+  Inspector: "Inspector",
+  auditor: "Inspector",
+  Auditor: "Inspector",
+};
+
+/**
+ * Map Firestore / token strings to canonical app roles (Admin, Manager, …).
+ * @param {string | null | undefined} role
+ * @returns {string | null}
+ */
+export function normalizeRole(role) {
+  if (role == null || typeof role !== "string") return null;
+  const t = role.trim();
+  if (!t) return null;
+  const mapped = ROLE_ALIASES[t] ?? (Object.prototype.hasOwnProperty.call(ROLE_PERMISSIONS, t) ? t : null);
+  if (mapped === "Auditor") return "Inspector";
+  return mapped;
+}
 
 /**
  * @param {string | null} role
@@ -26,6 +54,6 @@ const ROLE_ALIASES = { ADMIN: "Admin", admin: "Admin", Manager: "Manager", Quali
  */
 export function getPermissionsForRole(role) {
   if (!role || typeof role !== "string") return [];
-  const normalised = ROLE_ALIASES[role] ?? role;
+  const normalised = normalizeRole(role) ?? role;
   return ROLE_PERMISSIONS[normalised] ?? [];
 }

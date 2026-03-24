@@ -3,6 +3,7 @@ import { doc, setDoc, collection } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { createOrganisation } from "./organisation";
 import { createSubscription, PLANS, BILLING_CYCLES } from "./billingService";
+import { normalizePlanKey } from "../utils/featureAccess";
 import { createService } from "./servicesService";
 
 /**
@@ -12,7 +13,7 @@ import { createService } from "./servicesService";
  * @param {string} email
  * @param {string} password
  * @param {string} organisationName
- * @param {{ firstServiceName?: string }} [options]
+ * @param {{ firstServiceName?: string, planKey?: string }} [options] planKey: BASIC | PRO | ENTERPRISE (default BASIC)
  * @returns {Promise<{ uid: string, organisationId: string, serviceId: string }>}
  */
 export async function registerWithOrganisation(email, password, organisationName, options = {}) {
@@ -24,19 +25,23 @@ export async function registerWithOrganisation(email, password, organisationName
 
   const organisationId = doc(collection(db, "organisations")).id;
   const name = organisationName.trim();
+  const planKey = normalizePlanKey(options.planKey ?? PLANS.BASIC);
 
-  await createOrganisation(organisationId, { name, status: "active" });
+  await createOrganisation(organisationId, { name, status: "active", plan: planKey });
 
   await setDoc(doc(db, "users", uid), {
     orgId: organisationId,
+    organisationId,
+    email: email.trim(),
     role: "Admin",
+    mdtRole: "Clinical Lead",
     status: "active",
   });
 
   const auditContext = { organisationId, userId: uid, userRole: "Admin" };
   await createSubscription(
     organisationId,
-    PLANS.STARTER,
+    planKey,
     BILLING_CYCLES.MONTHLY,
     auditContext
   );

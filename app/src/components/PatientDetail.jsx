@@ -1,14 +1,23 @@
 /** [ENABLEMENT GATE: STAGE 5 - PATIENT DETAIL VIEW] */
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getPatientById } from "../services/patientService";
 import { fetchIncidentsForPatient } from "../services/incidentService";
 import { fetchClinicalNotesForPatient } from "../services/noteService";
+import PatientTimeline from "./PatientTimeline";
+import { calculateRisk } from "../utils/riskEngine";
 import { formatUkDateTime } from "../utils/dateFormat";
+import { useRole } from "../context/RoleContext";
+import { useOrganisation } from "../context/OrganisationContext";
+import { logAuditEvent } from "../services/auditService";
 
 export default function PatientDetail() {
   const { id } = useParams();
+  const { isInspectorRole } = useRole();
+  const { hasFeature } = useOrganisation();
+  const redactSensitive = isInspectorRole();
+  const showRiskUi = hasFeature("risk");
   const [isLoading, setIsLoading] = useState(true);
   const [patient, setPatient] = useState(null);
   const [error, setError] = useState(null);
@@ -17,6 +26,11 @@ export default function PatientDetail() {
   const [notes, setNotes] = useState([]);
   const [notesLoading, setNotesLoading] = useState(false);
   const [notesError, setNotesError] = useState(null);
+
+  useEffect(() => {
+    if (!id) return;
+    void logAuditEvent("PATIENT_OPENED", { patientId: id });
+  }, [id]);
 
   useEffect(() => {
     let mounted = true;
@@ -44,7 +58,7 @@ export default function PatientDetail() {
     let mounted = true;
     setNotesLoading(true);
     setNotesError(null);
-    fetchClinicalNotesForPatient(id, { limitCount: 10 })
+    fetchClinicalNotesForPatient(id, { limitCount: 50 })
       .then((list) => {
         if (!mounted) return;
         setNotes(Array.isArray(list) ? list : []);
@@ -85,6 +99,11 @@ export default function PatientDetail() {
     };
   }, [id]);
 
+  const risk = useMemo(() => {
+    if (!showRiskUi) return { level: "low", score: 0 };
+    return calculateRisk(notes || []);
+  }, [notes, showRiskUi]);
+
   if (isLoading) {
     return <div style={styles.text}>Loading patient…</div>;
   }
@@ -121,6 +140,30 @@ export default function PatientDetail() {
 
       <h2 style={styles.title}>{fullName || "Patient record"}</h2>
 
+      {showRiskUi && !redactSensitive && !notesLoading && !notesError && (
+        <div style={styles.riskStrip}>
+          <span style={styles.riskStripLabel}>Behaviour risk</span>
+          <span
+            style={{
+              ...styles.riskScore,
+              ...(risk.level === "high"
+                ? styles.riskScoreHigh
+                : risk.level === "medium"
+                  ? styles.riskScoreMedium
+                  : styles.riskScoreLow),
+            }}
+          >
+            {risk.level.toUpperCase()} · score {risk.score}
+          </span>
+        </div>
+      )}
+
+      {showRiskUi && !redactSensitive && risk.level === "high" && !notesLoading && !notesError ? (
+        <div role="alert" style={styles.highRiskBanner}>
+          ⚠️ High Risk — Early intervention required
+        </div>
+      ) : null}
+
       <div style={styles.actionsRow}>
         <Link to={`/incidents/new/${id}`} style={styles.primaryAction}>
           Report Incident (Stage 6)
@@ -132,6 +175,18 @@ export default function PatientDetail() {
           <div style={styles.label}>Full name</div>
           <div style={styles.value}>{fullName || "—"}</div>
         </div>
+        {(patient?.hospitalName || patient?.hospitalId) ? (
+          <div style={styles.row}>
+            <div style={styles.label}>Hospital</div>
+            <div style={styles.value}>{patient.hospitalName || patient.hospitalId || "—"}</div>
+          </div>
+        ) : null}
+        {(patient?.wardName || patient?.wardId) ? (
+          <div style={styles.row}>
+            <div style={styles.label}>Ward</div>
+            <div style={styles.value}>{patient.wardName || patient.wardId || "—"}</div>
+          </div>
+        ) : null}
         <div style={styles.row}>
           <div style={styles.label}>Address</div>
           <div style={styles.value}>{patient?.address || "—"}</div>
@@ -170,30 +225,33 @@ export default function PatientDetail() {
           )}
         </div>
 
-        {notes.length === 0 && !notesLoading && !notesError ? (
-          <div style={styles.notesEmpty}>No clinical notes recorded for this patient.</div>
+        {!notesError ? (
+          <PatientTimeline
+            variant="notes"
+            notes={notes.slice(0, 50)}
+            loadingNotes={notesLoading}
+            formatWhen={formatWhen}
+            emptyNotesMessage="No clinical notes recorded for this patient."
+          />
         ) : (
-          <ul style={styles.notesList}>
-            {notes.slice(0, 10).map((n) => (
-              <li key={n.id} style={styles.notesItem}>
-                <div style={styles.notesItemTop}>
-                  <span style={styles.notesCategoryBadge}>{n.category || "Note"}</span>
-                  {n.mood && <span style={styles.notesMood}>{n.mood}</span>}
-                </div>
-                <div style={styles.notesItemSub}>
-                  <span>{formatWhen(n.createdAt) || "—"}</span>
-                  <span> · </span>
-                  <span>{n.authorEmail || "—"}</span>
-                </div>
-                {n.content && (
-                  <div style={styles.notesContent}>
-                    {n.content}
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
+          <div style={styles.notesEmpty}>Unable to load notes.</div>
         )}
+      </div>
+
+      <div style={styles.timelinePreviewCard}>
+        <div style={styles.timelinePreviewHeader}>
+          <div style={styles.timelinePreviewTitle}>Clinical timeline (preview)</div>
+          <div style={styles.notesMeta}>Notes + incidents · newest first</div>
+        </div>
+        <PatientTimeline
+          variant="merged"
+          notes={notes.slice(0, 50)}
+          incidents={incidents.slice(0, 10)}
+          loadingNotes={notesLoading}
+          loadingIncidents={incidentsLoading}
+          formatWhen={formatWhen}
+          redactSensitive={redactSensitive}
+        />
       </div>
 
       <div style={styles.incidentCard}>
@@ -206,25 +264,14 @@ export default function PatientDetail() {
           )}
         </div>
 
-        {incidents.length === 0 && !incidentsLoading ? (
-          <div style={styles.incidentEmpty}>No incidents recorded for this patient.</div>
-        ) : (
-          <ul style={styles.incidentList}>
-            {incidents.map((x) => (
-              <li key={x.id} style={styles.incidentItem}>
-                <div style={styles.incidentItemTop}>
-                  <span style={styles.incidentItemTitle}>{x.title || "Incident"}</span>
-                  <span style={styles.incidentSeverity}>{(x.severity || "").toUpperCase()}</span>
-                </div>
-                <div style={styles.incidentItemSub}>
-                  <span>{formatWhen(x.occurredAt || x.createdAt) || "—"}</span>
-                  <span> · </span>
-                  <span>{x.location || "—"}</span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
+        <PatientTimeline
+          variant="incidents"
+          incidents={incidents}
+          loadingIncidents={incidentsLoading}
+          formatWhen={formatWhen}
+          emptyIncidentsMessage="No incidents recorded for this patient."
+          redactSensitive={redactSensitive}
+        />
       </div>
     </div>
   );
@@ -271,6 +318,56 @@ const styles = {
   title: {
     margin: "8px 0 14px 0",
     color: "#0f172a",
+  },
+  riskStrip: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 12,
+    padding: "10px 14px",
+    backgroundColor: "#f8fafc",
+    border: "1px solid #e2e8f0",
+    borderRadius: 10,
+  },
+  riskStripLabel: {
+    fontSize: 12,
+    fontWeight: 900,
+    color: "#475569",
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+  },
+  riskScore: {
+    fontSize: 13,
+    fontWeight: 900,
+    padding: "4px 10px",
+    borderRadius: 999,
+    border: "1px solid #cbd5e1",
+  },
+  riskScoreLow: {
+    color: "#166534",
+    backgroundColor: "#ecfdf5",
+    borderColor: "#86efac",
+  },
+  riskScoreMedium: {
+    color: "#92400e",
+    backgroundColor: "#fffbeb",
+    borderColor: "#fcd34d",
+  },
+  riskScoreHigh: {
+    color: "#991b1b",
+    backgroundColor: "#fef2f2",
+    borderColor: "#fecaca",
+  },
+  highRiskBanner: {
+    marginBottom: 14,
+    padding: "12px 16px",
+    borderRadius: 10,
+    border: "1px solid #fecaca",
+    backgroundColor: "#fef2f2",
+    color: "#991b1b",
+    fontWeight: 900,
+    fontSize: 14,
   },
   actionsRow: {
     display: "flex",
@@ -357,45 +454,6 @@ const styles = {
     color: "#64748b",
     fontWeight: 800,
   },
-  incidentEmpty: {
-    padding: "12px 14px",
-    color: "#334155",
-    fontSize: 13,
-  },
-  incidentList: {
-    listStyle: "none",
-    margin: 0,
-    padding: 0,
-  },
-  incidentItem: {
-    padding: "12px 14px",
-    borderBottom: "1px solid #f1f5f9",
-  },
-  incidentItemTop: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: 10,
-    alignItems: "baseline",
-  },
-  incidentItemTitle: {
-    fontWeight: 900,
-    color: "#0f172a",
-    fontSize: 13,
-  },
-  incidentSeverity: {
-    fontSize: 12,
-    fontWeight: 900,
-    color: "#0f172a",
-    backgroundColor: "#f1f5f9",
-    border: "1px solid #e2e8f0",
-    padding: "2px 8px",
-    borderRadius: 999,
-  },
-  incidentItemSub: {
-    marginTop: 6,
-    fontSize: 12,
-    color: "#475569",
-  },
   notesCard: {
     marginTop: 16,
     backgroundColor: "#ffffff",
@@ -425,45 +483,25 @@ const styles = {
     color: "#334155",
     fontSize: 13,
   },
-  notesList: {
-    listStyle: "none",
-    margin: 0,
-    padding: 0,
+  timelinePreviewCard: {
+    marginTop: 16,
+    backgroundColor: "#ffffff",
+    border: "1px solid #e2e8f0",
+    borderRadius: 12,
+    overflow: "hidden",
   },
-  notesItem: {
+  timelinePreviewHeader: {
     padding: "12px 14px",
     borderBottom: "1px solid #f1f5f9",
-  },
-  notesItemTop: {
     display: "flex",
     justifyContent: "space-between",
+    alignItems: "baseline",
     gap: 10,
-    alignItems: "center",
+    flexWrap: "wrap",
   },
-  notesCategoryBadge: {
-    fontSize: 12,
+  timelinePreviewTitle: {
     fontWeight: 900,
     color: "#0f172a",
-    backgroundColor: "#f1f5f9",
-    border: "1px solid #e2e8f0",
-    padding: "2px 8px",
-    borderRadius: 999,
-  },
-  notesMood: {
-    fontSize: 16,
-    lineHeight: 1,
-  },
-  notesItemSub: {
-    marginTop: 6,
-    fontSize: 12,
-    color: "#475569",
-  },
-  notesContent: {
-    marginTop: 8,
-    fontSize: 12,
-    color: "#334155",
-    whiteSpace: "pre-wrap",
-    lineHeight: 1.4,
   },
   backLink: {
     textDecoration: "none",

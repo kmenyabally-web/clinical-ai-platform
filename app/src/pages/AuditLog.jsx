@@ -1,12 +1,15 @@
 /** [ENABLEMENT GATE: STAGE 8 - COMPLIANCE AUDIT VIEWER] */
 
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { db } from "../firebase";
 import { getUserContext } from "../services/authService";
 import { formatUkDateTime } from "../utils/dateFormat";
+import { useOrganisation } from "../context/OrganisationContext";
 
 export default function AuditLog() {
+  const { hasFeature, loading: orgLoading } = useOrganisation();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -16,6 +19,14 @@ export default function AuditLog() {
     let mounted = true;
 
     async function load() {
+      if (!hasFeature("audit")) {
+        if (mounted) {
+          setRows([]);
+          setLoading(false);
+          setForbidden(false);
+        }
+        return;
+      }
       setLoading(true);
       setError(null);
       setForbidden(false);
@@ -59,7 +70,25 @@ export default function AuditLog() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [hasFeature]);
+
+  if (orgLoading) {
+    return <div style={styles.text}>Loading…</div>;
+  }
+
+  if (!hasFeature("audit")) {
+    return (
+      <div style={{ padding: "2rem", maxWidth: 560 }}>
+        <h1 style={styles.title}>Compliance audit log</h1>
+        <p style={{ color: "#64748b" }}>
+          Extended audit log visibility is available on the Enterprise plan.{" "}
+          <Link to="/billing" style={{ color: "#1976d2", fontWeight: 700 }}>
+            View billing &amp; plans
+          </Link>
+        </p>
+      </div>
+    );
+  }
 
   if (forbidden) {
     return (

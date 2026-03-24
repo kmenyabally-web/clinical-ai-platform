@@ -1,9 +1,11 @@
 import { useState, useRef } from "react";
+import { Link } from "react-router-dom";
 import { useOrganisation } from "../context/OrganisationContext";
 import { useService } from "../context/ServiceContext";
 import { useAuth } from "../context/AuthContext";
 import { useRole } from "../context/RoleContext";
 import { generateReadinessReport } from "../services/reportService";
+import { logAuditEvent } from "../services/auditService";
 
 const cardStyle = {
   background: "#fff",
@@ -17,7 +19,7 @@ const cardStyle = {
  * CQC Readiness Report page. Admin/Manager can generate; Staff/Auditor can view.
  */
 export default function Reports() {
-  const { organisationId } = useOrganisation();
+  const { organisationId, hasFeature } = useOrganisation();
   const { currentServiceId, currentService } = useService();
   const { user } = useAuth();
   const { can, role } = useRole();
@@ -42,6 +44,10 @@ export default function Reports() {
       const options = reportScope === "service" && currentServiceId ? { serviceId: currentServiceId } : {};
       const data = await generateReadinessReport(organisationId, auditContext, options);
       setReport(data);
+      void logAuditEvent("REPORT_GENERATED", {
+        patientId: null,
+        metadata: { scope: reportScope, serviceId: currentServiceId ?? null },
+      });
     } catch (e) {
       setError(e?.message ?? "Failed to generate report.");
     } finally {
@@ -95,6 +101,15 @@ export default function Reports() {
     <div style={{ padding: "1rem 0" }}>
       <h1 style={{ marginTop: 0 }}>CQC Readiness Report</h1>
 
+      {!hasFeature("reports") && (
+        <p style={{ color: "#64748b", marginBottom: "1rem" }}>
+          Readiness report generation is available on the Enterprise plan.{" "}
+          <Link to="/billing" style={{ color: "#1976d2", fontWeight: 600 }}>
+            View billing &amp; plans
+          </Link>
+        </p>
+      )}
+
       {error && (
         <p role="alert" style={{ color: "#c62828", marginBottom: "1rem" }}>
           {error}
@@ -107,7 +122,7 @@ export default function Reports() {
         </p>
       )}
 
-      {canGenerate && !report && (
+      {canGenerate && hasFeature("reports") && !report && (
         <div style={cardStyle}>
           <p style={{ marginTop: 0 }}>
             Generate a structured CQC Readiness Report with organisation summary, domain scores, risk indicators, evidence coverage, and latest inspection simulation results.
@@ -145,7 +160,7 @@ export default function Reports() {
       {report && (
         <>
           <div style={{ marginBottom: "1rem", display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {canGenerate && (
+            {canGenerate && hasFeature("reports") && (
               <button
                 type="button"
                 onClick={handleGenerate}
