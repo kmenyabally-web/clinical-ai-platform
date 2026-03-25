@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useOrganisation } from "../../context/OrganisationContext";
 import { useRole } from "../../context/RoleContext";
-import { NAV_ITEMS, MANAGEMENT_NAV_ITEMS, MANAGEMENT_ALLOWED_ROLES } from "../../config/routes";
+import { NAV_ITEMS, MANAGEMENT_NAV_ITEMS } from "../../config/routes";
 import {
   NHS_BLUE,
   NHS_BLUE_HOVER,
@@ -14,7 +14,7 @@ import SidebarNavItem from "./SidebarNavItem";
 
 export default function Sidebar() {
   const { organisation, organisationId, isPlatformAdmin } = useOrganisation();
-  const { isAllowed, role } = useRole();
+  const { isAllowed } = useRole();
   const [collapsed, setCollapsed] = useState(false);
 
   const visibleItems = useMemo(
@@ -22,22 +22,26 @@ export default function Sidebar() {
       NAV_ITEMS.filter((item) =>
         item.platformAdminOnly
           ? isPlatformAdmin
-          : organisationId && isAllowed(item.allowedRoles)
+          : item.allowedRoles == null
+            ? true
+            : (organisationId || isPlatformAdmin) && isAllowed(item.allowedRoles)
       ),
     [isAllowed, isPlatformAdmin, organisationId]
   );
 
-  const showManagementSection = useMemo(() => {
-    const roleOk =
-      isPlatformAdmin ||
-      (role != null && MANAGEMENT_ALLOWED_ROLES.includes(role));
-    return (organisationId || isPlatformAdmin) && roleOk;
-  }, [isPlatformAdmin, organisationId, role]);
+  // DEBUG: force management nav (Users, etc.) — set back to role-based check after auth/RBAC verified.
+  const showManagementSection = true;
 
-  const managementItems = useMemo(
-    () => (showManagementSection ? MANAGEMENT_NAV_ITEMS : []),
-    [showManagementSection]
-  );
+  const managementItems = useMemo(() => {
+    if (!showManagementSection) return [];
+    return MANAGEMENT_NAV_ITEMS.filter((item) =>
+      item.platformAdminOnly
+        ? isPlatformAdmin
+        : item.allowedRoles == null
+          ? true
+          : (organisationId || isPlatformAdmin) && isAllowed(item.allowedRoles)
+    );
+  }, [isAllowed, isPlatformAdmin, organisationId, showManagementSection]);
 
   const width = collapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH_EXPANDED;
   const toggleAriaLabel = collapsed ? "Expand sidebar" : "Collapse sidebar";

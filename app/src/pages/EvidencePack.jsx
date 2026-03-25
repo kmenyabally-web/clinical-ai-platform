@@ -7,6 +7,7 @@ import { listPatients } from "../services/patientService";
 import { getUserContext } from "../services/authService";
 import { buildEvidencePackZip } from "../services/evidencePackService";
 import { logAuditEvent } from "../services/auditService";
+import ActionBar from "../components/ActionBar";
 
 export default function EvidencePack() {
   const { hasFeature } = useOrganisation();
@@ -118,6 +119,10 @@ export default function EvidencePack() {
     }
   }
 
+  function generateEvidencePack() {
+    void handleGenerateBundle();
+  }
+
   return (
     <div style={{ padding: "2rem", maxWidth: 720, margin: "0 auto" }}>
       <style>{`
@@ -133,6 +138,16 @@ export default function EvidencePack() {
           organisation policy/evidence documents for the selected patient and organisation.
         </p>
       </header>
+
+      <ActionBar
+        actions={[
+          {
+            label: "⚡ Generate Evidence Pack",
+            type: "generate",
+            onClick: () => generateEvidencePack(),
+          },
+        ]}
+      />
 
       <section
         style={{

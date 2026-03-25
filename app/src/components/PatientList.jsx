@@ -8,6 +8,7 @@ import { logAuditEventNonBlocking } from "../services/auditService";
 import { useOrganisation } from "../context/OrganisationContext";
 import { useStructure } from "../context/StructureContext";
 import { useRole } from "../context/RoleContext";
+import { requireAdminRole } from "../lib/requireAdminAction";
 
 export default function PatientList() {
   const { organisationId, organisation } = useOrganisation();
@@ -240,6 +241,7 @@ export default function PatientList() {
             setCreateError(null);
           }}
           onSubmit={async (payload) => {
+            if (!requireAdminRole(role)) return;
             setCreating(true);
             setCreateError(null);
             try {

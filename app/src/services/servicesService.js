@@ -14,6 +14,8 @@ import {
 import { db } from "../firebase";
 import { logAuditEventNonBlocking } from "./auditService";
 import { checkServiceLimit } from "./billingService";
+import { getUserContext } from "./authService";
+import { assertTenantContext, tenantFieldsFromContext } from "../utils/tenantContext";
 
 const SERVICES_COLLECTION = "services";
 
@@ -86,9 +88,19 @@ export async function createService(organisationId, data, auditContext) {
       `Service limit reached. Your plan (${limitCheck.planName}) allows ${max} service(s). Upgrade to add more.`
     );
   }
+  const ctx = await getUserContext();
+  const tenant = tenantFieldsFromContext({
+    organisationId,
+    hospitalId: ctx.hospitalId,
+    wardId: ctx.wardId,
+  });
+  assertTenantContext(tenant.organisationId, tenant.hospitalId);
+
   const ref = collection(db, SERVICES_COLLECTION);
   const docData = {
     organisationId,
+    hospitalId: tenant.hospitalId,
+    wardId: tenant.wardId,
     serviceName: (data.serviceName ?? "").trim(),
     serviceType: (data.serviceType ?? "").trim(),
     location: (data.location ?? "").trim(),

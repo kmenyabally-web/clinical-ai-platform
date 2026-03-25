@@ -14,6 +14,8 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { logAuditEventNonBlocking } from "./auditService";
+import { getUserContext } from "./authService";
+import { assertTenantContext, tenantFieldsFromContext } from "../utils/tenantContext";
 import { createComplianceAction } from "./complianceService";
 import { createNotification, NOTIFICATION_TYPES } from "./notificationService";
 import { fetchDocumentCountsByDomain } from "./documentService";
@@ -72,9 +74,18 @@ export async function fetchInspectionQuestions() {
  */
 export async function createSession(organisationId, userId, auditContext, serviceId) {
   if (!organisationId?.trim() || !userId) throw new Error("organisationId and userId required");
+  const ctx = await getUserContext();
+  const tenant = tenantFieldsFromContext({
+    organisationId,
+    hospitalId: ctx.hospitalId,
+    wardId: ctx.wardId,
+  });
+  assertTenantContext(tenant.organisationId, tenant.hospitalId);
   const ref = collection(db, SESSIONS_COLLECTION);
   const docData = {
     organisationId,
+    hospitalId: tenant.hospitalId,
+    wardId: tenant.wardId,
     serviceId: serviceId ?? null,
     startedBy: userId,
     startedAt: serverTimestamp(),

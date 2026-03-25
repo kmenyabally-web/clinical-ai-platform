@@ -23,7 +23,7 @@ const inputStyle = {
 export default function PatientTimeline() {
   const { patientId } = useParams();
   const { user } = useAuth();
-  const { organisationId, organisation } = useOrganisation();
+  const { organisationId, organisation, hospitalId } = useOrganisation();
   const { currentServiceId, services } = useService();
 
   const [events, setEvents] = useState([]);
@@ -69,13 +69,14 @@ export default function PatientTimeline() {
       (list) => {
         setEvents(Array.isArray(list) ? list : []);
         setLoading(false);
-      }
+      },
+      hospitalId ?? null
     );
 
     return () => {
       unsubscribe();
     };
-  }, [organisationId, patientId, effectiveServiceId]);
+  }, [organisationId, patientId, effectiveServiceId, hospitalId]);
 
   // Apply client-side filters (event type, date range) to subscribed data
   const filteredEvents = useMemo(() => {

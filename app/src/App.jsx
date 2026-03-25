@@ -29,11 +29,15 @@ import StaffTraining from "./pages/StaffTraining";
 import AdminPanel from "./pages/AdminPanel";
 import OrganisationDashboard from "./pages/OrganisationDashboard";
 import Reports from "./pages/Reports";
+import BehaviourTracking from "./pages/BehaviourTracking";
+import MdtReviews from "./pages/MdtReviews";
+import ClinicalAiReports from "./pages/ClinicalAiReports";
 import Billing from "./pages/Billing";
 import Organisations from "./pages/management/Organisations";
 import Hospitals from "./pages/management/Hospitals";
 import Wards from "./pages/management/Wards";
 import Users from "./pages/management/Users";
+import CreateOrganisation from "./pages/CreateOrganisation";
 import { MANAGEMENT_ALLOWED_ROLES } from "./config/routes";
 
 export default function App() {
@@ -53,6 +57,15 @@ export default function App() {
         />
 
         <Route
+          path="/create-organisation"
+          element={
+            <ProtectedRoute>
+              <CreateOrganisation />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
           element={
             <ProtectedRoute allowMissingOrganisationForPlatformAdmin>
               <Layout />
@@ -62,7 +75,8 @@ export default function App() {
           <Route path="/" element={<FirstSafeScreen />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/organisation-dashboard" element={<OrganisationDashboard />} />
-          <Route path="/reports" element={<Reports />} />
+          <Route path="/reports" element={<ClinicalAiReports />} />
+          <Route path="/cqc-readiness-reports" element={<Reports />} />
           <Route path="/billing" element={<Billing />} />
           <Route path="/patients" element={<PatientList />} />
           <Route path="/patients/:id" element={<PatientDetail />} />
@@ -70,6 +84,8 @@ export default function App() {
           <Route path="/incidents/new/:patientId" element={<IncidentFormPage />} />
           <Route path="/incidents" element={<Incidents />} />
           <Route path="/clinical-notes" element={<ClinicalNotes />} />
+          <Route path="/behaviour" element={<BehaviourTracking />} />
+          <Route path="/mdt" element={<MdtReviews />} />
           <Route path="/documents" element={<Documents />} />
           <Route path="/care-plans" element={<CarePlans />} />
           <Route path="/staff-training" element={<StaffTraining />} />

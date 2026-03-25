@@ -22,8 +22,8 @@ export default class ErrorBoundary extends Component {
     if (this.state.hasError) {
       return (
         <div style={{ padding: "2rem", maxWidth: 480, margin: "2rem auto", textAlign: "center" }}>
-          <h1 style={{ color: "#c62828" }}>Something went wrong</h1>
-          <p>We've been notified. Please refresh the page or try again later.</p>
+          <h2 style={{ color: "#c62828" }}>System error. Please refresh.</h2>
+          <p style={{ color: "#475569", fontSize: 14 }}>We&apos;ve logged this. You can try again below.</p>
           <button
             type="button"
             onClick={() => this.setState({ hasError: false })}

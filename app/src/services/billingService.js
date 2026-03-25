@@ -13,6 +13,8 @@ import {
 } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { logAuditEventNonBlocking } from "./auditService";
+import { getUserContext } from "./authService";
+import { assertTenantContext, tenantFieldsFromContext } from "../utils/tenantContext";
 import { fetchServices } from "./servicesService";
 import { productionLogger } from "../lib/productionLogger";
 import { normalizePlanKey } from "../utils/featureAccess";
@@ -95,6 +97,13 @@ export async function getSubscription(organisationId) {
  */
 export async function createSubscription(organisationId, planName, billingCycle = BILLING_CYCLES.MONTHLY, auditContext) {
   if (!organisationId?.trim()) throw new Error("organisationId required");
+  const ctx = await getUserContext();
+  const tenant = tenantFieldsFromContext({
+    organisationId,
+    hospitalId: ctx.hospitalId,
+    wardId: ctx.wardId,
+  });
+  assertTenantContext(tenant.organisationId, tenant.hospitalId);
   const canonical = normalizePlanKey(planName ?? PLANS.BASIC);
   const ref = collection(db, SUBSCRIPTIONS_COLLECTION);
   const now = new Date();
@@ -102,6 +111,8 @@ export async function createSubscription(organisationId, planName, billingCycle 
   endDate.setMonth(endDate.getMonth() + (billingCycle === BILLING_CYCLES.ANNUAL ? 12 : 1));
   const docData = {
     organisationId,
+    hospitalId: tenant.hospitalId,
+    wardId: tenant.wardId,
     planName: canonical,
     status: "active",
     billingCycle: billingCycle ?? BILLING_CYCLES.MONTHLY,

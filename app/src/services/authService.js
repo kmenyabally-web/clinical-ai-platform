@@ -29,6 +29,8 @@ export async function getUserContext() {
     return {
       role: null,
       organisationId: null,
+      hospitalId: null,
+      wardId: null,
       serviceIds: null,
     };
   }
@@ -46,15 +48,25 @@ export async function getUserContext() {
       ? claims.organisationId.trim()
       : null;
 
+  let hospitalId =
+    typeof claims.hospitalId === "string" && claims.hospitalId.trim().length > 0
+      ? claims.hospitalId.trim()
+      : null;
+
+  let wardId =
+    typeof claims.wardId === "string" && claims.wardId.trim().length > 0
+      ? claims.wardId.trim()
+      : null;
+
   const serviceIds = Array.isArray(claims.serviceIds) ? claims.serviceIds : null;
 
   const profile = await getCurrentUserProfile(user.uid);
+  const profileOrgIdCandidate =
+    profile?.organisationId ?? profile?.orgId ?? null;
   const profileOrgId =
-    profile?.orgId != null && String(profile.orgId).trim() !== ""
-      ? String(profile.orgId).trim()
-      : profile?.organisationId != null && String(profile.organisationId).trim() !== ""
-        ? String(profile.organisationId).trim()
-        : null;
+    profileOrgIdCandidate != null && String(profileOrgIdCandidate).trim() !== ""
+      ? String(profileOrgIdCandidate).trim()
+      : null;
 
   if (!role && profile?.role != null && String(profile.role).trim() !== "") {
     role = String(profile.role).trim();
@@ -66,6 +78,18 @@ export async function getUserContext() {
     organisationId = profileOrgId;
   }
 
+  const profileHospitalId =
+    profile?.hospitalId != null && String(profile.hospitalId).trim() !== ""
+      ? String(profile.hospitalId).trim()
+      : null;
+  const profileWardId =
+    profile?.wardId != null && String(profile.wardId).trim() !== ""
+      ? String(profile.wardId).trim()
+      : null;
+
+  if (!hospitalId && profileHospitalId) hospitalId = profileHospitalId;
+  if (!wardId && profileWardId) wardId = profileWardId;
+
   if (!organisationId) {
     throw new Error(
       "Governance Context Missing: organisationId claim is required at Stage 2."
@@ -75,6 +99,8 @@ export async function getUserContext() {
   return {
     role,
     organisationId,
+    hospitalId,
+    wardId,
     serviceIds,
   };
 }

@@ -3,6 +3,8 @@ import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../firebase";
 import { EVIDENCE_DOMAINS } from "../config/evidenceDomains";
+import { getUserContext } from "../services/authService";
+import { assertTenantContext, tenantFieldsFromContext } from "../utils/tenantContext";
 
 const ACCEPT = ".pdf,.docx,.xlsx,.jpg,.jpeg,.png";
 const SUPPORTED_EXTENSIONS = [".pdf", ".docx", ".xlsx", ".jpg", ".jpeg", ".png"];
@@ -161,9 +163,19 @@ export default function EvidenceUpload({
         try {
           const fileUrl = await getDownloadURL(uploadTask.snapshot.ref);
 
+          const ctx = await getUserContext();
+          const tenant = tenantFieldsFromContext({
+            organisationId,
+            hospitalId: ctx.hospitalId,
+            wardId: ctx.wardId,
+          });
+          assertTenantContext(tenant.organisationId, tenant.hospitalId);
+
           const col = collection(db, "evidence");
           await addDoc(col, {
             organisationId,
+            hospitalId: tenant.hospitalId,
+            wardId: tenant.wardId,
             serviceId: serviceId ?? null,
             domain: domain.trim().toLowerCase(),
             title: title.trim(),

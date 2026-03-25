@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 import { useOrganisation } from "../../context/OrganisationContext";
 import { listOrganisationsForManagement } from "../../services/organisation";
 import {
@@ -9,6 +9,7 @@ import {
   listWards,
 } from "../../services/structureService";
 import { managementStyles as s } from "./managementStyles";
+import ActionBar from "../../components/ActionBar";
 
 export default function Wards() {
   const { organisationId, isPlatformAdmin } = useOrganisation();
@@ -124,6 +125,15 @@ export default function Wards() {
     if (isPlatformAdmin || organisationId) loadWards();
   }, [loadWards, isPlatformAdmin, organisationId]);
 
+  function openWardModal() {
+    if (!effectiveOrg?.trim()) return;
+    setModalOpen(true);
+    const oid = effectiveOrg?.trim() ?? "";
+    setModalOrgId(oid);
+    setModalHospitalId(hospitalFilter?.trim() ?? "");
+    setName("");
+  }
+
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
     const oid = modalOrgId.trim();
@@ -144,24 +154,22 @@ export default function Wards() {
   }
 
   if (!isPlatformAdmin && !organisationId) {
-    return (
-      <div style={s.page}>
-        <h1 style={s.h1}>Wards</h1>
-        <div style={s.callout}>
-          <strong>No organisation assigned.</strong>{" "}
-          <Link to="/management/organisations" style={{ color: "#005eb8", fontWeight: 700 }}>
-            Set up an organisation
-          </Link>{" "}
-          first.
-        </div>
-      </div>
-    );
+    return <Navigate to="/create-organisation" replace />;
   }
 
   return (
     <div style={s.page}>
       <h1 style={s.h1}>Wards</h1>
       <p style={s.muted}>Wards belong to a hospital; organisation is stored for tenant isolation.</p>
+
+      <ActionBar
+        actions={[
+          {
+            label: "➕ Add Ward",
+            onClick: openWardModal,
+          },
+        ]}
+      />
 
       {error ? (
         <p role="alert" style={s.alert}>
@@ -199,20 +207,6 @@ export default function Wards() {
             ))}
           </select>
         </label>
-        <button
-          type="button"
-          style={s.btnPrimary}
-          disabled={!effectiveOrg?.trim()}
-          onClick={() => {
-            setModalOpen(true);
-            const oid = effectiveOrg?.trim() ?? "";
-            setModalOrgId(oid);
-            setModalHospitalId(hospitalFilter?.trim() ?? "");
-            setName("");
-          }}
-        >
-          Add ward
-        </button>
       </div>
 
       {loading ? (

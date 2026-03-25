@@ -13,6 +13,8 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { addTimelineEntry } from "./patientTimelineService";
+import { getPatientById } from "./patientService";
+import { assertTenantContext, TENANT_UNSCOPED_WARD } from "../utils/tenantContext";
 
 const CARE_PLANS_COLLECTION = "care_plans";
 const CARE_PLAN_VERSIONS_COLLECTION = "care_plan_versions";
@@ -43,6 +45,8 @@ function snapshotFromDoc(d) {
   return {
     id: d?.id ?? "",
     organisationId: x.organisationId ?? "",
+    hospitalId: x.hospitalId ?? "",
+    wardId: x.wardId ?? "",
     serviceId: x.serviceId ?? null,
     patientId: x.patientId ?? "",
     careNeeds: x.careNeeds ?? "",
@@ -65,9 +69,16 @@ export async function saveAiCarePlanDraft({ organisationId, patientId, content }
   const body = String(content ?? "").trim();
   if (!body) throw new Error("content is required");
 
+  const patient = await getPatientById(patientId.trim());
+  const hospitalId = (patient.hospitalId && String(patient.hospitalId).trim()) || "";
+  const wardId = (patient.wardId && String(patient.wardId).trim()) || TENANT_UNSCOPED_WARD;
+  assertTenantContext(org, hospitalId);
+
   const ref = collection(db, CARE_PLANS_COLLECTION);
   const payload = {
     organisationId: org,
+    hospitalId,
+    wardId,
     patientId: patientId.trim(),
     content: body,
     status: "draft",
@@ -210,10 +221,17 @@ export async function createCarePlanRecord({
   if (!patientId?.trim()) throw new Error("patientId is required");
   if (!createdBy?.trim()) throw new Error("createdBy is required");
 
+  const patient = await getPatientById(patientId.trim());
+  const hospitalId = (patient.hospitalId && String(patient.hospitalId).trim()) || "";
+  const wardId = (patient.wardId && String(patient.wardId).trim()) || TENANT_UNSCOPED_WARD;
+  assertTenantContext(organisationId.trim(), hospitalId);
+
   const now = serverTimestamp();
   const ref = collection(db, CARE_PLANS_COLLECTION);
   const payload = {
     organisationId: organisationId.trim(),
+    hospitalId,
+    wardId,
     serviceId: serviceId ?? null,
     patientId: patientId.trim(),
     careNeeds: String(careNeeds ?? "").trim(),
@@ -240,6 +258,8 @@ export async function createCarePlanRecord({
   await addTimelineEntry({
     organisationId,
     patientId,
+    hospitalId,
+    wardId,
     serviceId,
     eventType: "care_plan_update",
     eventTitle: "Care plan created",
@@ -296,8 +316,19 @@ export async function updateCarePlanRecord({
 
   await updateDoc(ref, updates);
 
+  let vHid = current.hospitalId;
+  let vWid = current.wardId;
+  if (!vHid?.trim()) {
+    const p = await getPatientById(current.patientId.trim());
+    vHid = (p.hospitalId && String(p.hospitalId).trim()) || "";
+    vWid = (p.wardId && String(p.wardId).trim()) || vWid || TENANT_UNSCOPED_WARD;
+  }
+  assertTenantContext(current.organisationId, vHid);
+
   await addDoc(collection(db, CARE_PLAN_VERSIONS_COLLECTION), {
     organisationId: current.organisationId,
+    hospitalId: vHid,
+    wardId: vWid || TENANT_UNSCOPED_WARD,
     serviceId: current.serviceId,
     patientId: current.patientId,
     carePlanId: current.id,
@@ -315,6 +346,8 @@ export async function updateCarePlanRecord({
   await addTimelineEntry({
     organisationId,
     patientId,
+    hospitalId: vHid,
+    wardId: vWid || TENANT_UNSCOPED_WARD,
     serviceId: serviceId ?? current.serviceId,
     eventType: "care_plan_update",
     eventTitle: "Care plan updated",

@@ -1,3 +1,6 @@
+import { collection, query, where, getDocs } from "firebase/firestore";
+import { db, auth } from "../firebase";
+import { generateGeminiReportFromPrompt, processClinicalNote } from "./geminiAiService";
 import { getOrganisation } from "./organisation";
 import { getService } from "./servicesService";
 import {
@@ -8,9 +11,11 @@ import {
 import { fetchDocumentCountsByDomain } from "./documentService";
 import { getSessionsForOrganisation } from "./inspectionService";
 import { getRiskLevel } from "./readinessService";
-import { logAuditEventNonBlocking } from "./auditService";
+import { logAuditEventNonBlocking, logAction } from "./auditService";
 import { CQC_DOCUMENT_DOMAINS } from "../config/documentDomains";
 import { DOMAIN_TO_STATS_FIELD } from "../config/documentDomains";
+
+export { processClinicalNote };
 
 const DEDUCTION_OVERDUE = 3;
 const DEDUCTION_HIGH_SEVERITY = 5;
@@ -220,4 +225,93 @@ export async function generateReadinessReport(organisationId, auditContext, opti
   }
 
   return report;
+}
+
+async function getPatientNotes(patientId, organisationId, hospitalId) {
+  const q = query(
+    collection(db, "notes"),
+    where("patientId", "==", patientId),
+    where("organisationId", "==", organisationId),
+    where("hospitalId", "==", hospitalId)
+  );
+
+  const snapshot = await getDocs(q);
+
+  let combined = "";
+
+  snapshot.forEach((docSnap) => {
+    const data = docSnap.data();
+    combined += (data.aiSummary || data.correctedText || "") + "\n";
+  });
+
+  return combined;
+}
+
+/**
+ * CPA report from aggregated notes (multi-section JSON via Gemini).
+ */
+export async function generateCPAReport(patientId, context) {
+  const combined = await getPatientNotes(
+    patientId,
+    context.organisationId,
+    context.hospitalId
+  );
+
+  const prompt = `
+You are generating a CPA clinical report.
+
+STRICT RULES:
+
+* Do NOT invent information
+* Only use provided notes
+* If data missing, say "Not documented"
+
+---
+
+NOTES:
+${combined}
+
+---
+
+Return valid JSON only with these keys (string values):
+mental_state, risk_assessment, progress, medication_issues, safeguarding, recommendations
+  `;
+
+  const out = await generateGeminiReportFromPrompt(prompt);
+  void logAction("GENERATE_CPA_REPORT", auth.currentUser?.uid ?? null);
+  return out;
+}
+
+/**
+ * Tribunal report from aggregated notes (multi-section JSON via Gemini).
+ */
+export async function generateTribunalReport(patientId, context) {
+  const combined = await getPatientNotes(
+    patientId,
+    context.organisationId,
+    context.hospitalId
+  );
+
+  const prompt = `
+You are generating a Tribunal report.
+
+STRICT RULES:
+
+* No assumptions
+* No hallucination
+
+---
+
+NOTES:
+${combined}
+
+---
+
+Return valid JSON only with these keys (string values):
+background, current_presentation, risks, treatment_engagement, professional_opinion
+  `;
+
+  const out = await generateGeminiReportFromPrompt(prompt);
+  void logAction("GENERATE_TRIBUNAL_REPORT", auth.currentUser?.uid ?? null);
+  return out;
 }

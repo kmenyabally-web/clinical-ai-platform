@@ -19,6 +19,7 @@
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { getUserContext } from "./authService";
+import { getPatientById } from "./patientService";
 import { logEvent } from "./auditService";
 import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "../constants/auditTaxonomy";
 
@@ -54,6 +55,9 @@ export async function getDocumentContent(patientId, docId) {
       "Access denied: role not permitted to read clinical content at this gate."
     );
   }
+
+  // Validate tenant scope for this patient (organisation + hospital).
+  await getPatientById(patientId);
 
   // Anchor read at the patient-level careFolder subcollection.
   const docRef = doc(db, "people", patientId, "careFolder", docId);

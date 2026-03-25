@@ -6,8 +6,46 @@
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { getUserContext } from "./authService";
+import { assertTenantContext, tenantFieldsFromContext } from "../utils/tenantContext";
 
 const AUDIT_LOGS_COLLECTION = "auditLogs";
+/** Lightweight action log collection (pre-flight observability). */
+const AUDIT_ACTIONS_COLLECTION = "audit_logs";
+
+/**
+ * Mandatory compliance-style audit row (Stage 10B).
+ * @param {string} action
+ * @param {Record<string, unknown>} [metadata]
+ */
+export async function logAudit(action, metadata = {}) {
+  try {
+    await addDoc(collection(db, AUDIT_ACTIONS_COLLECTION), {
+      action,
+      metadata,
+      userId: metadata.userId ?? auth.currentUser?.uid ?? null,
+      organisationId: metadata.organisationId ?? null,
+      timestamp: serverTimestamp(),
+    });
+  } catch (err) {
+    console.warn("Audit log failed:", err);
+  }
+}
+
+/**
+ * @param {string} action
+ * @param {string | null | undefined} userId
+ */
+export async function logAction(action, userId) {
+  try {
+    await addDoc(collection(db, AUDIT_ACTIONS_COLLECTION), {
+      action,
+      userId: userId ?? null,
+      createdAt: serverTimestamp(),
+    });
+  } catch (e) {
+    console.warn("[audit] logAction failed:", e);
+  }
+}
 
 /**
  * @param {string} eventType
@@ -16,20 +54,33 @@ const AUDIT_LOGS_COLLECTION = "auditLogs";
 export async function logAuditEvent(eventType, options = {}) {
   const userId = options.userId ?? auth.currentUser?.uid ?? null;
   let organisationId = options.organisationId ?? null;
-  if (!organisationId) {
-    try {
-      const ctx = await getUserContext();
-      organisationId = ctx?.organisationId ?? null;
-    } catch {
-      /* non-fatal */
-    }
+  let ctx = null;
+  try {
+    ctx = await getUserContext();
+  } catch {
+    /* non-fatal */
   }
+  if (!organisationId) {
+    organisationId = ctx?.organisationId ?? null;
+  }
+  if (!organisationId?.trim()) {
+    return;
+  }
+
+  const tenant = tenantFieldsFromContext({
+    organisationId,
+    hospitalId: ctx?.hospitalId,
+    wardId: ctx?.wardId,
+  });
+  assertTenantContext(tenant.organisationId, tenant.hospitalId);
 
   const payload = {
     eventType: String(eventType ?? "UNKNOWN"),
     userId: userId ?? null,
     patientId: options.patientId ?? null,
-    organisationId,
+    organisationId: tenant.organisationId,
+    hospitalId: tenant.hospitalId,
+    wardId: tenant.wardId,
     metadata: options.metadata && typeof options.metadata === "object" ? options.metadata : null,
     timestamp: serverTimestamp(),
   };
@@ -66,6 +117,8 @@ export const logAppInitStub = () => {
 export default {
   logEvent,
   logAuditEvent,
+  logAction,
+  logAudit,
   logAuditEventNonBlocking,
   logAppInitStub,
 };

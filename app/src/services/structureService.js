@@ -4,18 +4,20 @@
  */
 
 import {
-  addDoc,
   collection,
+  doc,
   getDocs,
   query,
   where,
   orderBy,
   limit,
   serverTimestamp,
+  setDoc,
 } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { getUserContext } from "./authService";
 import { isPlatformAdmin } from "./platformAdminService";
+import { assertTenantContext, TENANT_UNSCOPED_WARD } from "../utils/tenantContext";
 
 const HOSPITALS_COLLECTION = "hospitals";
 const WARDS_COLLECTION = "wards";
@@ -105,9 +107,13 @@ export async function createHospital(organisationId, data) {
   if (!organisationId?.trim()) throw new Error("organisationId required");
   if (!data?.name?.trim()) throw new Error("Hospital name required");
   await assertSameOrganisation(organisationId);
-  const ref = await addDoc(collection(db, HOSPITALS_COLLECTION), {
+  const ref = doc(collection(db, HOSPITALS_COLLECTION));
+  assertTenantContext(organisationId, ref.id);
+  await setDoc(ref, {
     name: data.name.trim(),
     organisationId,
+    hospitalId: ref.id,
+    wardId: TENANT_UNSCOPED_WARD,
     createdAt: serverTimestamp(),
   });
   return { id: ref.id };
@@ -123,10 +129,13 @@ export async function createWard(organisationId, hospitalId, data) {
   if (!organisationId?.trim() || !hospitalId?.trim()) throw new Error("organisationId and hospitalId required");
   if (!data?.name?.trim()) throw new Error("Ward name required");
   await assertSameOrganisation(organisationId);
-  const ref = await addDoc(collection(db, WARDS_COLLECTION), {
+  assertTenantContext(organisationId, hospitalId);
+  const ref = doc(collection(db, WARDS_COLLECTION));
+  await setDoc(ref, {
     name: data.name.trim(),
     hospitalId,
     organisationId,
+    wardId: ref.id,
     createdAt: serverTimestamp(),
   });
   return { id: ref.id };

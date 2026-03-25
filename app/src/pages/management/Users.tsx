@@ -1,18 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 import { useOrganisation } from "../../context/OrganisationContext";
 import { useRole } from "../../context/RoleContext";
 import { listOrganisationsForManagement } from "../../services/organisation";
-import {
-  SYSTEM_ROLES,
-  MDT_ROLES,
-  createOrganisationUserAccount,
-  listUsersInOrganisation,
-  updateUserAssignment,
-} from "../../services/userManagementService";
+import { SYSTEM_ROLES, MDT_ROLES, listUsersInOrganisation, updateUserAssignment } from "../../services/userManagementService";
 import { listHospitals, listWards } from "../../services/structureService";
 import { managementStyles as s } from "./managementStyles";
 import { MANAGEMENT_ALLOWED_ROLES } from "../../config/routes";
+import ActionBar from "../../components/ActionBar";
+import AddUserModal from "../../components/AddUserModal";
 
 export default function Users() {
   const { organisationId, isPlatformAdmin } = useOrganisation();
@@ -39,18 +35,7 @@ export default function Users() {
   const [error, setError] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
 
-  const [modalOpen, setModalOpen] = useState(false);
-  const [displayName, setDisplayName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [systemRole, setSystemRole] = useState<string>("Staff");
-  const [mdtRole, setMdtRole] = useState<string>(MDT_ROLES[0] ?? "Nurse");
-  const [modalOrgId, setModalOrgId] = useState("");
-  const [modalHospitalId, setModalHospitalId] = useState("");
-  const [modalWardId, setModalWardId] = useState("");
-  const [modalHospitals, setModalHospitals] = useState<Array<{ id: string; name: string }>>([]);
-  const [modalWards, setModalWards] = useState<Array<{ id: string; name: string }>>([]);
-  const [creating, setCreating] = useState(false);
+  const [showAddUser, setShowAddUser] = useState(false);
 
   const effectiveOrgId = isPlatformAdmin ? orgFilter : organisationId ?? "";
 
@@ -103,43 +88,6 @@ export default function Users() {
     load();
   }, [load]);
 
-  useEffect(() => {
-    if (!modalOpen || !modalOrgId?.trim()) {
-      setModalHospitals([]);
-      setModalWards([]);
-      return;
-    }
-    let cancelled = false;
-    listHospitals(modalOrgId.trim())
-      .then((h) => {
-        if (!cancelled) setModalHospitals(Array.isArray(h) ? h : []);
-      })
-      .catch(() => {
-        if (!cancelled) setModalHospitals([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [modalOpen, modalOrgId]);
-
-  useEffect(() => {
-    if (!modalOpen || !modalOrgId?.trim() || !modalHospitalId?.trim()) {
-      setModalWards([]);
-      return;
-    }
-    let cancelled = false;
-    listWards(modalOrgId.trim(), modalHospitalId.trim())
-      .then((w) => {
-        if (!cancelled) setModalWards(Array.isArray(w) ? w : []);
-      })
-      .catch(() => {
-        if (!cancelled) setModalWards([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [modalOpen, modalOrgId, modalHospitalId]);
-
   async function saveRow(
     userId: string,
     nextRole: string,
@@ -168,48 +116,6 @@ export default function Users() {
     }
   }
 
-  async function handleCreateUser(e: React.FormEvent) {
-    e.preventDefault();
-    const oid = modalOrgId.trim();
-    if (!email.trim() || password.length < 6 || !oid) return;
-    if (!systemRole?.trim() || !mdtRole?.trim()) {
-      setError("System role and MDT role are required.");
-      return;
-    }
-    setCreating(true);
-    setError(null);
-    try {
-      await createOrganisationUserAccount({
-        email: email.trim(),
-        password,
-        displayName: displayName.trim(),
-        role: systemRole.trim(),
-        mdtRole: mdtRole.trim(),
-        organisationId: oid,
-        hospitalId: modalHospitalId.trim() || null,
-        wardId: modalWardId.trim() || null,
-      });
-      setModalOpen(false);
-      setDisplayName("");
-      setEmail("");
-      setPassword("");
-      setSystemRole("Staff");
-      setMdtRole(MDT_ROLES[0] ?? "Nurse");
-      setModalHospitalId("");
-      setModalWardId("");
-      await load();
-    } catch (err: unknown) {
-      const code = err && typeof err === "object" && "code" in err ? String((err as { code?: string }).code) : "";
-      const msg =
-        err && typeof err === "object" && "message" in err
-          ? String((err as { message?: string }).message)
-          : "Failed to create user.";
-      setError(code === "functions/already-exists" ? "That email is already registered." : msg);
-    } finally {
-      setCreating(false);
-    }
-  }
-
   if (!canManageUsers) {
     return (
       <div style={s.page}>
@@ -219,24 +125,25 @@ export default function Users() {
   }
 
   if (!isPlatformAdmin && !organisationId) {
-    return (
-      <div style={s.page}>
-        <h1 style={s.h1}>Users</h1>
-        <div style={s.callout}>
-          <strong>No organisation assigned.</strong>{" "}
-          <Link to="/management/organisations" style={{ color: "#005eb8", fontWeight: 700 }}>
-            Complete organisation setup
-          </Link>{" "}
-          first.
-        </div>
-      </div>
-    );
+    return <Navigate to="/create-organisation" replace />;
   }
 
   return (
     <div style={s.page}>
       <h1 style={s.h1}>Users</h1>
       <p style={s.muted}>Invite users and assign roles and hospital / ward scope.</p>
+
+      <ActionBar
+        actions={[
+          {
+            label: "➕ Add User",
+            onClick: () => {
+              if (!effectiveOrgId?.trim()) return;
+              setShowAddUser(true);
+            },
+          },
+        ]}
+      />
 
       {error ? (
         <p role="alert" style={s.alert}>
@@ -257,24 +164,6 @@ export default function Users() {
             </select>
           </label>
         ) : null}
-        <button
-          type="button"
-          style={s.btnPrimary}
-          disabled={!effectiveOrgId?.trim()}
-          onClick={() => {
-            setModalOpen(true);
-            setModalOrgId(effectiveOrgId || "");
-            setModalHospitalId("");
-            setModalWardId("");
-            setDisplayName("");
-            setEmail("");
-            setPassword("");
-            setSystemRole("Staff");
-            setMdtRole(MDT_ROLES[0] ?? "Nurse");
-          }}
-        >
-          Add user
-        </button>
       </div>
 
       {loading ? (
@@ -309,147 +198,16 @@ export default function Users() {
         </div>
       )}
 
-      {modalOpen ? (
-        <div style={s.modalBackdrop} role="presentation">
-          <div style={{ ...s.modalCard, maxWidth: 460 }} role="dialog" aria-modal="true" aria-labelledby="add-user-title">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <h2 id="add-user-title" style={{ margin: 0, fontSize: "1.1rem" }}>
-                Add user
-              </h2>
-              <button
-                type="button"
-                onClick={() => setModalOpen(false)}
-                style={{ border: "none", background: "none", cursor: "pointer", fontSize: "1.25rem" }}
-                aria-label="Close"
-              >
-                ×
-              </button>
-            </div>
-            <form onSubmit={handleCreateUser}>
-              {isPlatformAdmin ? (
-                <label style={s.label}>
-                  Organisation
-                  <select
-                    required
-                    value={modalOrgId}
-                    onChange={(e) => {
-                      setModalOrgId(e.target.value);
-                      setModalHospitalId("");
-                      setModalWardId("");
-                    }}
-                    style={s.select}
-                  >
-                    <option value="">Select</option>
-                    {orgs.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
-              <label style={s.label}>
-                Name
-                <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} style={s.input} />
-              </label>
-              <label style={s.label}>
-                Email
-                <input
-                  type="email"
-                  required
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  style={s.input}
-                />
-              </label>
-              <label style={s.label}>
-                Temporary password
-                <input
-                  type="password"
-                  required
-                  minLength={6}
-                  autoComplete="new-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  style={s.input}
-                />
-              </label>
-              <label style={s.label}>
-                System role *
-                <select
-                  required
-                  value={systemRole}
-                  onChange={(e) => setSystemRole(e.target.value)}
-                  style={s.select}
-                >
-                  {SYSTEM_ROLES.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label style={s.label}>
-                MDT role *
-                <select required value={mdtRole} onChange={(e) => setMdtRole(e.target.value)} style={s.select}>
-                  {MDT_ROLES.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label style={s.label}>
-                Hospital
-                <select
-                  value={modalHospitalId}
-                  onChange={(e) => {
-                    setModalHospitalId(e.target.value);
-                    setModalWardId("");
-                  }}
-                  style={s.select}
-                >
-                  <option value="">Optional</option>
-                  {modalHospitals.map((h) => (
-                    <option key={h.id} value={h.id}>
-                      {h.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label style={s.label}>
-                Ward
-                <select
-                  value={modalWardId}
-                  onChange={(e) => setModalWardId(e.target.value)}
-                  disabled={!modalHospitalId}
-                  style={s.select}
-                >
-                  <option value="">Optional</option>
-                  {modalWards.map((w) => (
-                    <option key={w.id} value={w.id}>
-                      {w.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <p style={{ ...s.muted, marginTop: -4 }}>
-                The user should sign in with the email and password above, then change password if your policy requires
-                it.
-              </p>
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button type="submit" disabled={creating} style={s.btnPrimary}>
-                  {creating ? "Creating…" : "Create user"}
-                </button>
-                <button type="button" style={s.btnGhost} onClick={() => setModalOpen(false)}>
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
+      <AddUserModal
+        open={showAddUser}
+        onClose={() => setShowAddUser(false)}
+        onCreated={() => {
+          void load();
+        }}
+        defaultOrganisationId={effectiveOrgId}
+        organisations={orgs}
+        isPlatformAdmin={isPlatformAdmin}
+      />
     </div>
   );
 }

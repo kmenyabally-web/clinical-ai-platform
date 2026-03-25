@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import { useRole } from "../context/RoleContext";
 import { generateReadinessReport } from "../services/reportService";
 import { logAuditEvent } from "../services/auditService";
+import { requireAdminRole } from "../lib/requireAdminAction";
 
 const cardStyle = {
   background: "#fff",
@@ -37,6 +38,7 @@ export default function Reports() {
       : undefined;
 
   async function handleGenerate() {
+    if (!requireAdminRole(role)) return;
     if (!organisationId || !auditContext) return;
     setError(null);
     setLoading(true);
@@ -113,6 +115,12 @@ export default function Reports() {
       {error && (
         <p role="alert" style={{ color: "#c62828", marginBottom: "1rem" }}>
           {error}
+        </p>
+      )}
+
+      {loading && (
+        <p style={{ marginBottom: "1rem", fontWeight: 600 }} aria-live="polite">
+          ⏳ Processing…
         </p>
       )}
 
@@ -294,6 +302,12 @@ export default function Reports() {
             </section>
           </div>
         </>
+      )}
+
+      {hasFeature("reports") && !report && !loading && (
+        <p style={{ color: "#64748b", padding: "1rem 1.25rem", background: "#f8fafc", borderRadius: 12, marginTop: "1rem" }}>
+          No data available. Start by generating a readiness report when you have access.
+        </p>
       )}
     </div>
   );

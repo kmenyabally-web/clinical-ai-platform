@@ -10,6 +10,12 @@ import {
   onSnapshot,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { getPatientById } from "./patientService";
+import {
+  assertTenantContext,
+  TENANT_UNSCOPED_HOSPITAL,
+  TENANT_UNSCOPED_WARD,
+} from "../utils/tenantContext";
 
 /** Firestore collection for the unified patient timeline (all event types). */
 export const PATIENT_TIMELINE_COLLECTION = "patient_timeline";
@@ -46,6 +52,8 @@ export async function addTimelineEntry({
   organisationId,
   patientId,
   serviceId,
+  hospitalId = null,
+  wardId: wardIdParam = null,
   eventType,
   eventTitle,
   eventDescription = "",
@@ -61,10 +69,27 @@ export async function addTimelineEntry({
     throw new Error("eventType, eventTitle and createdBy are required");
   }
 
+  let hid =
+    hospitalId != null && String(hospitalId).trim() !== "" ? String(hospitalId).trim() : "";
+  let wid =
+    wardIdParam != null && String(wardIdParam).trim() !== "" ? String(wardIdParam).trim() : "";
+  if (!hid) {
+    const p = await getPatientById(patientId.trim());
+    hid = (p.hospitalId && String(p.hospitalId).trim()) || TENANT_UNSCOPED_HOSPITAL;
+    wid = (p.wardId && String(p.wardId).trim()) || wid || TENANT_UNSCOPED_WARD;
+  } else if (!wid) {
+    const p = await getPatientById(patientId.trim());
+    wid = (p.wardId && String(p.wardId).trim()) || TENANT_UNSCOPED_WARD;
+  }
+
+  assertTenantContext(organisationId.trim(), hid);
+
   const ref = collection(db, PATIENT_TIMELINE_COLLECTION);
   const doc = {
     organisationId: organisationId.trim(),
     patientId: patientId.trim(),
+    hospitalId: hid,
+    wardId: wid || TENANT_UNSCOPED_WARD,
     serviceId: serviceId ?? null,
     eventType: String(eventType),
     eventTitle: String(eventTitle).trim(),
@@ -109,11 +134,14 @@ export async function fetchPatientTimeline(organisationId, patientId, serviceIdO
     return [];
   }
 
+  // Validate tenant scope for this specific patient (organisation + hospital).
+  await getPatientById(patientId.trim());
+
   const options =
     serviceIdOrOptions != null && typeof serviceIdOrOptions === "object" && !Array.isArray(serviceIdOrOptions)
       ? serviceIdOrOptions
       : { serviceId: serviceIdOrOptions ?? null };
-  const { serviceId = null, eventType = null, dateFrom = null, dateTo = null } = options;
+  const { serviceId = null, eventType = null, dateFrom = null, dateTo = null, hospitalId = null } = options;
   const ref = collection(db, PATIENT_TIMELINE_COLLECTION);
 
   const constraints = [
@@ -121,6 +149,10 @@ export async function fetchPatientTimeline(organisationId, patientId, serviceIdO
     where("patientId", "==", patientId.trim()),
     orderBy("createdAt", "desc"),
   ];
+
+  if (hospitalId != null && String(hospitalId).trim() !== "") {
+    constraints.splice(constraints.length - 1, 0, where("hospitalId", "==", String(hospitalId).trim()));
+  }
 
   if (serviceId != null && serviceId !== "") {
     constraints.splice(constraints.length - 1, 0, where("serviceId", "==", serviceId));
@@ -159,13 +191,17 @@ export async function fetchPatientTimeline(organisationId, patientId, serviceIdO
 export async function fetchClinicalNotesForOrganisation(organisationId, options = {}) {
   if (!organisationId?.trim()) return [];
   const limitCount = options?.limitCount ?? 300;
+  const hospitalId = options?.hospitalId != null ? String(options.hospitalId).trim() : "";
   const ref = collection(db, PATIENT_TIMELINE_COLLECTION);
-  const q = query(
-    ref,
+  const constraints = [
     where("organisationId", "==", organisationId.trim()),
     orderBy("createdAt", "desc"),
-    limit(limitCount)
-  );
+    limit(limitCount),
+  ];
+  if (hospitalId) {
+    constraints.splice(1, 0, where("hospitalId", "==", hospitalId));
+  }
+  const q = query(ref, ...constraints);
   const snapshot = await getDocs(q);
   const docs = snapshot?.docs ?? [];
   let list = docs.map((d) => mapDocToEvent(d));
@@ -186,36 +222,58 @@ export async function fetchClinicalNotesForOrganisation(organisationId, options 
  * @param {(events: Array<any>) => void} onUpdate
  * @returns {() => void} Unsubscribe function
  */
-export function subscribePatientTimeline(organisationId, patientId, serviceId, onUpdate) {
+export function subscribePatientTimeline(organisationId, patientId, serviceId, onUpdate, hospitalId = null) {
   if (!organisationId?.trim() || !patientId?.trim()) {
     onUpdate([]);
     return () => {};
   }
 
-  const ref = collection(db, PATIENT_TIMELINE_COLLECTION);
-  const constraints = [
-    where("organisationId", "==", organisationId.trim()),
-    where("patientId", "==", patientId.trim()),
-    orderBy("createdAt", "desc"),
-  ];
-  if (serviceId != null && serviceId !== "") {
-    constraints.splice(constraints.length - 1, 0, where("serviceId", "==", serviceId));
-  }
+  // subscription setup is async because we validate the tenant boundary first.
+  let unsubscribe = () => {};
+  onUpdate([]);
 
-  const q = query(ref, ...constraints);
+  (async () => {
+    try {
+      await getPatientById(patientId.trim());
 
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      const docs = snapshot?.docs ?? [];
-      const list = docs.map((d) => mapDocToEvent(d));
-      onUpdate(list);
-    },
-    (err) => {
-      console.error("Patient timeline subscription error:", err);
+      const ref = collection(db, PATIENT_TIMELINE_COLLECTION);
+      const constraints = [
+        where("organisationId", "==", organisationId.trim()),
+        where("patientId", "==", patientId.trim()),
+        orderBy("createdAt", "desc"),
+      ];
+      if (hospitalId != null && String(hospitalId).trim() !== "") {
+        constraints.splice(constraints.length - 1, 0, where("hospitalId", "==", String(hospitalId).trim()));
+      }
+      if (serviceId != null && serviceId !== "") {
+        constraints.splice(constraints.length - 1, 0, where("serviceId", "==", serviceId));
+      }
+
+      const q = query(ref, ...constraints);
+      unsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+          const docs = snapshot?.docs ?? [];
+          const list = docs.map((d) => mapDocToEvent(d));
+          onUpdate(list);
+        },
+        (err) => {
+          console.error("Patient timeline subscription error:", err);
+          onUpdate([]);
+        }
+      );
+    } catch (err) {
       onUpdate([]);
     }
-  );
+  })();
+
+  return () => {
+    try {
+      unsubscribe?.();
+    } catch {
+      // ignore
+    }
+  };
 }
 
 /**
@@ -300,16 +358,18 @@ function toMillis(v) {
 
 function mapDocToEvent(d) {
   const x = d?.data?.() ?? {};
+  const isNoteLink = x.type === "NOTE";
   return {
     id: d?.id ?? "",
     organisationId: x.organisationId ?? "",
     patientId: x.patientId ?? "",
+    hospitalId: x.hospitalId ?? null,
     serviceId: x.serviceId ?? null,
-    eventType: x.eventType ?? "clinical_note",
-    eventTitle: x.eventTitle ?? "",
-    eventDescription: x.eventDescription ?? "",
-    sourceCollection: x.sourceCollection ?? "",
-    sourceId: x.sourceId ?? "",
+    eventType: isNoteLink ? "clinical_note" : x.eventType ?? "clinical_note",
+    eventTitle: isNoteLink ? "Clinical note" : x.eventTitle ?? "",
+    eventDescription: isNoteLink ? String(x.summary ?? "") : x.eventDescription ?? "",
+    sourceCollection: isNoteLink ? "notes" : x.sourceCollection ?? "",
+    sourceId: isNoteLink ? String(x.refId ?? "") : x.sourceId ?? "",
     createdBy: x.createdBy ?? "",
     createdAt: x.createdAt ?? null,
     metadata: x.metadata ?? null,

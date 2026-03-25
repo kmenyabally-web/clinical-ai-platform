@@ -18,6 +18,7 @@ import { db, storage } from "../firebase";
 import { logAuditEventNonBlocking } from "./auditService";
 import { getUserContext } from "./authService";
 import { DOMAIN_TO_STATS_FIELD } from "../config/documentDomains";
+import { assertTenantContext, tenantFieldsFromContext } from "../utils/tenantContext";
 
 const POLICIES_COLLECTION = "policies";
 const EVIDENCE_DOCUMENTS_COLLECTION = "evidence_documents";
@@ -58,8 +59,17 @@ async function getOrCreateDocumentStatsRef(organisationId, serviceId) {
   const snapshot = await getDocs(q);
   const firstDoc = snapshot?.docs?.[0];
   if (firstDoc && firstDoc.ref) return firstDoc.ref;
+  const ctx = await getUserContext();
+  const tenant = tenantFieldsFromContext({
+    organisationId,
+    hospitalId: ctx.hospitalId,
+    wardId: ctx.wardId,
+  });
+  assertTenantContext(tenant.organisationId, tenant.hospitalId);
   const docData = {
     organisationId,
+    hospitalId: tenant.hospitalId,
+    wardId: tenant.wardId,
     totalCount: 0,
     governance: 0,
     safeguarding: 0,
@@ -105,8 +115,15 @@ export async function uploadDocument(organisationIdOrFile, payload, auditContext
     if (!file) throw new Error("File required");
     if (!isSupportedFileType(file)) throw new Error("File type not supported. Use: pdf, docx, xlsx, jpg, png.");
 
-    const { organisationId: claimsOrgId } = await getUserContext();
+    const ctx = await getUserContext();
+    const claimsOrgId = ctx.organisationId;
     const scopedOrgId = (claimsOrgId ?? "dev-org-001").toString().trim();
+    const tenant = tenantFieldsFromContext({
+      organisationId: scopedOrgId,
+      hospitalId: ctx.hospitalId,
+      wardId: ctx.wardId,
+    });
+    assertTenantContext(tenant.organisationId, tenant.hospitalId);
 
     const category = (metadata.category ?? "Other").toString().trim();
     if (!MANAGED_CATEGORIES.includes(category)) {
@@ -134,6 +151,8 @@ export async function uploadDocument(organisationIdOrFile, payload, auditContext
 
     await setDoc(docRef, {
       organisationId: scopedOrgId,
+      hospitalId: tenant.hospitalId,
+      wardId: tenant.wardId,
       fileName: file.name,
       fileUrl,
       category,
@@ -148,6 +167,14 @@ export async function uploadDocument(organisationIdOrFile, payload, auditContext
   const organisationId = organisationIdOrFile;
   if (!organisationId?.trim()) throw new Error("organisationId required");
 
+  const ctx = await getUserContext();
+  const tenant = tenantFieldsFromContext({
+    organisationId,
+    hospitalId: ctx.hospitalId,
+    wardId: ctx.wardId,
+  });
+  assertTenantContext(tenant.organisationId, tenant.hospitalId);
+
   const { title, documentType, domainType, description, file } = payload;
   if (!file) throw new Error("File required");
   if (!isSupportedFileType(file)) throw new Error("File type not supported. Use: pdf, docx, xlsx, jpg, png.");
@@ -156,6 +183,8 @@ export async function uploadDocument(organisationIdOrFile, payload, auditContext
   const col = collection(db, colName);
   const docData = {
     organisationId,
+    hospitalId: tenant.hospitalId,
+    wardId: tenant.wardId,
     serviceId: serviceId ?? null,
     title: title?.trim() ?? "",
     documentType: documentType ?? "evidence",

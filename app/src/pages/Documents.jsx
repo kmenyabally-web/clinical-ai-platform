@@ -220,10 +220,10 @@ export default function Documents() {
 
   useEffect(() => {
     if (!documents || documents.length === 0) return;
-    // eslint-disable-next-line no-console
-    console.log("Document categories in DB:", documents.map((d) => d.category ?? "Other"));
-    // eslint-disable-next-line no-console
-    console.log("UI selectedCategory:", selectedCategory, "visibleDocs:", visibleDocs.length);
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log("Debug:", { docCategories: documents.length, visibleDocs: visibleDocs.length });
+    }
   }, [documents, selectedCategory, visibleDocs.length]);
 
   async function handleUpload({ file, category }) {

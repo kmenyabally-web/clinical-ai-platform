@@ -25,7 +25,9 @@ export default function EvidencePackGenerator() {
 
   async function handleGenerate() {
     if (!organisationId || !serviceId) return;
-    console.log("Evidence pack generation started", { organisationId, serviceId, dateFrom, dateTo });
+    if (import.meta.env.DEV) {
+      console.log("Debug:", { evidencePack: "started" });
+    }
     setLoading(true);
     setError(null);
     try {

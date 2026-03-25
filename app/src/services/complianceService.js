@@ -2,6 +2,8 @@ import { collection, getDocs, query, where, limit, addDoc, doc, getDoc, updateDo
 import { db } from "../firebase";
 import { logAuditEventNonBlocking } from "./auditService";
 import { createNotification, NOTIFICATION_TYPES } from "./notificationService";
+import { getUserContext } from "./authService";
+import { assertTenantContext, tenantFieldsFromContext } from "../utils/tenantContext";
 
 /**
  * Compliance service – all queries scoped by organisationId.
@@ -152,9 +154,18 @@ export async function fetchComplianceStats(organisationId, serviceId) {
  */
 export async function createComplianceAction(organisationId, data, auditContext, serviceId) {
   if (!organisationId?.trim()) throw new Error("organisationId required");
+  const ctx = await getUserContext();
+  const tenant = tenantFieldsFromContext({
+    organisationId,
+    hospitalId: ctx.hospitalId,
+    wardId: ctx.wardId,
+  });
+  assertTenantContext(tenant.organisationId, tenant.hospitalId);
   const ref = collection(db, "compliance_actions");
   const docData = {
     organisationId,
+    hospitalId: tenant.hospitalId,
+    wardId: tenant.wardId,
     serviceId: serviceId ?? null,
     title: data.title ?? "",
     description: data.description ?? "",
@@ -269,8 +280,17 @@ async function getOrCreateComplianceStatsRef(organisationId, serviceId) {
   const snapshot = await getDocs(q);
   const firstDoc = snapshot?.docs?.[0];
   if (firstDoc?.ref) return firstDoc.ref;
+  const ctx = await getUserContext();
+  const tenant = tenantFieldsFromContext({
+    organisationId,
+    hospitalId: ctx.hospitalId,
+    wardId: ctx.wardId,
+  });
+  assertTenantContext(tenant.organisationId, tenant.hospitalId);
   const docData = {
     organisationId,
+    hospitalId: tenant.hospitalId,
+    wardId: tenant.wardId,
     overallComplianceScore: 0,
     totalDomains: 0,
     openActionCount: 0,

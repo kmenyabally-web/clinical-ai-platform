@@ -68,11 +68,23 @@ export function AuthProvider({ children }) {
     }
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
+      if (currentUser) {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.log("Debug:", { authUid: currentUser.uid ? "present" : "absent" });
+        }
+        setUser(currentUser);
+      } else {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn("Debug: no auth session");
+        }
+        setUser(null);
+      }
       setLoading(false);
     });
 
-    return unsubscribe;
+    return () => unsubscribe();
   }, []);
 
   const value = {

@@ -15,7 +15,7 @@ import { calculateRisk } from "../utils/riskEngine";
 import { formatUkDateTime } from "../utils/dateFormat";
 
 export default function OrganisationDashboard() {
-  const { organisationId, organisation, hasFeature } = useOrganisation();
+  const { organisationId, organisation, hasFeature, isPlatformAdmin } = useOrganisation();
   const { canViewReports, loading: roleLoading, role } = useRole();
 
   const [loading, setLoading] = useState(true);
@@ -180,7 +180,25 @@ export default function OrganisationDashboard() {
 
   return (
     <div style={{ padding: "2rem", maxWidth: 960, margin: "0 auto", fontFamily: "sans-serif" }}>
-      <h1 style={{ marginTop: 0 }}>Organisation dashboard</h1>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
+        <h1 style={{ marginTop: 0 }}>Organisation dashboard</h1>
+        {isPlatformAdmin ? (
+          <Link
+            to="/management/organisations"
+            style={{
+              color: "#005eb8",
+              fontWeight: 800,
+              textDecoration: "none",
+              border: "1px solid #e2e8f0",
+              background: "#ffffff",
+              padding: "10px 14px",
+              borderRadius: 10,
+            }}
+          >
+            Add organisation
+          </Link>
+        ) : null}
+      </div>
       <p style={{ color: "#64748b", marginBottom: "1.5rem" }}>
         {organisation?.name ?? "Organisation"} · tenant <code>{organisationId}</code>
       </p>

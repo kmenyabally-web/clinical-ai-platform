@@ -10,6 +10,8 @@ import {
   limit,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { getUserContext } from "./authService";
+import { assertTenantContext, tenantFieldsFromContext } from "../utils/tenantContext";
 import { getComplianceScore, calculateComplianceScore } from "./complianceEngine";
 import { fetchIncidents } from "./incidentService";
 import { fetchComplianceActions } from "./complianceService";
@@ -156,8 +158,18 @@ export async function runInspectionSimulation(organisationId, serviceId) {
     wellLedRating,
   });
 
-  const payload = {
+  const ctx = await getUserContext();
+  const tenant = tenantFieldsFromContext({
     organisationId: organisationId.trim(),
+    hospitalId: ctx.hospitalId,
+    wardId: ctx.wardId,
+  });
+  assertTenantContext(tenant.organisationId, tenant.hospitalId);
+
+  const payload = {
+    organisationId: tenant.organisationId,
+    hospitalId: tenant.hospitalId,
+    wardId: tenant.wardId,
     serviceId: serviceId && String(serviceId).trim() ? String(serviceId).trim() : null,
     simulatedAt: serverTimestamp(),
     safeRating,

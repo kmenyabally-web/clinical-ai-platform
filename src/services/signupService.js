@@ -30,7 +30,11 @@ export async function registerWithOrganisation(email, password, organisationName
   await setDoc(doc(db, "users", uid), {
     orgId: organisationId,
     role: "Admin",
+    organisationId,
+    hospitalId: null,
+    wardId: null,
     status: "active",
+    createdAt: new Date().toISOString(),
   });
 
   const auditContext = { organisationId, userId: uid, userRole: "Admin" };

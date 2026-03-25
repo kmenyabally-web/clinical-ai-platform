@@ -5,17 +5,22 @@ import { Link, useParams } from "react-router-dom";
 import { getPatientById } from "../services/patientService";
 import { fetchIncidentsForPatient } from "../services/incidentService";
 import { fetchClinicalNotesForPatient } from "../services/noteService";
-import PatientTimeline from "./PatientTimeline";
+import PatientClinicalIntelligenceTabs from "./PatientClinicalIntelligenceTabs";
 import { calculateRisk } from "../utils/riskEngine";
 import { formatUkDateTime } from "../utils/dateFormat";
 import { useRole } from "../context/RoleContext";
+import { requireAdminRole } from "../lib/requireAdminAction";
 import { useOrganisation } from "../context/OrganisationContext";
 import { logAuditEvent } from "../services/auditService";
+import { generateDailySummary } from "../services/summaryService";
+import { generateCPAReport, generateTribunalReport } from "../services/reportService";
+import { generateMDTReview } from "../services/mdtService";
+import { generateManagementReport } from "../services/managementService";
 
 export default function PatientDetail() {
   const { id } = useParams();
-  const { isInspectorRole } = useRole();
-  const { hasFeature } = useOrganisation();
+  const { isInspectorRole, role: userRole } = useRole();
+  const { hasFeature, organisationId, hospitalId: profileHospitalId } = useOrganisation();
   const redactSensitive = isInspectorRole();
   const showRiskUi = hasFeature("risk");
   const [isLoading, setIsLoading] = useState(true);
@@ -26,6 +31,24 @@ export default function PatientDetail() {
   const [notes, setNotes] = useState([]);
   const [notesLoading, setNotesLoading] = useState(false);
   const [notesError, setNotesError] = useState(null);
+  const [aiSummary, setAiSummary] = useState("");
+  const [mdtSummary, setMdtSummary] = useState("");
+  const [dailySummaryLoading, setDailySummaryLoading] = useState(false);
+  const [mdtSummaryLoading, setMdtSummaryLoading] = useState(false);
+  const [dailySummaryError, setDailySummaryError] = useState(null);
+
+  // Ensures existing report UI works (CPA/Tribunal) and enables additional report flows.
+  const [report, setReport] = useState(null);
+  const [reportGenLoading, setReportGenLoading] = useState(false);
+  const [reportGenError, setReportGenError] = useState(null);
+
+  const [mdtData, setMdtData] = useState(null);
+  const [mdtWardRoundLoading, setMdtWardRoundLoading] = useState(false);
+  const [mdtWardRoundError, setMdtWardRoundError] = useState(null);
+
+  const [managementReport, setManagementReport] = useState(null);
+  const [managementReportLoading, setManagementReportLoading] = useState(false);
+  const [managementReportError, setManagementReportError] = useState(null);
 
   useEffect(() => {
     if (!id) return;
@@ -78,6 +101,21 @@ export default function PatientDetail() {
     };
   }, [id]);
 
+  async function refreshNotes() {
+    if (!id) return;
+    setNotesLoading(true);
+    setNotesError(null);
+    try {
+      const list = await fetchClinicalNotesForPatient(id, { limitCount: 50 });
+      setNotes(Array.isArray(list) ? list : []);
+    } catch (err) {
+      setNotes([]);
+      setNotesError(err);
+    } finally {
+      setNotesLoading(false);
+    }
+  }
+
   useEffect(() => {
     let mounted = true;
     setIncidentsLoading(true);
@@ -103,6 +141,141 @@ export default function PatientDetail() {
     if (!showRiskUi) return { level: "low", score: 0 };
     return calculateRisk(notes || []);
   }, [notes, showRiskUi]);
+
+  const reportContext = useMemo(() => {
+    const oid = organisationId ?? patient?.organisationId ?? null;
+    const hid =
+      (patient?.hospitalId && String(patient.hospitalId).trim()) ||
+      (profileHospitalId && String(profileHospitalId).trim()) ||
+      null;
+    return { organisationId: oid, hospitalId: hid };
+  }, [organisationId, patient?.organisationId, patient?.hospitalId, profileHospitalId]);
+
+  const reportContextReady = Boolean(
+    reportContext.organisationId &&
+      reportContext.hospitalId &&
+      (patient?.id ?? id)
+  );
+
+  async function handleDailySummary() {
+    if (!requireAdminRole(userRole)) return;
+    if (!id) return;
+    setDailySummaryLoading(true);
+    setDailySummaryError(null);
+    try {
+      const summary = await generateDailySummary(id, new Date());
+      setAiSummary(summary || "");
+    } catch (e) {
+      setDailySummaryError(e?.message ?? "Failed to generate daily summary.");
+      setAiSummary("");
+    } finally {
+      setDailySummaryLoading(false);
+    }
+  }
+
+  async function handleMDTSummary() {
+    setMdtSummaryLoading(true);
+    try {
+      const grouped = {};
+      (notes || []).forEach((n) => {
+        const role = n.mdtRole || "Unknown";
+        if (!grouped[role]) grouped[role] = [];
+        grouped[role].push(n.aiSummary || n.correctedText || n.content);
+      });
+      const parts = Object.entries(grouped).map(([role, texts]) => {
+        const body = texts
+          .map((t) => String(t ?? "").trim())
+          .filter(Boolean)
+          .join("\n---\n");
+        return `${role}\n${body || "—"}`;
+      });
+      setMdtSummary(parts.join("\n\n"));
+    } finally {
+      setMdtSummaryLoading(false);
+    }
+  }
+
+  async function handleMDT() {
+    const patientId = patient?.id ?? id;
+    if (!patientId || !reportContext.organisationId) return;
+
+    setMdtWardRoundLoading(true);
+    setMdtWardRoundError(null);
+    try {
+      const result = await generateMDTReview(patientId, reportContext);
+      setMdtData(result || null);
+    } catch (e) {
+      setMdtWardRoundError(e?.message ?? "Failed to generate MDT Ward Round.");
+      setMdtData(null);
+    } finally {
+      setMdtWardRoundLoading(false);
+    }
+  }
+
+  async function handleCPA() {
+    if (!requireAdminRole(userRole)) return;
+    const patientId = patient?.id ?? id;
+    if (!patientId) return;
+    if (!reportContext.organisationId || !reportContext.hospitalId) {
+      setReportGenError(
+        "Organisation and hospital are required to load notes for this report."
+      );
+      return;
+    }
+    setReportGenLoading(true);
+    setReportGenError(null);
+    try {
+      const r = await generateCPAReport(patientId, reportContext);
+      setReport(r);
+    } catch (e) {
+      setReportGenError(e?.message ?? "Failed to generate CPA report.");
+    } finally {
+      setReportGenLoading(false);
+    }
+  }
+
+  async function handleTribunal() {
+    if (!requireAdminRole(userRole)) return;
+    const patientId = patient?.id ?? id;
+    if (!patientId) return;
+    if (!reportContext.organisationId || !reportContext.hospitalId) {
+      setReportGenError(
+        "Organisation and hospital are required to load notes for this report."
+      );
+      return;
+    }
+    setReportGenLoading(true);
+    setReportGenError(null);
+    try {
+      const r = await generateTribunalReport(patientId, reportContext);
+      setReport(r);
+    } catch (e) {
+      setReportGenError(e?.message ?? "Failed to generate Tribunal report.");
+    } finally {
+      setReportGenLoading(false);
+    }
+  }
+
+  async function handleManagement() {
+    const patientId = patient?.id ?? id;
+    if (!patientId) return;
+    if (!reportContext.organisationId) {
+      setManagementReportError("Organisation context is missing.");
+      return;
+    }
+
+    setManagementReportLoading(true);
+    setManagementReportError(null);
+    try {
+      const result = await generateManagementReport(patientId, reportContext);
+      setManagementReport(result || null);
+    } catch (e) {
+      setManagementReportError(e?.message ?? "Failed to generate Management Hearing Report.");
+      setManagementReport(null);
+    } finally {
+      setManagementReportLoading(false);
+    }
+  }
 
   if (isLoading) {
     return <div style={styles.text}>Loading patient…</div>;
@@ -213,64 +386,170 @@ export default function PatientDetail() {
         </div>
       </div>
 
-      <div style={styles.notesCard}>
-        <div style={styles.notesHeader}>
-          <div style={styles.notesTitle}>Notes History</div>
-          {notesLoading ? (
-            <div style={styles.notesMeta}>Loading…</div>
-          ) : notesError ? (
-            <div style={styles.notesMeta}>Unable to load notes</div>
-          ) : (
-            <div style={styles.notesMeta}>{notes.length} recent</div>
-          )}
-        </div>
+      {!redactSensitive ? (
+        <div style={styles.clinicalIntelSection}>
+          <h2 style={styles.clinicalIntelHeading}>Clinical Intelligence</h2>
+          <p style={styles.clinicalIntelIntro}>
+            Daily summaries, MDT roll-ups by author clinical role, and structured fields on each note below.
+          </p>
+          {(reportGenLoading || dailySummaryLoading) ? (
+            <p style={{ margin: "0 0 12px 0", fontWeight: 700, color: "#1e1b4b" }} aria-live="polite">
+              ⏳ Processing…
+            </p>
+          ) : null}
 
-        {!notesError ? (
-          <PatientTimeline
-            variant="notes"
-            notes={notes.slice(0, 50)}
-            loadingNotes={notesLoading}
-            formatWhen={formatWhen}
-            emptyNotesMessage="No clinical notes recorded for this patient."
-          />
-        ) : (
-          <div style={styles.notesEmpty}>Unable to load notes.</div>
-        )}
-      </div>
+          <div style={styles.clinicalIntelRow}>
+            <div style={styles.clinicalIntelCard}>
+              <h3 style={styles.clinicalIntelCardTitle}>Daily summary</h3>
+              <p style={styles.clinicalIntelHint}>Combine AI summaries from today&apos;s notes (tenant-scoped).</p>
+              <button
+                type="button"
+                style={styles.clinicalIntelBtn}
+                onClick={handleDailySummary}
+                disabled={dailySummaryLoading || !id}
+              >
+                {dailySummaryLoading ? "Generating…" : "Generate Daily Summary"}
+              </button>
+              {dailySummaryError ? (
+                <div role="alert" style={styles.clinicalIntelError}>
+                  {dailySummaryError}
+                </div>
+              ) : null}
+              {aiSummary ? (
+                <div style={styles.aiSummaryBox}>
+                  <h4 style={styles.aiSummaryTitle}>AI Daily Summary</h4>
+                  <p style={styles.aiSummaryText}>{aiSummary}</p>
+                </div>
+              ) : null}
+            </div>
 
-      <div style={styles.timelinePreviewCard}>
-        <div style={styles.timelinePreviewHeader}>
-          <div style={styles.timelinePreviewTitle}>Clinical timeline (preview)</div>
-          <div style={styles.notesMeta}>Notes + incidents · newest first</div>
+            <div style={styles.clinicalIntelCard}>
+              <h3 style={styles.clinicalIntelCardTitle}>MDT summary</h3>
+              <p style={styles.clinicalIntelHint}>Group note text by author MDT role (mdtRole).</p>
+              <button
+                type="button"
+                style={styles.clinicalIntelBtnSecondary}
+                onClick={handleMDTSummary}
+                disabled={mdtSummaryLoading || !(notes?.length)}
+              >
+                {mdtSummaryLoading ? "Building…" : "Generate MDT Summary"}
+              </button>
+              {mdtSummary ? (
+                <div style={styles.aiSummaryBox}>
+                  <h4 style={styles.aiSummaryTitle}>MDT roll-up</h4>
+                  <pre style={styles.mdtPre}>{mdtSummary}</pre>
+                </div>
+              ) : null}
+
+              <div style={{ height: 12 }} />
+              <button
+                type="button"
+                style={styles.clinicalIntelBtn}
+                onClick={handleMDT}
+                disabled={mdtWardRoundLoading || !reportContext.organisationId}
+              >
+                {mdtWardRoundLoading ? "Generating…" : "Generate MDT Ward Round"}
+              </button>
+              {mdtWardRoundError ? (
+                <div role="alert" style={styles.clinicalIntelError}>
+                  {mdtWardRoundError}
+                </div>
+              ) : null}
+              {mdtData ? (
+                <div style={styles.aiSummaryBox}>
+                  <h4 style={styles.aiSummaryTitle}>MDT Ward Round</h4>
+                  {Object.entries(mdtData).map(([role, notes]) => (
+                    <div key={role}>
+                      <h4 style={{ margin: "8px 0 6px 0", fontSize: 13, color: "#0f172a", fontWeight: 900 }}>
+                        {role}
+                      </h4>
+                      <ul style={{ margin: "0 0 0 18px", padding: 0 }}>
+                        {(notes ?? []).map((n, i) => (
+                          <li key={i} style={{ marginBottom: 6 }}>
+                            {String(n ?? "")}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          <div style={styles.reportGeneratorCard}>
+            <h3 style={styles.clinicalIntelCardTitle}>Clinical reports</h3>
+            <p style={styles.clinicalIntelHint}>
+              CPA and Tribunal outputs from aggregated notes (organisation + hospital scoped).
+            </p>
+            <div style={styles.reportButtonRow}>
+              <button
+                type="button"
+                style={styles.clinicalIntelBtn}
+                onClick={handleCPA}
+                disabled={reportGenLoading || !reportContextReady}
+              >
+                {reportGenLoading ? "Generating…" : "Generate CPA Report"}
+              </button>
+              <button
+                type="button"
+                style={styles.clinicalIntelBtnSecondary}
+                onClick={handleTribunal}
+                disabled={reportGenLoading || !reportContextReady}
+              >
+                {reportGenLoading ? "Generating…" : "Generate Tribunal Report"}
+              </button>
+                <button
+                  type="button"
+                  style={styles.clinicalIntelBtnSecondary}
+                  onClick={handleManagement}
+                  disabled={managementReportLoading || !reportContext.organisationId}
+                >
+                  {managementReportLoading ? "Generating…" : "Generate Management Hearing Report"}
+                </button>
+            </div>
+            {reportGenError ? (
+              <div role="alert" style={styles.clinicalIntelError}>
+                {reportGenError}
+              </div>
+            ) : null}
+            {report ? (
+              <div className="report-box" style={styles.reportBox}>
+                <h3 style={styles.aiSummaryTitle}>Generated Report</h3>
+                <pre style={styles.reportPre}>{JSON.stringify(report, null, 2)}</pre>
+              </div>
+            ) : null}
+              {managementReportError ? (
+                <div role="alert" style={styles.clinicalIntelError}>
+                  {managementReportError}
+                </div>
+              ) : null}
+              {managementReport ? (
+                <div style={styles.reportBox}>
+                  <h3 style={styles.aiSummaryTitle}>Management Hearing Report</h3>
+                  <pre style={styles.reportPre}>
+                    {JSON.stringify(managementReport, null, 2)}
+                  </pre>
+                </div>
+              ) : null}
+          </div>
         </div>
-        <PatientTimeline
-          variant="merged"
+      ) : (
+        <div style={styles.clinicalIntelSectionMuted}>
+          Clinical intelligence is restricted for your role.
+        </div>
+      )}
+
+      <div style={styles.tabsWrap}>
+        <PatientClinicalIntelligenceTabs
+          patientId={id}
           notes={notes.slice(0, 50)}
           incidents={incidents.slice(0, 10)}
-          loadingNotes={notesLoading}
-          loadingIncidents={incidentsLoading}
-          formatWhen={formatWhen}
+          notesLoading={notesLoading}
+          incidentsLoading={incidentsLoading}
           redactSensitive={redactSensitive}
-        />
-      </div>
-
-      <div style={styles.incidentCard}>
-        <div style={styles.incidentHeader}>
-          <div style={styles.incidentTitle}>Incident History</div>
-          {incidentsLoading ? (
-            <div style={styles.incidentMeta}>Loading…</div>
-          ) : (
-            <div style={styles.incidentMeta}>{incidents.length} recent</div>
-          )}
-        </div>
-
-        <PatientTimeline
-          variant="incidents"
-          incidents={incidents}
-          loadingIncidents={incidentsLoading}
           formatWhen={formatWhen}
-          emptyIncidentsMessage="No incidents recorded for this patient."
-          redactSensitive={redactSensitive}
+          refreshNotes={refreshNotes}
         />
       </div>
     </div>
@@ -436,6 +715,150 @@ const styles = {
     border: "1px solid #e2e8f0",
     borderRadius: 12,
     overflow: "hidden",
+  },
+  clinicalIntelSection: {
+    marginTop: 16,
+    padding: "16px 18px",
+    borderRadius: 12,
+    border: "1px solid #c7d2fe",
+    background: "linear-gradient(180deg, #eef2ff 0%, #ffffff 48%)",
+  },
+  clinicalIntelHeading: {
+    margin: "0 0 6px 0",
+    fontSize: 18,
+    color: "#1e1b4b",
+    fontWeight: 900,
+  },
+  clinicalIntelIntro: {
+    margin: "0 0 14px 0",
+    fontSize: 13,
+    color: "#475569",
+    lineHeight: 1.45,
+  },
+  clinicalIntelRow: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 14,
+  },
+  reportGeneratorCard: {
+    marginTop: 14,
+    backgroundColor: "#ffffff",
+    border: "1px solid #e2e8f0",
+    borderRadius: 10,
+    padding: 12,
+  },
+  reportButtonRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 10,
+    alignItems: "center",
+  },
+  reportBox: {
+    marginTop: 12,
+    padding: "10px 12px",
+    borderRadius: 8,
+    backgroundColor: "#f8fafc",
+    border: "1px solid #e2e8f0",
+  },
+  reportPre: {
+    margin: 0,
+    fontSize: 12,
+    lineHeight: 1.45,
+    color: "#334155",
+    whiteSpace: "pre-wrap",
+    fontFamily: "ui-monospace, Consolas, monospace",
+    overflowX: "auto",
+  },
+  clinicalIntelCard: {
+    backgroundColor: "#ffffff",
+    border: "1px solid #e2e8f0",
+    borderRadius: 10,
+    padding: 12,
+  },
+  clinicalIntelCardTitle: {
+    margin: "0 0 6px 0",
+    fontSize: 14,
+    fontWeight: 900,
+    color: "#0f172a",
+  },
+  clinicalIntelHint: {
+    margin: "0 0 10px 0",
+    fontSize: 12,
+    color: "#64748b",
+  },
+  clinicalIntelBtn: {
+    padding: "8px 14px",
+    borderRadius: 8,
+    border: "none",
+    backgroundColor: "#4f46e5",
+    color: "#fff",
+    fontWeight: 800,
+    fontSize: 13,
+    cursor: "pointer",
+  },
+  clinicalIntelBtnSecondary: {
+    padding: "8px 14px",
+    borderRadius: 8,
+    border: "1px solid #6366f1",
+    backgroundColor: "#fff",
+    color: "#3730a3",
+    fontWeight: 800,
+    fontSize: 13,
+    cursor: "pointer",
+  },
+  clinicalIntelError: {
+    marginTop: 8,
+    padding: "8px 10px",
+    borderRadius: 8,
+    backgroundColor: "#fef2f2",
+    border: "1px solid #fecaca",
+    color: "#991b1b",
+    fontSize: 12,
+    fontWeight: 700,
+  },
+  aiSummaryBox: {
+    marginTop: 12,
+    padding: "10px 12px",
+    borderRadius: 8,
+    backgroundColor: "#f8fafc",
+    border: "1px solid #e2e8f0",
+  },
+  aiSummaryTitle: {
+    margin: "0 0 6px 0",
+    fontSize: 13,
+    fontWeight: 900,
+    color: "#0f172a",
+  },
+  aiSummaryText: {
+    margin: 0,
+    fontSize: 13,
+    lineHeight: 1.5,
+    color: "#334155",
+    whiteSpace: "pre-wrap",
+  },
+  mdtPre: {
+    margin: 0,
+    fontSize: 12,
+    lineHeight: 1.45,
+    color: "#334155",
+    whiteSpace: "pre-wrap",
+    fontFamily: "system-ui, sans-serif",
+  },
+  clinicalIntelSectionMuted: {
+    marginTop: 16,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: "#f1f5f9",
+    color: "#64748b",
+    fontSize: 13,
+    fontWeight: 700,
+  },
+  tabsWrap: {
+    marginTop: 16,
+    backgroundColor: "#ffffff",
+    border: "1px solid #e2e8f0",
+    borderRadius: 12,
+    padding: 14,
   },
   incidentHeader: {
     padding: "12px 14px",

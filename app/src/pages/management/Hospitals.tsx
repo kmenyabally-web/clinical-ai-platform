@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 import { useOrganisation } from "../../context/OrganisationContext";
 import { listOrganisationsForManagement } from "../../services/organisation";
 import { createHospital, listAllHospitals, listHospitals } from "../../services/structureService";
 import { managementStyles as s } from "./managementStyles";
+import ActionBar from "../../components/ActionBar";
 
 export default function Hospitals() {
   const { organisationId, isPlatformAdmin } = useOrganisation();
@@ -64,6 +65,13 @@ export default function Hospitals() {
     }
   }, [isPlatformAdmin, orgs, orgFilter]);
 
+  function openHospitalModal() {
+    if (!effectiveOrgFilter?.trim()) return;
+    setModalOpen(true);
+    setModalOrgId(effectiveOrgFilter || "");
+    setName("");
+  }
+
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
     const oid = modalOrgId.trim();
@@ -83,24 +91,22 @@ export default function Hospitals() {
   }
 
   if (!isPlatformAdmin && !organisationId) {
-    return (
-      <div style={s.page}>
-        <h1 style={s.h1}>Hospitals</h1>
-        <div style={s.callout}>
-          <strong>No organisation assigned.</strong>{" "}
-          <Link to="/management/organisations" style={{ color: "#005eb8", fontWeight: 700 }}>
-            Create or select an organisation
-          </Link>{" "}
-          first.
-        </div>
-      </div>
-    );
+    return <Navigate to="/create-organisation" replace />;
   }
 
   return (
     <div style={s.page}>
       <h1 style={s.h1}>Hospitals</h1>
       <p style={s.muted}>Register hospitals and scope them to an organisation.</p>
+
+      <ActionBar
+        actions={[
+          {
+            label: "➕ Add Hospital",
+            onClick: openHospitalModal,
+          },
+        ]}
+      />
 
       {error ? (
         <p role="alert" style={s.alert}>
@@ -130,18 +136,6 @@ export default function Hospitals() {
             Organisation: <strong>{orgs.find((o) => o.id === organisationId)?.name ?? organisationId}</strong>
           </span>
         )}
-        <button
-          type="button"
-          style={s.btnPrimary}
-          disabled={!effectiveOrgFilter?.trim()}
-          onClick={() => {
-            setModalOpen(true);
-            setModalOrgId(effectiveOrgFilter || "");
-            setName("");
-          }}
-        >
-          Add hospital
-        </button>
       </div>
 
       {isPlatformAdmin && !orgFilter ? (

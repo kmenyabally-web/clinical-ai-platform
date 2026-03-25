@@ -1,44 +1,60 @@
-import { createContext, useContext, useMemo } from "react";
-import { useOrganisation } from "./OrganisationContext";
-import { getPermissionsForRole } from "../config/rbac";
+import React, { createContext, useContext, useEffect, useState } from "react";
+import { getAuth } from "firebase/auth";
 
-/**
- * RoleContext – RBAC derived from OrganisationContext (see docs/rbac.md).
- * Role comes from Firestore users/{uid}.role via OrganisationContext.userProfile.
- * No separate fetch: role and permissions are available when org is ready, so no UI flicker.
- * Depends on AuthContext and OrganisationContext being ready.
- */
-const RoleContext = createContext(null);
+const RoleContext = createContext();
 
-export function useRole() {
-  const ctx = useContext(RoleContext);
-  if (!ctx) throw new Error("useRole must be used within RoleProvider");
-  return ctx;
-}
+export const RoleProvider = ({ children, profile }) => {
+  const [role, setRole] = useState("STAFF");
+  const [loading, setLoading] = useState(true);
 
-export function RoleProvider({ children }) {
-  const { userProfile, loading: orgLoading } = useOrganisation();
-  const role = userProfile?.role ?? null;
-  const permissions = useMemo(() => getPermissionsForRole(role), [role]);
+  useEffect(() => {
+    const resolveRole = async () => {
+      try {
+        const auth = getAuth();
+        const user = auth.currentUser;
 
-  const value = useMemo(
-    () => ({
-      role,
-      permissions,
-      loading: orgLoading,
-      hasRole: (r) => role === r,
-      can: (permission) =>
-        typeof permission === "string" && permissions.includes(permission),
-      isAllowed: (allowedRoles) =>
-        !allowedRoles ||
-        (Array.isArray(allowedRoles) && role && allowedRoles.includes(role)),
-    }),
-    [role, permissions, orgLoading]
-  );
+        let token = null;
+
+        if (user) {
+          try {
+            token = await user.getIdTokenResult();
+          } catch {
+            if (import.meta.env.DEV) {
+              console.warn("Debug: token read failed");
+            }
+          }
+        }
+
+        const rawRole =
+          profile?.role ||
+          profile?.systemRole ||
+          token?.claims?.role ||
+          token?.claims?.claimRole ||
+          "STAFF";
+
+        const resolvedRole = String(rawRole).toUpperCase();
+
+        if (import.meta.env.DEV) {
+          console.log("Debug:", { role: resolvedRole });
+        }
+
+        setRole(resolvedRole);
+      } catch (error) {
+        console.error("Role resolution error:", error);
+        setRole("STAFF");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    resolveRole();
+  }, [profile]);
 
   return (
-    <RoleContext.Provider value={value}>
+    <RoleContext.Provider value={{ role, loading }}>
       {children}
     </RoleContext.Provider>
   );
-}
+};
+
+export const useRole = () => useContext(RoleContext);

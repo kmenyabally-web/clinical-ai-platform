@@ -12,6 +12,8 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { logAuditEventNonBlocking } from "./auditService";
+import { getUserContext } from "./authService";
+import { assertTenantContext, tenantFieldsFromContext } from "../utils/tenantContext";
 import { getOverdueActions, detectMissingEvidence, calculateReadinessScore } from "./readinessService";
 
 const NOTIFICATIONS_COLLECTION = "notifications";
@@ -37,9 +39,18 @@ const READINESS_DROP_THRESHOLD = 60;
  */
 export async function createNotification(organisationId, payload, auditContext, serviceId) {
   if (!organisationId?.trim()) throw new Error("organisationId required");
+  const ctx = await getUserContext();
+  const tenant = tenantFieldsFromContext({
+    organisationId,
+    hospitalId: ctx.hospitalId,
+    wardId: ctx.wardId,
+  });
+  assertTenantContext(tenant.organisationId, tenant.hospitalId);
   const ref = collection(db, NOTIFICATIONS_COLLECTION);
   const docData = {
     organisationId,
+    hospitalId: tenant.hospitalId,
+    wardId: tenant.wardId,
     serviceId: serviceId ?? null,
     type: payload.type ?? "",
     title: payload.title ?? "",

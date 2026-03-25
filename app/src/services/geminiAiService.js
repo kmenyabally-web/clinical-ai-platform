@@ -46,18 +46,23 @@ function buildPrompt(details) {
 }
 
 export async function generateClinicalCarePlan(details) {
-  requireApiKey();
-  const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+  try {
+    requireApiKey();
+    const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
-  const prompt = buildPrompt(details);
-  const result = await model.generateContent(prompt);
+    const prompt = buildPrompt(details);
+    const result = await model.generateContent(prompt);
 
-  const text = result?.response?.text?.() ?? "";
-  if (!text.trim()) {
-    throw new Error("Gemini returned an empty response.");
+    const text = result?.response?.text?.() ?? "";
+    if (!text.trim()) {
+      return null;
+    }
+    return text.trim();
+  } catch (e) {
+    console.warn("AI failed, fallback used");
+    return null;
   }
-  return text.trim();
 }
 
 export async function generateCarePlanDraft(patientName, observations) {
@@ -125,16 +130,21 @@ function buildInspectorPrompt(data) {
 }
 
 export async function generateInspectorChallenge(data) {
-  requireApiKey();
-  const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-  const prompt = buildInspectorPrompt(data);
-  const result = await model.generateContent(prompt);
-  const text = result?.response?.text?.() ?? "";
-  if (!text.trim()) {
-    throw new Error("Gemini returned an empty inspection challenge.");
+  try {
+    requireApiKey();
+    const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+    const prompt = buildInspectorPrompt(data);
+    const result = await model.generateContent(prompt);
+    const text = result?.response?.text?.() ?? "";
+    if (!text.trim()) {
+      return null;
+    }
+    return text.trim();
+  } catch (e) {
+    console.warn("AI failed, fallback used");
+    return null;
   }
-  return text.trim();
 }
 
 function buildInspectorAuditPrompt(data, managerResponse) {
@@ -177,16 +187,21 @@ function buildInspectorAuditPrompt(data, managerResponse) {
 }
 
 export async function generateInspectorAuditFeedback(data, managerResponse) {
-  requireApiKey();
-  const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-  const prompt = buildInspectorAuditPrompt(data, managerResponse);
-  const result = await model.generateContent(prompt);
-  const text = result?.response?.text?.() ?? "";
-  if (!text.trim()) {
-    throw new Error("Gemini returned empty audit feedback.");
+  try {
+    requireApiKey();
+    const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+    const prompt = buildInspectorAuditPrompt(data, managerResponse);
+    const result = await model.generateContent(prompt);
+    const text = result?.response?.text?.() ?? "";
+    if (!text.trim()) {
+      return null;
+    }
+    return text.trim();
+  } catch (e) {
+    console.warn("AI failed, fallback used");
+    return null;
   }
-  return text.trim();
 }
 
 /**
@@ -239,16 +254,21 @@ function buildCandourLetterPrompt(incidentData, patientData) {
 }
 
 export async function generateCandourLetter(incidentData, patientData) {
-  requireApiKey();
-  const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-  const prompt = buildCandourLetterPrompt(incidentData, patientData);
-  const result = await model.generateContent(prompt);
-  const text = result?.response?.text?.() ?? "";
-  if (!text.trim()) {
-    throw new Error("Gemini returned an empty Duty of Candour letter.");
+  try {
+    requireApiKey();
+    const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+    const prompt = buildCandourLetterPrompt(incidentData, patientData);
+    const result = await model.generateContent(prompt);
+    const text = result?.response?.text?.() ?? "";
+    if (!text.trim()) {
+      return null;
+    }
+    return text.trim();
+  } catch (e) {
+    console.warn("AI failed, fallback used");
+    return null;
   }
-  return text.trim();
 }
 
 // --- Staff competency vs care plan needs (clinical governance) ---
@@ -326,7 +346,8 @@ export async function getCompetencyGapWarning({
     const prompt = buildCompetencyGapPrompt(patientDisplayName, combined, trainingSummaryLines);
     const result = await model.generateContent(prompt);
     aiText = (result?.response?.text?.() ?? "").trim();
-  } catch {
+  } catch (e) {
+    console.warn("AI failed, fallback used");
     aiText = "";
   }
 
@@ -335,4 +356,138 @@ export async function getCompetencyGapWarning({
   }
 
   return heuristicCompetencyGapWarning({ combinedCareText: combined, validCountsByTraining });
+}
+
+// --- Clinical note: grammar + structured extraction + summary (Gemini JSON) ---
+
+/**
+ * Redact common identifiers before sending text to external AI (defence in depth).
+ * @param {string} text
+ */
+export function sanitizeClinicalText(text) {
+  if (!text) return "";
+
+  return text
+    .replace(/\b[A-Z][a-z]+ [A-Z][a-z]+\b/g, "[NAME]")
+    .replace(/\b\d{2,3}[- ]?\d{3}[- ]?\d{4}\b/g, "[PHONE]")
+    .replace(/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g, "[DATE]")
+    .replace(/\bNHS\s?\d{3}\s?\d{3}\s?\d{4}\b/gi, "[NHS]");
+}
+
+/** Strip markdown code fences; models often wrap JSON in ```json blocks. */
+function stripJsonFence(text) {
+  if (!text || typeof text !== "string") return "";
+  let t = text.trim();
+  const fence = /^```(?:json)?\s*([\s\S]*?)```$/im;
+  const m = t.match(fence);
+  if (m) t = m[1].trim();
+  return t;
+}
+
+const CLINICAL_NOTE_MODEL = "gemini-1.5-flash";
+
+/**
+ * Grammar correction + structured fields + short summary. Returns parsed JSON or null if key missing / parse fails.
+ * @param {string} noteText
+ * @returns {Promise<{
+ *   correctedText?: string;
+ *   mood?: string | null;
+ *   behaviour?: string | null;
+ *   risk?: string | null;
+ *   engagement?: string | null;
+ *   incidents?: string | null;
+ *   summary?: string | null;
+ * } | null>}
+ */
+export async function processClinicalNote(noteText) {
+  const raw = (noteText ?? "").toString().trim();
+  if (!raw) return null;
+
+  const key = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!key || typeof key !== "string" || !key.trim()) {
+    console.warn("processClinicalNote: VITE_GEMINI_API_KEY missing; skipping AI.");
+    return null;
+  }
+
+  const genAI = new GoogleGenerativeAI(key.trim());
+  const model = genAI.getGenerativeModel({ model: CLINICAL_NOTE_MODEL });
+
+  const safeText = sanitizeClinicalText(raw);
+  const safeInput = JSON.stringify(safeText);
+
+  const prompt = `
+You are a clinical documentation assistant.
+
+STRICT RULES:
+
+* Do NOT invent information
+* Only use what is written
+* If missing, return null
+* Keep language professional and clinical
+
+---
+
+INPUT NOTE:
+${safeInput}
+
+---
+
+RETURN JSON ONLY (no markdown, no commentary):
+
+{
+  "correctedText": "...",
+  "mood": "...",
+  "behaviour": "...",
+  "risk": "...",
+  "engagement": "...",
+  "incidents": "...",
+  "summary": "..."
+}
+`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const text = result?.response?.text?.() ?? "";
+    const cleaned = stripJsonFence(text);
+    const parsed = JSON.parse(cleaned);
+    return typeof parsed === "object" && parsed !== null ? parsed : null;
+  } catch (e) {
+    console.warn("AI failed, fallback used");
+    return null;
+  }
+}
+
+/**
+ * Multi-section clinical reports (CPA, Tribunal, etc.). Uses the same model but does not wrap
+ * the prompt in the single-note JSON schema used by {@link processClinicalNote}.
+ * @param {string} fullPrompt
+ * @returns {Promise<Record<string, unknown> | null>}
+ */
+export async function generateGeminiReportFromPrompt(fullPrompt) {
+  const raw = (fullPrompt ?? "").toString().trim();
+  if (!raw) return null;
+
+  const key = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!key || typeof key !== "string" || !key.trim()) {
+    console.warn("generateGeminiReportFromPrompt: VITE_GEMINI_API_KEY missing.");
+    return null;
+  }
+
+  const genAI = new GoogleGenerativeAI(key.trim());
+  const model = genAI.getGenerativeModel({ model: CLINICAL_NOTE_MODEL });
+
+  try {
+    const result = await model.generateContent(raw);
+    const text = result?.response?.text?.() ?? "";
+    const cleaned = stripJsonFence(text);
+    try {
+      const parsed = JSON.parse(cleaned);
+      return typeof parsed === "object" && parsed !== null ? parsed : { raw: text };
+    } catch {
+      return { raw: text };
+    }
+  } catch (e) {
+    console.warn("AI failed, fallback used");
+    return null;
+  }
 }

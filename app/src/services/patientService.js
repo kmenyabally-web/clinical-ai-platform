@@ -12,10 +12,11 @@ import {
   where,
   serverTimestamp,
 } from "firebase/firestore";
-import { db } from "../firebase";
+import { db, auth } from "../firebase";
 import { getUserContext } from "./authService";
-import { logAuditEventNonBlocking } from "./auditService";
+import { logAuditEventNonBlocking, logAction, logAudit } from "./auditService";
 import { addDocLogged } from "../utils/firestoreWrite";
+import { safeModeFields } from "../utils/safeMode";
 
 const PATIENTS_COLLECTION = "patients";
 
@@ -26,15 +27,26 @@ const PATIENTS_COLLECTION = "patients";
  * @param {string} [filters.serviceId]
  */
 export async function listPatientMetadata(filters = {}) {
-  const { organisationId } = await getUserContext();
+  const { organisationId, hospitalId: ctxHospitalId, wardId: ctxWardId } = await getUserContext();
 
   if (!organisationId) {
     throw new Error("Governance Error: organisationId is required for Stage 3.");
   }
 
+  const hospitalId = filters.hospitalId != null ? String(filters.hospitalId).trim() : (ctxHospitalId != null ? String(ctxHospitalId).trim() : "");
+  const wardId = filters.wardId != null ? String(filters.wardId).trim() : (ctxWardId != null ? String(ctxWardId).trim() : "");
+  const serviceId = filters.serviceId != null ? String(filters.serviceId).trim() : "";
+
+  if (!hospitalId) {
+    throw new Error("hospitalId is required for multi-tenant patient queries.");
+  }
+
+  const constraints = [where("organisationId", "==", organisationId), where("hospitalId", "==", hospitalId)];
+  if (wardId) constraints.push(where("wardId", "==", wardId));
+
   const q = query(
     collection(db, PATIENTS_COLLECTION),
-    where("organisationId", "==", organisationId)
+    ...constraints
   );
 
   const snapshot = await getDocs(q);
@@ -71,16 +83,7 @@ export async function listPatientMetadata(filters = {}) {
     };
   });
 
-  const hospitalId = filters.hospitalId != null ? String(filters.hospitalId).trim() : "";
-  const wardId = filters.wardId != null ? String(filters.wardId).trim() : "";
-  const serviceId = filters.serviceId != null ? String(filters.serviceId).trim() : "";
-
-  if (hospitalId) {
-    results = results.filter((p) => p.hospitalId === hospitalId);
-  }
-  if (wardId) {
-    results = results.filter((p) => p.wardId === wardId);
-  }
+  // hospitalId/wardId filtering is enforced in Firestore query constraints above.
   if (serviceId) {
     results = results.filter((p) => !p.serviceId || p.serviceId === serviceId);
   }
@@ -133,17 +136,32 @@ export async function createPatient(params) {
     err.status = 403;
     throw err;
   }
-  if (!hospitalId?.trim() || !wardId?.trim()) {
-    throw new Error("hospitalId and wardId are required to create a patient.");
+
+  const resolvedHospitalId = hospitalId?.trim()
+    ? hospitalId.trim()
+    : ctx.hospitalId != null
+      ? String(ctx.hospitalId).trim()
+      : "";
+  const resolvedWardId = wardId?.trim()
+    ? wardId.trim()
+    : ctx.wardId != null
+      ? String(ctx.wardId).trim()
+      : "";
+
+  if (!resolvedHospitalId) {
+    throw new Error("hospitalId is required to create a patient.");
   }
 
   const firstName = (params.firstName ?? "").toString().trim();
   const lastName = (params.lastName ?? "").toString().trim();
+  const name = `${firstName} ${lastName}`.trim() || "Unnamed patient";
 
   const patientPayload = {
+    ...safeModeFields(),
     organisationId,
-    hospitalId: hospitalId.trim(),
-    wardId: wardId.trim(),
+    hospitalId: resolvedHospitalId,
+    wardId: resolvedWardId || "",
+    name,
     hospitalName: (params.hospitalName ?? "").toString().trim(),
     wardName: (params.wardName ?? "").toString().trim(),
     serviceId: params.serviceId != null ? String(params.serviceId).trim() || null : null,
@@ -168,6 +186,13 @@ export async function createPatient(params) {
     entityId: docRef.id,
   });
 
+  void logAction("PATIENT_CREATE", auth.currentUser?.uid ?? null);
+  await logAudit("CREATE_PATIENT", {
+    userId: auth.currentUser?.uid ?? null,
+    organisationId,
+    patientId: docRef.id,
+  });
+
   return { id: docRef.id };
 }
 
@@ -180,7 +205,7 @@ export async function getPatientById(id) {
     throw new Error("Patient id is required.");
   }
 
-  const { organisationId } = await getUserContext();
+  const { organisationId, hospitalId: ctxHospitalId, wardId: ctxWardId } = await getUserContext();
   if (!organisationId) {
     throw new Error("Governance Error: organisationId is required.");
   }
@@ -198,6 +223,18 @@ export async function getPatientById(id) {
 
   if (data.organisationId && data.organisationId !== organisationId) {
     const err = new Error("403 Forbidden: Governance Breach");
+    err.status = 403;
+    throw err;
+  }
+
+  if (ctxHospitalId && typeof data.hospitalId === "string" && data.hospitalId.trim() && data.hospitalId.trim() !== ctxHospitalId) {
+    const err = new Error("403 Forbidden: hospital scope mismatch");
+    err.status = 403;
+    throw err;
+  }
+
+  if (ctxWardId && typeof data.wardId === "string" && data.wardId.trim() && data.wardId.trim() !== ctxWardId) {
+    const err = new Error("403 Forbidden: ward scope mismatch");
     err.status = 403;
     throw err;
   }

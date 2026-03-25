@@ -12,6 +12,8 @@ import {
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../firebase";
 import { addPatientTimelineEvent } from "./patientTimelineService";
+import { getUserContext } from "./authService";
+import { assertTenantContext, tenantFieldsFromContext } from "../utils/tenantContext";
 
 const EVIDENCE_COLLECTION = "evidence";
 const MAX_ITEMS = 200;
@@ -112,9 +114,19 @@ export async function uploadEvidence(organisationId, serviceId, domain, title, f
   if (!file) throw new Error("File required");
   if (!isSupportedFileType(file)) throw new Error("File type not supported. Use: pdf, docx, xlsx, jpg, png.");
 
+  const ctx = await getUserContext();
+  const tenant = tenantFieldsFromContext({
+    organisationId,
+    hospitalId: ctx.hospitalId,
+    wardId: ctx.wardId,
+  });
+  assertTenantContext(tenant.organisationId, tenant.hospitalId);
+
   const col = collection(db, EVIDENCE_COLLECTION);
   const docData = {
     organisationId,
+    hospitalId: tenant.hospitalId,
+    wardId: tenant.wardId,
     serviceId: serviceId ?? null,
     domain: domain.trim().toLowerCase(),
     title: title.trim(),

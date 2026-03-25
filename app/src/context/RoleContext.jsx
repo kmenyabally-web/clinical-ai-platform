@@ -1,7 +1,7 @@
-import { createContext, useContext, useMemo, useState, useEffect } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useAuth } from "./AuthContext";
 import { useOrganisation } from "./OrganisationContext";
-import { getPermissionsForRole, normalizeRole } from "../config/rbac";
+import { getPermissionsForRole, normalizeRole, canAccess } from "../config/rbac";
 import {
   mapSystemRoleToEnterpriseCode,
   canViewClinicalNotesAccess,
@@ -24,20 +24,20 @@ export function useRole() {
 export function RoleProvider({ children }) {
   const { user } = useAuth();
   const { userProfile, loading: orgLoading, organisationId } = useOrganisation();
-  const [claimRole, setClaimRole] = useState(null);
 
+  const [claimRole, setClaimRole] = useState(null);
   useEffect(() => {
-    if (!user) {
+    let cancelled = false;
+    if (!user?.getIdTokenResult) {
       setClaimRole(null);
       return;
     }
-    let cancelled = false;
     user
-      .getIdTokenResult(true)
-      .then((r) => {
-        const cr = r?.claims?.role;
+      .getIdTokenResult()
+      .then((tr) => {
         if (cancelled) return;
-        setClaimRole(typeof cr === "string" && cr.trim() ? cr.trim() : null);
+        const r = tr.claims?.role;
+        setClaimRole(typeof r === "string" && r.trim() ? r.trim() : null);
       })
       .catch(() => {
         if (!cancelled) setClaimRole(null);
@@ -45,12 +45,21 @@ export function RoleProvider({ children }) {
     return () => {
       cancelled = true;
     };
-  }, [user?.uid]);
+  }, [user]);
 
   const role = useMemo(() => {
-    const raw = userProfile?.role ?? claimRole ?? null;
-    return normalizeRole(raw) ?? raw;
-  }, [userProfile?.role, claimRole]);
+    const profile = userProfile;
+    const rawRole =
+      profile?.role ||
+      profile?.systemRole ||
+      claimRole ||
+      "STAFF";
+    const finalRole = normalizeRole(String(rawRole)) ?? "Staff";
+    if (import.meta.env.DEV) {
+      console.log("Debug:", { role: finalRole });
+    }
+    return finalRole;
+  }, [userProfile?.role, userProfile?.systemRole, claimRole]);
 
   const mdtRole = userProfile?.mdtRole ?? null;
 
@@ -73,7 +82,7 @@ export function RoleProvider({ children }) {
       loading: orgLoading,
       hasRole: (r) => role === r,
       can: (permission) =>
-        typeof permission === "string" && permissions.includes(permission),
+        typeof permission === "string" && canAccess(role, permission),
       isAllowed: (allowedRoles) =>
         !allowedRoles ||
         (Array.isArray(allowedRoles) && role != null && allowedRoles.includes(role)),

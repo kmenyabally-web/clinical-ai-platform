@@ -10,6 +10,7 @@ import { getPatientById } from "../services/patientService";
 import { generateCandourLetter } from "../services/aiService";
 import { isIndexError, INDEX_ERROR_MESSAGE } from "../lib/firestoreIndexError";
 import { formatUkDateTime } from "../utils/dateFormat";
+import ActionBar from "../components/ActionBar";
 
 /** Regulation 20 candour: show draft letter for medium/high severity incidents. */
 function isDutyOfCandourSeverity(severity) {
@@ -97,6 +98,10 @@ export default function Incidents() {
 
   const safeServices = Array.isArray(services) ? services : [];
   const reportSectionRef = useRef(null);
+
+  function openIncidentReportSection() {
+    reportSectionRef.current?.scrollIntoView({ behavior: "smooth" });
+  }
 
   /** Draft from the report form (before/without relying on the saved row). */
   async function handleDraftCandourFromForm(payload) {
@@ -191,23 +196,16 @@ export default function Incidents() {
             </p>
           )}
         </div>
-        <button
-          type="button"
-          onClick={() => reportSectionRef.current?.scrollIntoView({ behavior: "smooth" })}
-          style={{
-            padding: "8px 16px",
-            borderRadius: 8,
-            border: "none",
-            background: "#005eb8",
-            color: "#fff",
-            fontWeight: 600,
-            fontSize: "0.9rem",
-            cursor: "pointer",
-          }}
-        >
-          Report Incident
-        </button>
       </div>
+
+      <ActionBar
+        actions={[
+          {
+            label: "➕ Add Incident",
+            onClick: openIncidentReportSection,
+          },
+        ]}
+      />
 
       <section
         aria-label="Incident filters"

@@ -17,6 +17,8 @@ import {
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../firebase";
 import { parseUkDateString } from "../utils/dateFormat";
+import { getUserContext } from "./authService";
+import { assertTenantContext, tenantFieldsFromContext } from "../utils/tenantContext";
 
 const COLLECTION = "staff_training";
 
@@ -136,8 +138,14 @@ export async function createStaffTrainingRecord(payload) {
 
   const status = computeTrainingStatus(expiryUkStr);
 
+  const ctx = await getUserContext();
+  const tenant = tenantFieldsFromContext({ organisationId: org, hospitalId: ctx.hospitalId, wardId: ctx.wardId });
+  assertTenantContext(tenant.organisationId, tenant.hospitalId);
+
   const docData = {
     organisationId: org,
+    hospitalId: tenant.hospitalId,
+    wardId: tenant.wardId,
     serviceId: payload.serviceId ?? null,
     staffId: payload.staffId.trim(),
     staffName: String(payload.staffName ?? "").trim(),

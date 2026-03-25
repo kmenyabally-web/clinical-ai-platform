@@ -28,6 +28,8 @@ type Props = {
   emptyIncidentsMessage?: string;
   /** Inspector / oversight: hide structured risk and narrative detail. */
   redactSensitive?: boolean;
+  /** Which narrative text to display for clinical notes. */
+  noteTextMode?: "raw" | "corrected";
 };
 
 function toMillis(value: unknown): number {
@@ -89,6 +91,15 @@ const disciplineBadgeStyle: React.CSSProperties = {
   borderRadius: 999,
 };
 
+const structuredFieldsBlockStyle: React.CSSProperties = {
+  marginTop: 8,
+  padding: "8px 0 10px 0",
+  borderTop: "1px solid #e2e8f0",
+  fontSize: 12.5,
+  lineHeight: 1.5,
+  color: "#334155",
+};
+
 export default function PatientTimeline({
   variant,
   notes = [],
@@ -99,6 +110,7 @@ export default function PatientTimeline({
   emptyNotesMessage = "No clinical notes recorded for this patient.",
   emptyIncidentsMessage = "No incidents recorded for this patient.",
   redactSensitive = false,
+  noteTextMode = "raw",
 }: Props) {
   if (variant === "merged") {
     if (loadingNotes || loadingIncidents) {
@@ -113,7 +125,13 @@ export default function PatientTimeline({
         {merged.map((entry) =>
           entry.kind === "clinical_note" ? (
             <li key={`n-${entry.id}`} style={itemStyle}>
-              <NoteBody note={entry.note} formatWhen={formatWhen} showKindLabel redactSensitive={redactSensitive} />
+              <NoteBody
+                note={entry.note}
+                formatWhen={formatWhen}
+                showKindLabel
+                redactSensitive={redactSensitive}
+                noteTextMode={noteTextMode}
+              />
             </li>
           ) : (
             <li key={`i-${entry.id}`} style={itemStyle}>
@@ -136,7 +154,7 @@ export default function PatientTimeline({
       <ul style={listStyle}>
         {notes.map((n) => (
             <li key={n.id} style={itemStyle}>
-            <NoteBody note={n} formatWhen={formatWhen} redactSensitive={redactSensitive} />
+            <NoteBody note={n} formatWhen={formatWhen} redactSensitive={redactSensitive} noteTextMode={noteTextMode} />
           </li>
         ))}
       </ul>
@@ -169,19 +187,29 @@ function NoteBody({
   formatWhen,
   showKindLabel,
   redactSensitive = false,
+  noteTextMode,
 }: {
   note: ClinicalNote & { mood?: string | null };
   formatWhen: (value: unknown) => string;
   showKindLabel?: boolean;
   redactSensitive?: boolean;
+  noteTextMode: "raw" | "corrected";
 }) {
   const mood = note.structured?.mood ?? note.mood ?? "";
   const behaviour = redactSensitive ? "" : (note.structured?.behaviour ?? "");
   const engagement = redactSensitive ? "" : (note.structured?.engagement ?? "");
+  const risk = redactSensitive ? "" : (note.structured?.risk ?? "");
+  const moodLine = redactSensitive ? "Restricted" : (note.mood || note.structured?.mood || "N/A");
+  const behaviourLine = redactSensitive
+    ? "Restricted"
+    : note.behaviour || note.structured?.behaviour || "N/A";
+  const riskLine = redactSensitive ? "Restricted" : note.risk || note.structured?.risk || "N/A";
   const physicalHealth = redactSensitive ? "" : (note.structured?.physicalHealth ?? "");
   const medicationIssues = redactSensitive ? "" : (note.structured?.medicationIssues ?? "");
-  const summary = redactSensitive ? "" : (note.structured?.summary ?? "");
+  const progress = redactSensitive ? "" : (note.structured?.progress ?? note.structured?.summary ?? "");
+  const incidents = redactSensitive ? [] : (note.structured?.incidents ?? []);
   const risks = redactSensitive ? [] : (note.structured?.riskIndicators ?? []);
+  const narrative = noteTextMode === "corrected" ? note.correctedNote ?? note.content : note.content;
 
   return (
     <>
@@ -198,6 +226,17 @@ function NoteBody({
           ) : null}
         </span>
         {mood ? <span style={moodStyle}>{mood}</span> : null}
+      </div>
+      <div style={structuredFieldsBlockStyle}>
+        <div>
+          <strong>Mood:</strong> {moodLine}
+        </div>
+        <div>
+          <strong>Behaviour:</strong> {behaviourLine}
+        </div>
+        <div>
+          <strong>Risk:</strong> {riskLine}
+        </div>
       </div>
       {behaviour ? (
         <div style={behaviourStyle}>
@@ -223,10 +262,25 @@ function NoteBody({
           {medicationIssues}
         </div>
       ) : null}
-      {summary ? (
+      {risk ? (
+        <div style={behaviourStyle}>
+          <span style={subLabelStyle}>Risk: </span>
+          {risk}
+        </div>
+      ) : null}
+      {progress ? (
         <div style={summaryStyle}>
-          <span style={subLabelStyle}>AI summary: </span>
-          {summary}
+          <span style={subLabelStyle}>Progress: </span>
+          {progress}
+        </div>
+      ) : null}
+      {incidents.length > 0 ? (
+        <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {incidents.map((inc) => (
+            <span key={inc} style={riskTagStyle}>
+              {inc}
+            </span>
+          ))}
         </div>
       ) : null}
       {risks.length > 0 ? (
@@ -246,7 +300,7 @@ function NoteBody({
       {redactSensitive ? (
         <div style={restrictedBannerStyle}>Structured risk and clinical detail are restricted for this role.</div>
       ) : null}
-      {note.content ? <div style={contentStyle}>{note.content}</div> : null}
+      {narrative ? <div style={contentStyle}>{narrative}</div> : null}
     </>
   );
 }

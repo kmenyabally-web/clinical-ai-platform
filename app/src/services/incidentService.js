@@ -2,6 +2,8 @@ import {
   collection,
   addDoc,
   updateDoc,
+  doc,
+  getDoc,
   serverTimestamp,
   query,
   where,
@@ -14,7 +16,9 @@ import { addTimelineEntry } from "./patientTimelineService";
 import { recalculateComplianceScoreAsync } from "./complianceEngine";
 import { auth } from "../firebase";
 import { getUserContext } from "./authService";
+import { getPatientById } from "./patientService";
 import { logAuditEventNonBlocking } from "./auditService";
+import { assertTenantContext, tenantFieldsFromContext } from "../utils/tenantContext";
 
 const INCIDENTS_COLLECTION = "incidents";
 const PATIENT_TIMELINE_COLLECTION = "patientTimeline";
@@ -68,6 +72,11 @@ export async function createIncidentLegacy({
   if (!description?.trim()) throw new Error("description is required");
   if (!reportedBy?.trim()) throw new Error("reportedBy is required");
 
+  const patient = await getPatientById(patientId.trim());
+  const hospitalId = (patient.hospitalId && String(patient.hospitalId).trim()) || "";
+  const wardId = (patient.wardId && String(patient.wardId).trim()) || "";
+  assertTenantContext(organisationId, hospitalId);
+
   const incidentsRef = collection(db, INCIDENTS_COLLECTION);
   const now = serverTimestamp();
 
@@ -75,6 +84,8 @@ export async function createIncidentLegacy({
     incidentId: "",
     patientId,
     organisationId,
+    hospitalId,
+    wardId,
     serviceId,
     type,
     severity,
@@ -104,6 +115,8 @@ export async function createIncidentLegacy({
     eventId: incidentId,
     patientId,
     organisationId,
+    hospitalId,
+    wardId,
     serviceId,
     type: type === "safeguarding" ? "safeguarding" : "incident",
     title: type === "safeguarding" ? "Safeguarding concern" : "Incident report",
@@ -125,6 +138,8 @@ export async function createIncidentLegacy({
   await addTimelineEntry({
     organisationId,
     patientId,
+    hospitalId,
+    wardId,
     serviceId,
     eventType,
     eventTitle,
@@ -153,10 +168,19 @@ export async function createIncidentLegacy({
  */
 export async function createIncident(incidentData) {
   const safePayload = incidentData && typeof incidentData === "object" ? incidentData : {};
+  const ctx = await getUserContext();
+  const tenant = tenantFieldsFromContext({
+    organisationId: "dev-org-001",
+    hospitalId: ctx.hospitalId,
+    wardId: ctx.wardId,
+  });
+  assertTenantContext(tenant.organisationId, tenant.hospitalId);
 
   const incidentDoc = {
     ...safePayload,
     organisationId: "dev-org-001",
+    hospitalId: tenant.hospitalId,
+    wardId: tenant.wardId,
     createdAt: serverTimestamp(),
     status: "open",
   };
@@ -197,7 +221,8 @@ export async function createIncidentReport({
   description,
   patientId,
 }) {
-  const { organisationId } = await getUserContext();
+  const ctx = await getUserContext();
+  const { organisationId } = ctx;
   const reporterId = auth.currentUser?.uid || null;
 
   if (!organisationId) throw new Error("Governance Error: organisationId is required.");
@@ -211,10 +236,17 @@ export async function createIncidentReport({
     throw new Error("occurredAt (Date) is required");
   }
 
+  const patient = await getPatientById(patientId.trim());
+  const hospitalId = (patient.hospitalId && String(patient.hospitalId).trim()) || "";
+  const wardId = (patient.wardId && String(patient.wardId).trim()) || "";
+  assertTenantContext(organisationId, hospitalId);
+
   const incidentsRef = collection(db, INCIDENTS_COLLECTION);
   const incidentDoc = {
     incidentId: "",
     organisationId,
+    hospitalId,
+    wardId,
     patientId: patientId.trim(),
     title: title.trim(),
     location: location.trim(),
@@ -250,6 +282,9 @@ export async function fetchIncidentsForPatient(patientId, { limitCount = 20 } = 
   const { organisationId } = await getUserContext();
   if (!organisationId) throw new Error("Governance Error: organisationId is required.");
   if (!patientId?.trim()) return [];
+
+  // Validate tenant scope for this patient (organisation + hospital).
+  await getPatientById(patientId.trim());
 
   const ref = collection(db, INCIDENTS_COLLECTION);
   const q = query(
@@ -291,6 +326,7 @@ export async function fetchIncidents(organisationId, filters = {}) {
   if (!organisationId?.trim()) return [];
 
   const { serviceId, severity, status } = filters;
+  const { hospitalId: ctxHospitalId } = await getUserContext().catch(() => ({}));
   const ref = collection(db, INCIDENTS_COLLECTION);
 
   const constraints = [
@@ -306,7 +342,7 @@ export async function fetchIncidents(organisationId, filters = {}) {
   const snapshot = await getDocs(q);
   const docs = snapshot?.docs ?? [];
 
-  return docs.map((d) => {
+  const mapped = docs.map((d) => {
     const x = d?.data?.() ?? {};
     return {
       id: d?.id ?? "",
@@ -324,5 +360,31 @@ export async function fetchIncidents(organisationId, filters = {}) {
       linkedEvidence: Array.isArray(x.linkedEvidence) ? x.linkedEvidence : [],
     };
   });
+
+  // Hospital boundary enforcement for organisation-scoped incident listings.
+  // Incidents themselves are scoped by organisationId only; we filter by the patient's hospitalId.
+  if (ctxHospitalId) {
+    const uniquePatientIds = Array.from(
+      new Set(mapped.map((r) => (r.patientId ?? "").toString().trim()).filter(Boolean))
+    );
+    const hospitalByPatientId = new Map();
+    await Promise.all(
+      uniquePatientIds.map(async (pid) => {
+        try {
+          const snap = await getDoc(doc(db, "patients", pid));
+          const x = snap?.data?.() ?? {};
+          const orgOk = x.organisationId ? x.organisationId === organisationId : true;
+          const hosp = typeof x.hospitalId === "string" ? x.hospitalId : null;
+          hospitalByPatientId.set(pid, orgOk ? hosp : null);
+        } catch {
+          hospitalByPatientId.set(pid, null);
+        }
+      })
+    );
+
+    return mapped.filter((r) => hospitalByPatientId.get(String(r.patientId ?? "").trim()) === ctxHospitalId);
+  }
+
+  return mapped;
 }
 

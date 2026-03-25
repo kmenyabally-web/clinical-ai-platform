@@ -3,8 +3,11 @@ import { Link } from "react-router-dom";
 import { useOrganisation } from "../context/OrganisationContext";
 import { useService } from "../context/ServiceContext";
 import { listPatients, createPatient } from "../services/patientService";
+import { useRole } from "../context/RoleContext";
+import { requireAdminRole } from "../lib/requireAdminAction";
 import { isIndexError, INDEX_ERROR_MESSAGE } from "../lib/firestoreIndexError";
 import { formatUkDate } from "../utils/dateFormat";
+import ActionBar from "../components/ActionBar";
 
 function formatDate(value) {
   return formatUkDate(value, "—");
@@ -58,23 +61,19 @@ export default function Patients() {
             {organisation?.name ? `${organisation.name}${currentServiceId ? ` · ${currentServiceName}` : ""}` : "Manage patients for this organisation."}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => { setShowCreateModal(true); setCreateError(null); }}
-          style={{
-            padding: "8px 16px",
-            borderRadius: 8,
-            border: "none",
-            background: "#005eb8",
-            color: "#fff",
-            fontWeight: 600,
-            fontSize: "0.9rem",
-            cursor: "pointer",
-          }}
-        >
-          Add Patient
-        </button>
       </div>
+
+      <ActionBar
+        actions={[
+          {
+            label: "➕ Add Patient",
+            onClick: () => {
+              setShowCreateModal(true);
+              setCreateError(null);
+            },
+          },
+        ]}
+      />
 
       {error && (
         <div role="alert" style={{ marginBottom: "1rem", padding: "1rem", background: "#fef2f2", borderRadius: 8, color: "#b91c1c" }}>
@@ -86,7 +85,7 @@ export default function Patients() {
 
       {!loading && !error && patients.length === 0 && (
         <p style={{ color: "#64748b", padding: "2rem", background: "#f8fafc", borderRadius: 12 }}>
-          No patients yet. Click Add Patient to create one.
+          No data available. Start by adding a patient with Add Patient.
         </p>
       )}
 
@@ -146,6 +145,7 @@ export default function Patients() {
           services={services ?? []}
           onClose={() => { setShowCreateModal(false); setCreateError(null); }}
           onSubmit={async (data) => {
+            if (!requireAdminRole(role)) return;
             setCreating(true);
             setCreateError(null);
             try {

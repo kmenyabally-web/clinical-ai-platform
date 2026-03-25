@@ -35,7 +35,10 @@ export async function registerWithOrganisation(email, password, organisationName
     email: email.trim(),
     role: "Admin",
     mdtRole: "Clinical Lead",
+    hospitalId: null,
+    wardId: null,
     status: "active",
+    createdAt: new Date().toISOString(),
   });
 
   const auditContext = { organisationId, userId: uid, userRole: "Admin" };

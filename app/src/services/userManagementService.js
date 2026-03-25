@@ -6,8 +6,18 @@
 import { collection, doc, getDocs, query, updateDoc, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "../firebase";
+
+async function ensureAuthTokenForCallable() {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error("User must be signed in to create users.");
+  }
+  await user.getIdToken(true);
+}
 import { getUserContext } from "./authService";
 import { isPlatformAdmin } from "./platformAdminService";
+import { hasPermission } from "../config/rbac";
+import { logAudit } from "./auditService";
 import { SYSTEM_ROLES } from "../constants/systemRoles";
 import { MDT_ROLES } from "../constants/mdtRoles";
 
@@ -72,9 +82,38 @@ export async function updateUserAssignment(userId, updates) {
  * @param {{ email: string, password: string, displayName: string, role: string, mdtRole: string, organisationId: string, hospitalId?: string | null, wardId?: string | null }} payload
  */
 export async function createOrganisationUserAccount(payload) {
+  const ctx = await getUserContext();
+  const uid = auth.currentUser?.uid;
+  const platform = uid ? await isPlatformAdmin(uid) : false;
+  if (!platform && !hasPermission(ctx.role, "CREATE_USER")) {
+    throw new Error("Permission denied");
+  }
+  await ensureAuthTokenForCallable();
   const fn = httpsCallable(functions, "createOrganisationUser");
   const res = await fn(payload);
-  return res.data;
+  const data = res.data ?? {};
+  await logAudit("CREATE_USER", {
+    userId: data.uid ?? data.userId ?? null,
+    organisationId: payload?.organisationId ?? ctx.organisationId ?? null,
+  });
+  return data;
+}
+
+/**
+ * Same as {@link createOrganisationUserAccount}; callable name `createOrganisationUser` (HTTPS onCall).
+ * @param {{ email: string, password: string, displayName?: string, name?: string, role: string, mdtRole: string, organisationId: string, hospitalId: string, wardId?: string | null }} data
+ */
+export async function createUser(data) {
+  return createOrganisationUserAccount({
+    email: data.email,
+    password: data.password,
+    displayName: (data.displayName ?? data.name ?? "").trim(),
+    role: data.role,
+    mdtRole: data.mdtRole,
+    organisationId: data.organisationId,
+    hospitalId: data.hospitalId,
+    wardId: data.wardId ?? null,
+  });
 }
 
 export { SYSTEM_ROLES, MDT_ROLES, APP_ROLES };

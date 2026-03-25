@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { collection, doc } from "firebase/firestore";
+import { Link, Navigate } from "react-router-dom";
+import { collection, doc, getDoc, setDoc } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 import { db } from "../../firebase";
 import { useOrganisation } from "../../context/OrganisationContext";
 import { useRole } from "../../context/RoleContext";
@@ -13,19 +14,22 @@ import { createSubscription, BILLING_CYCLES } from "../../services/billingServic
 import { useAuth } from "../../context/AuthContext";
 import { managementStyles as s } from "./managementStyles";
 import type { PlanKey } from "../../constants/plans";
+import ActionBar from "../../components/ActionBar";
 
 const PLAN_OPTIONS: PlanKey[] = ["BASIC", "PRO", "ENTERPRISE"];
 
 export default function Organisations() {
   const { organisationId, organisation, isPlatformAdmin, reload } = useOrganisation();
-  const { can } = useRole();
+  const { role, can, hasRole, enterpriseRoleCode } = useRole();
   const { user } = useAuth();
   const [rows, setRows] = useState<Array<{ id: string; name: string; plan?: string; status?: string | null }>>(
     []
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [modalOpen, setModalOpen] = useState(false);
+  const [platformModalOpen, setPlatformModalOpen] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [orgName, setOrgName] = useState("");
   const [name, setName] = useState("");
   const [plan, setPlan] = useState<PlanKey>("BASIC");
   const [saving, setSaving] = useState(false);
@@ -44,13 +48,17 @@ export default function Organisations() {
     }
   }, [isPlatformAdmin, organisationId]);
 
+  /** Spec uses "ADMIN"; normalised system role is "Admin" (see rbac). */
+  const isAdminUser =
+    role === "Admin" || enterpriseRoleCode === "ADMIN" || hasRole("Admin");
+
   useEffect(() => {
-    if (isPlatformAdmin || organisationId) load();
+    if (isPlatformAdmin || organisationId || isAdminUser) load();
     else {
       setRows([]);
       setLoading(false);
     }
-  }, [load, isPlatformAdmin, organisationId]);
+  }, [load, isPlatformAdmin, organisationId, isAdminUser]);
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
@@ -66,7 +74,7 @@ export default function Organisations() {
         userRole: isPlatformAdmin ? "platform_admin" : "Admin",
       };
       await createSubscription(newId, plan, BILLING_CYCLES.MONTHLY, auditContext);
-      setModalOpen(false);
+      setPlatformModalOpen(false);
       setName("");
       setPlan("BASIC");
       await load();
@@ -79,17 +87,87 @@ export default function Organisations() {
   }
 
   const canAddOrg = isPlatformAdmin;
+  /** Profile points at organisations/{id} but no document — invalid tenant state; Admin can repair. */
+  const orphanOrganisationRef = Boolean(organisationId) && !organisation;
+  /** Tenant Admin: create first org, or repair missing Firestore doc for existing organisationId. */
+  const showAdminCreate =
+    isAdminUser && !isPlatformAdmin && (!organisationId || orphanOrganisationRef);
 
-  if (!isPlatformAdmin && !organisationId) {
-    return (
-      <div style={s.page}>
-        <h1 style={s.h1}>Organisations</h1>
-        <div style={s.callout}>
-          <strong>No organisation yet.</strong> Ask an administrator to assign your account to an organisation, or
-          sign in as a platform administrator to create one.
-        </div>
-      </div>
-    );
+  async function handleCreateOrganisation() {
+    try {
+      const authInst = getAuth();
+      const authUser = authInst.currentUser;
+      if (!authUser) {
+        alert("User not authenticated");
+        return;
+      }
+      setSaving(true);
+      setError(null);
+      const nameTrim = orgName.trim() || "New Organisation";
+
+      if (organisationId) {
+        const existing = await getDoc(doc(db, "organisations", organisationId));
+        if (!existing.exists()) {
+          await createOrganisation(organisationId, {
+            name: nameTrim,
+            status: "active",
+            plan: "BASIC",
+          });
+          await setDoc(
+            doc(db, "organisations", organisationId),
+            { createdBy: authUser.uid },
+            { merge: true }
+          );
+          await createSubscription(organisationId, "BASIC", BILLING_CYCLES.MONTHLY, {
+            organisationId,
+            userId: authUser.uid,
+            userRole: "Admin",
+          });
+          setShowModal(false);
+          setOrgName("");
+          alert("Organisation created successfully");
+          window.location.reload();
+          return;
+        }
+        alert("Organisation already exists. Refreshing…");
+        await reload();
+        await load();
+        setShowModal(false);
+        setOrgName("");
+        return;
+      }
+
+      const orgId = `org_${Date.now()}`;
+      await createOrganisation(orgId, { name: nameTrim, status: "active", plan: "BASIC" });
+      await setDoc(
+        doc(db, "organisations", orgId),
+        { createdBy: authUser.uid },
+        { merge: true }
+      );
+      await setDoc(
+        doc(db, "users", authUser.uid),
+        { organisationId: orgId, orgId },
+        { merge: true }
+      );
+      await createSubscription(orgId, "BASIC", BILLING_CYCLES.MONTHLY, {
+        organisationId: orgId,
+        userId: authUser.uid,
+        userRole: "Admin",
+      });
+      setShowModal(false);
+      setOrgName("");
+      alert("Organisation created successfully");
+      window.location.reload();
+    } catch (error) {
+      console.error(error);
+      alert("Failed to create organisation");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!isPlatformAdmin && !organisationId && !isAdminUser) {
+    return <Navigate to="/create-organisation" replace />;
   }
 
   return (
@@ -98,6 +176,72 @@ export default function Organisations() {
       <p style={s.muted}>
         Tenant directory{organisation?.name ? ` · Current: ${organisation.name}` : ""}
       </p>
+
+      {canAddOrg ? (
+        <ActionBar
+          actions={[
+            {
+              label: "➕ Add Organisation",
+              onClick: () => setPlatformModalOpen(true),
+            },
+          ]}
+        />
+      ) : null}
+
+      {showAdminCreate ? (
+        <button
+          type="button"
+          style={{
+            padding: "10px 16px",
+            background: "#2563eb",
+            color: "white",
+            border: "none",
+            borderRadius: "6px",
+            marginBottom: "20px",
+            cursor: "pointer",
+            fontWeight: 700,
+            fontSize: 14,
+          }}
+          onClick={() => setShowModal(true)}
+        >
+          + Create Organisation
+        </button>
+      ) : null}
+
+      {showModal ? (
+        <div style={s.modalBackdrop} role="presentation">
+          <div className="modal" style={s.modalCard} role="dialog" aria-modal="true" aria-labelledby="admin-create-org-title">
+            <h3 id="admin-create-org-title" style={{ marginTop: 0, marginBottom: 12 }}>
+              Create Organisation
+            </h3>
+            <label style={s.label}>
+              Organisation name
+              <input
+                placeholder="Organisation Name"
+                value={orgName}
+                onChange={(e) => setOrgName(e.target.value)}
+                style={s.input}
+                autoComplete="organization"
+              />
+            </label>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button type="button" disabled={saving} onClick={handleCreateOrganisation} style={s.btnPrimary}>
+                {saving ? "Creating…" : "Create"}
+              </button>
+              <button
+                type="button"
+                style={s.btnGhost}
+                onClick={() => {
+                  setShowModal(false);
+                  setOrgName("");
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {error ? (
         <p role="alert" style={s.alert}>
@@ -108,25 +252,30 @@ export default function Organisations() {
       {!isPlatformAdmin && organisationId && rows.length === 0 && !loading ? (
         <div style={s.callout}>
           <strong>No organisation record found.</strong>{" "}
-          <Link to="/management/hospitals" style={{ color: "#005eb8", fontWeight: 700 }}>
-            Add hospitals and wards
-          </Link>{" "}
-          to finish setup.
+          {orphanOrganisationRef ? (
+            <>
+              Your account references an organisation ID, but there is no matching document in Firestore.{" "}
+              {showAdminCreate
+                ? "Use “Create Organisation” above to create the tenant record at your existing ID."
+                : "Ask an organisation Admin to create the record, or contact support."}
+            </>
+          ) : (
+            <>
+              <Link to="/management/hospitals" style={{ color: "#005eb8", fontWeight: 700 }}>
+                Add hospitals and wards
+              </Link>{" "}
+              to finish setup.
+            </>
+          )}
         </div>
       ) : null}
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-        {canAddOrg ? (
-          <button type="button" style={s.btnPrimary} onClick={() => setModalOpen(true)}>
-            Add organisation
-          </button>
-        ) : (
-          <p style={s.muted}>
-            <strong>Add organisation</strong> is available to platform administrators only (new tenants). You can edit
-            your current organisation name below.
-          </p>
-        )}
-      </div>
+      {!canAddOrg ? (
+        <p style={{ ...s.muted, marginBottom: 16 }}>
+          <strong>Add organisation</strong> is available to platform administrators only (new tenants). You can edit
+          your current organisation name below.
+        </p>
+      ) : null}
 
       {loading ? (
         <p style={s.muted}>Loading…</p>
@@ -171,7 +320,7 @@ export default function Organisations() {
         />
       ) : null}
 
-      {modalOpen ? (
+      {platformModalOpen ? (
         <div style={s.modalBackdrop} role="presentation">
           <div style={s.modalCard} role="dialog" aria-modal="true" aria-labelledby="add-org-title">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
@@ -180,7 +329,7 @@ export default function Organisations() {
               </h2>
               <button
                 type="button"
-                onClick={() => setModalOpen(false)}
+                onClick={() => setPlatformModalOpen(false)}
                 style={{ border: "none", background: "none", cursor: "pointer", fontSize: "1.25rem" }}
                 aria-label="Close"
               >
@@ -212,7 +361,7 @@ export default function Organisations() {
                 <button type="submit" disabled={saving} style={s.btnPrimary}>
                   {saving ? "Saving…" : "Save"}
                 </button>
-                <button type="button" style={s.btnGhost} onClick={() => setModalOpen(false)}>
+                <button type="button" style={s.btnGhost} onClick={() => setPlatformModalOpen(false)}>
                   Cancel
                 </button>
               </div>

@@ -11,7 +11,9 @@ import { initErrorMonitoring } from "./lib/errorMonitoring";
 import { runFirestoreTestWriteOnce } from "./services/firestoreTestWrite";
 
 initErrorMonitoring();
-runFirestoreTestWriteOnce();
+if (import.meta.env.DEV) {
+  runFirestoreTestWriteOnce();
+}
 
 // Provider order: Auth → Organisation → Role → Service (needs org + user) → App.
 ReactDOM.createRoot(document.getElementById("root")).render(

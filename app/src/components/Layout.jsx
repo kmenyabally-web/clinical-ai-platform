@@ -1,13 +1,21 @@
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 import { useOrganisation } from "../context/OrganisationContext";
+import { useAuth } from "../context/AuthContext";
 import { Link, Outlet, useLocation } from "react-router-dom";
+import CreateOrganisation from "../pages/setup/CreateOrganisation";
+import SystemStatus from "./SystemStatus";
 
 export default function Layout() {
-  const { organisationId, isPlatformAdmin, loading, error } = useOrganisation();
+  const { user } = useAuth();
+  const { organisationId, hospitalId, isPlatformAdmin, loading, needsSetup } = useOrganisation();
   const location = useLocation();
 
-  const showOrgGuard = !loading && !organisationId && !isPlatformAdmin;
+  const showHospitalWarning = !loading && !!organisationId && !hospitalId && !isPlatformAdmin;
+
+  if (!loading && user && needsSetup) {
+    return <CreateOrganisation />;
+  }
 
   return (
     <div style={layoutStyles.app}>
@@ -28,39 +36,27 @@ export default function Layout() {
               active={location.pathname.startsWith("/patients")}
             />
           </div>
-          {showOrgGuard ? (
+          {showHospitalWarning ? (
             <div
-              role="alert"
+              role="status"
               style={{
-                maxWidth: 640,
-                margin: "2rem auto",
-                padding: "1.5rem 1.75rem",
-                borderRadius: 12,
-                border: "1px solid #fee2e2",
-                background: "#fef2f2",
-                color: "#b91c1c",
+                marginBottom: 12,
+                padding: "10px 14px",
+                borderRadius: 8,
+                border: "1px solid #fcd34d",
+                background: "#fffbeb",
+                color: "#92400e",
+                fontSize: "0.875rem",
               }}
             >
-              <h1 style={{ marginTop: 0, marginBottom: "0.5rem", fontSize: "1.25rem" }}>
-                No organisation selected.
-              </h1>
-              {error && (
-                <p style={{ margin: 0, fontSize: "0.9rem" }}>
-                  {error}
-                </p>
-              )}
-              {!error && (
-                <p style={{ margin: 0, fontSize: "0.9rem" }}>
-                  Your account is not currently linked to an organisation. Please contact an
-                  administrator to be assigned to an organisation.
-                </p>
-              )}
+              <strong>No hospital assigned.</strong> Some features need a hospital — contact admin if
+              required.
             </div>
-          ) : (
-            <Outlet />
-          )}
+          ) : null}
+          <Outlet />
         </div>
       </div>
+      <SystemStatus />
     </div>
   );
 }

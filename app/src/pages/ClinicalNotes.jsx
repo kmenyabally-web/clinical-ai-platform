@@ -8,12 +8,14 @@ import { useAuth } from "../context/AuthContext";
 import { listPatients } from "../services/patientService";
 import { isIndexError, INDEX_ERROR_MESSAGE } from "../lib/firestoreIndexError";
 import { useRole } from "../context/RoleContext";
-import { analyseNote } from "../services/aiService";
+import { requireAdminRole } from "../lib/requireAdminAction";
+import { analyseClinicalNote } from "../services/aiService";
 import { addClinicalNote, fetchClinicalNotesForOrganisation } from "../services/noteService";
 import { logAuditEvent } from "../services/auditService";
 import ClinicalNoteForm from "../components/ClinicalNoteForm";
 import { formatUkDateTime } from "../utils/dateFormat";
 import { MDT_OTHER, MDT_ROLES } from "../constants/mdtRoles";
+import ActionBar from "../components/ActionBar";
 
 function formatDate(value) {
   return formatUkDateTime(value, "—");
@@ -99,6 +101,12 @@ export default function ClinicalNotes() {
 
   const createdBy = user?.email || user?.displayName || "Unknown";
 
+  function generatePatientSummary() {
+    if (import.meta.env.DEV) {
+      console.log("Debug:", { patientSummary: "generate" });
+    }
+  }
+
   if (roleLoading) {
     return (
       <div style={{ padding: 40 }}>
@@ -125,25 +133,26 @@ export default function ClinicalNotes() {
             {organisation?.name ? `${organisation.name}${currentServiceId ? ` · ${currentServiceName}` : ""}` : "Manage clinical notes for this organisation."}
           </p>
         </div>
-        {canEditNotes() ? (
-          <button
-            type="button"
-            onClick={() => { setShowCreateModal(true); setCreateError(null); }}
-            style={{
-              padding: "8px 16px",
-              borderRadius: 8,
-              border: "none",
-              background: "#005eb8",
-              color: "#fff",
-              fontWeight: 600,
-              fontSize: "0.9rem",
-              cursor: "pointer",
-            }}
-          >
-            Add Clinical Note
-          </button>
-        ) : null}
       </div>
+
+      {canEditNotes() ? (
+        <ActionBar
+          actions={[
+            {
+              label: "➕ Add Note",
+              onClick: () => {
+                setShowCreateModal(true);
+                setCreateError(null);
+              },
+            },
+            {
+              label: "⚡ Generate Summary",
+              type: "generate",
+              onClick: () => generatePatientSummary(),
+            },
+          ]}
+        />
+      ) : null}
 
       {isManager && (
         <div
@@ -186,11 +195,17 @@ export default function ClinicalNotes() {
         </div>
       )}
 
+      {(creating || analysing) && (
+        <p style={{ color: "#0f172a", marginBottom: "0.75rem", fontWeight: 600 }} aria-live="polite">
+          ⏳ Processing…
+        </p>
+      )}
+
       {loading && <p style={{ color: "#666" }}>Loading clinical notes…</p>}
 
       {!loading && !error && notes.length === 0 && (
         <p style={{ color: "#64748b", padding: "2rem", background: "#f8fafc", borderRadius: 12 }}>
-          No clinical notes yet. Click Add Clinical Note to create one.
+          No data available. Start by adding a clinical note with Add Note.
         </p>
       )}
 
@@ -285,6 +300,7 @@ export default function ClinicalNotes() {
           createdBy={createdBy}
           onClose={() => { setShowCreateModal(false); setCreateError(null); }}
           onSubmit={async ({ patientId, category, content, mood, discipline }) => {
+            if (!requireAdminRole(role)) return;
             const resolvedDiscipline = (discipline ?? "").toString().trim();
             if (!resolvedDiscipline) {
               setCreateError("Please select a role");
@@ -294,15 +310,19 @@ export default function ClinicalNotes() {
             setCreating(true);
             setCreateError(null);
 
-            let analysis = null;
+            let aiResult = null;
             if (hasFeature("ai")) {
               setAnalysing(true);
               try {
                 try {
-                  analysis = await analyseNote(content, resolvedDiscipline, patientId);
+                  aiResult = await analyseClinicalNote({
+                    content,
+                    authorRole: resolvedDiscipline,
+                    patientId,
+                  });
                 } catch (aiErr) {
                   console.error("AI failed:", aiErr);
-                  analysis = null;
+                  aiResult = null;
                 }
               } finally {
                 setAnalysing(false);
@@ -310,27 +330,35 @@ export default function ClinicalNotes() {
             }
 
             try {
-              const structured = analysis
+              const structured = aiResult?.structuredData
                 ? {
-                    behaviour: analysis.behaviour,
-                    mood: analysis.mood,
-                    engagement: analysis.engagement,
-                    physicalHealth: analysis.physicalHealth,
-                    medicationIssues: analysis.medicationIssues,
-                    incidents: analysis.incidents,
-                    riskIndicators: analysis.riskIndicators,
-                    summary: analysis.summary,
+                    behaviour: aiResult.structuredData.behaviour,
+                    mood: aiResult.structuredData.mood,
+                    engagement: aiResult.structuredData.engagement,
+                    risk: aiResult.structuredData.risk,
+                    physicalHealth: aiResult.structuredData.physicalHealth,
+                    medicationIssues: aiResult.structuredData.medicationIssues,
+                    incidents: aiResult.structuredData.incidents,
+                    riskIndicators: aiResult.structuredData.riskIndicators,
+                    progress: aiResult.structuredData.progress,
+                    summary: aiResult.structuredData.summary,
                   }
                 : undefined;
 
               await addClinicalNote(patientId, {
                 category,
                 content,
-                mood: mood ?? analysis?.mood ?? null,
+                mood: mood ?? aiResult?.structuredData?.mood ?? null,
                 authorEmail: createdBy,
                 serviceId: currentServiceId ?? null,
                 discipline: resolvedDiscipline,
                 ...(structured ? { structured } : {}),
+                correctedNote: aiResult?.correctedNote ?? null,
+                structuredData: aiResult?.structuredData ?? null,
+                summaries: aiResult?.summaries ?? null,
+                mdtReview: aiResult?.mdtReview ?? null,
+                reports: aiResult?.reports ?? null,
+                careFolder: aiResult?.careFolder ?? null,
               });
               void logAuditEvent("NOTE_CREATED", { patientId });
               setShowCreateModal(false);

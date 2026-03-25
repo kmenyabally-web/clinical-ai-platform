@@ -12,7 +12,9 @@ export default function Header() {
   return (
     <div style={styles.header}>
       <div style={styles.orgRow}>
-        <span>{organisation?.name ? `Organisation: ${organisation.name}` : "Organisation: —"}</span>
+        <span>
+          {`Organisation: ${organisation?.name?.trim() || "Unknown"}`}
+        </span>
         <ServiceSwitcher />
       </div>
 
