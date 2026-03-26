@@ -21,7 +21,8 @@ function mapUxRoleKey({ systemRole, mdtRole }) {
     if (m.includes("Care Assistant") || m.includes("Head of Care") || m.includes("Care")) return "Carer";
     if (m.includes("Ward Manager")) return "Manager";
     if (m.includes("Manager")) return "Manager";
-    return null;
+    if (m.includes("Physiotherapist") || m.includes("Physiotherapy")) return "Nurse";
+    // Unknown MDT title: use system role below (STAFF → Nurse, etc.) instead of empty permissions.
   }
 
   // System-level fallback mapping.

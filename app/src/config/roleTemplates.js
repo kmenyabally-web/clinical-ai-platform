@@ -15,17 +15,22 @@ export const ROLE_TEMPLATES = {
     canViewAssignedPatients: true,
     canAccessMedication: true,
     canAccessMDT: true,
+    canAccessBehaviour: true,
+    canGenerateReports: true,
   },
 
   Psychologist: {
     canWriteNotes: true,
     canAccessBehaviour: true,
     canAccessMDT: true,
+    canGenerateReports: true,
   },
 
   "Support Worker": {
     canWriteNotes: true,
     canViewAssignedPatients: true,
+    canAccessBehaviour: true,
+    canGenerateReports: true,
   },
 
   Manager: {

@@ -2,12 +2,12 @@
 //
 // Critical principles enforced:
 // - Every request must be authenticated
-// - Every document is scoped to organisationId
-// - No cross-tenant reads/writes
+// - Every document is scoped to organisationId (or orgId via docOrgId)
+// - No cross-tenant reads/writes for tenant data
 // - Notes are immutable (update/delete denied)
 // - Audit logs protected from non-admin roles (read)
-// - Default deny for everything else
-// - Tenant collections: documents, evidence, behaviours, risk_alerts, staff_training (org-scoped CRU)
+// - Default deny for unknown paths (explicit allow-list below)
+// - Org-type differences (care home vs MH vs nursing) stay in app/feature templates; rules enforce tenant only
 //
 // NOTE: This ruleset assumes `users/{uid}` contains:
 // - organisationId (or orgId)
@@ -75,12 +75,38 @@ service cloud.firestore {
         : request.auth.token.isGlobalAdmin == true;
     }
 
+    function isSuperAdminOrGlobalAdminRole() {
+      return roleUpper() in ['SUPER_ADMIN', 'GLOBAL_ADMIN'];
+    }
+
+    // Optional: set `isPlatformAdmin: true` on users/{uid} for platform operators (mirrors app context).
+    function isPlatformAdminFlag() {
+      let u = getUserSafe();
+      return u != null && u.isPlatformAdmin == true;
+    }
+
+    function canReadOrganisationRoot(orgId) {
+      return sameOrganisation(orgId)
+        || isSuperAdminOrGlobalAdminRole()
+        || isPlatformAdminFlag();
+    }
+
+    function inspectionSessionOrgId(sessionId) {
+      return get(/databases/$(database)/documents/inspection_sessions/$(sessionId)).data.organisationId;
+    }
+
     // =========
     // Organisations
     // =========
     match /organisations/{orgId} {
-      allow read: if isAuthenticated() && sameOrganisation(orgId);
+      allow read: if isAuthenticated() && canReadOrganisationRoot(orgId);
       allow create, update, delete: if isAuthenticated() && isGlobalAdmin();
+    }
+
+    // Stage-20 readiness rows (dashboard / compliance). Scoped by parent org id.
+    match /organisations/{orgId}/readiness/{readinessId} {
+      allow read: if isAuthenticated() && sameOrganisation(orgId);
+      allow create, update, delete: if isAuthenticated() && sameOrganisation(orgId) && isAdmin();
     }
 
     // =========
@@ -194,6 +220,18 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Legacy alias used by incidentService / carePlanService (same schema as patient_timeline).
+    match /patientTimeline/{timelineId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+
+      allow create: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId);
+
+      allow update: if false;
+      allow delete: if false;
+    }
+
     // =========
     // Services / Hospitals / Wards
     // (Needed for onboarding + tenant setup flows.)
@@ -256,7 +294,9 @@ service cloud.firestore {
     // =========
     match /inspection_reports/{reportId} {
       allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
-      allow create: if isAuthenticated() && isAdmin() && sameOrganisation(request.resource.data.organisationId);
+      allow create: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId);
       allow update, delete: if false;
     }
 
@@ -268,10 +308,18 @@ service cloud.firestore {
         && resource.data.organisationId != null
         && sameOrganisation(resource.data.organisationId);
 
-      allow create, update, delete: if isAuthenticated()
-        && isGlobalAdmin()
-        && request.resource.data.organisationId != null
-        && sameOrganisation(request.resource.data.organisationId);
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data))
+        && isAdmin();
+
+      allow update: if isAuthenticated()
+        && docOrgId(resource.data) != null
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data)
+        && isAdmin();
+
+      allow delete: if isAuthenticated() && isGlobalAdmin();
     }
 
     // =========
@@ -337,6 +385,189 @@ service cloud.firestore {
       allow update: if isAuthenticated()
         && sameOrganisation(docOrgId(resource.data))
         && docOrgId(request.resource.data) == docOrgId(resource.data);
+    }
+
+    // =========
+    // Care plans (structured + AI drafts) and version history
+    // =========
+    match /care_plans/{carePlanId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow create: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId);
+      allow update, delete: if isAuthenticated()
+        && sameOrganisation(resource.data.organisationId)
+        && request.resource.data.organisationId == resource.data.organisationId;
+    }
+
+    match /care_plan_versions/{versionId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow create: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId);
+      allow update, delete: if isAuthenticated()
+        && sameOrganisation(resource.data.organisationId)
+        && request.resource.data.organisationId == resource.data.organisationId;
+    }
+
+    match /carePlans/{carePlanId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow create: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId);
+      allow update, delete: if isAuthenticated()
+        && sameOrganisation(resource.data.organisationId)
+        && request.resource.data.organisationId == resource.data.organisationId;
+    }
+
+    // =========
+    // Compliance engine + governance (all queries filter by organisationId in app code)
+    // =========
+    match /compliance_scores/{scoreId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow create, update: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId);
+      allow delete: if false;
+    }
+
+    match /compliance_domains/{domainId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow create: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId)
+        && isAdmin();
+      allow update: if isAuthenticated()
+        && sameOrganisation(resource.data.organisationId)
+        && request.resource.data.organisationId == resource.data.organisationId;
+      allow delete: if false;
+    }
+
+    match /compliance_actions/{actionId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow create: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId);
+      allow update: if isAuthenticated()
+        && sameOrganisation(resource.data.organisationId)
+        && request.resource.data.organisationId == resource.data.organisationId;
+      allow delete: if false;
+    }
+
+    match /compliance_stats/{statsId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow create, update: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId);
+      allow delete: if false;
+    }
+
+    // =========
+    // Policies / evidence file metadata / per-domain counts (document module)
+    // =========
+    match /policies/{policyId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if isAuthenticated()
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data);
+      allow delete: if false;
+    }
+
+    match /evidence_documents/{evidenceDocId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if isAuthenticated()
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data);
+      allow delete: if false;
+    }
+
+    match /document_stats/{statId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow create, update: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId);
+      allow delete: if false;
+    }
+
+    // =========
+    // Notifications (in-app)
+    // =========
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow create: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId);
+      allow update: if isAuthenticated()
+        && sameOrganisation(resource.data.organisationId)
+        && request.resource.data.organisationId == resource.data.organisationId;
+      allow delete: if false;
+    }
+
+    // =========
+    // CQC scores + inspection simulations (dashboard)
+    // =========
+    match /cqcScores/{rowId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow create, update: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId);
+      allow delete: if false;
+    }
+
+    match /inspection_simulations/{simId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow create: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId);
+      allow update, delete: if false;
+    }
+
+    // =========
+    // Platform admin membership lookup (query: where userId == request.auth.uid)
+    // =========
+    match /platform_admins/{docId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    // =========
+    // Inspection workflow (sessions hold organisationId; responses link to session)
+    // =========
+    match /inspection_questions/{questionId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    match /inspection_sessions/{sessionId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow create: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId);
+      allow update: if isAuthenticated()
+        && sameOrganisation(resource.data.organisationId)
+        && request.resource.data.organisationId == resource.data.organisationId;
+      allow delete: if false;
+    }
+
+    match /inspection_responses/{responseId} {
+      allow read: if isAuthenticated()
+        && resource.data.sessionId != null
+        && sameOrganisation(inspectionSessionOrgId(resource.data.sessionId));
+      allow create: if isAuthenticated()
+        && request.resource.data.sessionId != null
+        && sameOrganisation(inspectionSessionOrgId(request.resource.data.sessionId));
+      allow update: if isAuthenticated()
+        && resource.data.sessionId != null
+        && request.resource.data.sessionId != null
+        && sameOrganisation(inspectionSessionOrgId(resource.data.sessionId))
+        && sameOrganisation(inspectionSessionOrgId(request.resource.data.sessionId));
+      allow delete: if false;
     }
 
     // =========

@@ -12,15 +12,14 @@ import {
 } from "./constants";
 import SidebarNavItem from "./SidebarNavItem";
 import { APP_CONFIG } from "../../config/appConfig";
-import { usePermissions } from "../../hooks/usePermissions";
 
 export default function Sidebar() {
   const { organisation, organisationId, isPlatformAdmin } = useOrganisation();
   const { isAllowed, isGlobalAdmin, isSuperAdmin } = useRole();
-  const permissions = usePermissions();
   const [collapsed, setCollapsed] = useState(false);
 
   const features = organisation?.features ?? null;
+  /** Match {@link FeatureGate}: module visibility is driven by org features, not duplicate UX-permission checks. */
   const isFeatureEnabled = (slug) => {
     if (!slug) return true;
     return features?.[slug] === true;
@@ -36,38 +35,16 @@ export default function Sidebar() {
     "/inspection-simulator": "inspection",
   };
 
-  const navPermissionRequirements = {
-    "/clinical-notes": "canWriteNotes",
-    "/care-plans": "canAccessMedication_OR_CARELOGS",
-    "/mdt": "canAccessMDT",
-    "/behaviour": "canAccessBehaviour",
-    "/compliance": "canAccessBehaviour",
-    "/reports": "canGenerateReports",
-    "/evidence-pack": "canGenerateReports",
-    "/inspection-simulation": "canGenerateReports",
-  };
-
-  const isNavItemPermitted = (itemPath) => {
-    const permKey = navPermissionRequirements[itemPath];
-    if (!permKey) return true;
-    if (permKey === "canAccessMedication_OR_CARELOGS") {
-      return Boolean(permissions?.canAccessMedication || permissions?.canAccessCareLogs);
-    }
-
-    // Safe fallback: if role missing, permissions object is empty => undefined => false.
-    return Boolean(permissions?.[permKey]);
-  };
-
   const visibleItems = useMemo(
     () =>
       NAV_ITEMS.filter((item) =>
         item.platformAdminOnly
           ? isPlatformAdmin
           : item.allowedRoles == null
-            ? isFeatureEnabled(navFeatureRequirements[item.path]) && isNavItemPermitted(item.path)
+            ? isFeatureEnabled(navFeatureRequirements[item.path])
             : (organisationId || isPlatformAdmin) && isAllowed(item.allowedRoles)
       ),
-    [isAllowed, isPlatformAdmin, organisationId, features, permissions]
+    [isAllowed, isPlatformAdmin, organisationId, features]
   );
 
   // DEBUG: force management nav (Users, etc.) — set back to role-based check after auth/RBAC verified.
