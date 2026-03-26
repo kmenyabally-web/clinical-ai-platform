@@ -18,7 +18,7 @@ export const NAV_ITEMS = [
   { path: "/incidents", label: "Incidents & Safeguarding", ariaLabel: "Incidents and safeguarding", icon: ShieldAlert, allowedRoles: undefined },
   { path: "/evidence-pack", label: "Evidence Pack", ariaLabel: "CQC evidence pack generator", allowedRoles: undefined },
   { path: "/inspection-simulation", label: "Inspection simulation", ariaLabel: "CQC inspection simulation", allowedRoles: undefined },
-  { path: "/reports", label: "Reports", ariaLabel: "CQC Readiness Report", allowedRoles: undefined },
+  { path: "/reports", label: "Reports", ariaLabel: "SanctumCare Clinical Report", allowedRoles: undefined },
   { path: "/notifications", label: "Notifications", ariaLabel: "Notifications and alerts", allowedRoles: undefined },
   { path: "/services", label: "Services", ariaLabel: "Manage services", allowedRoles: undefined },
   { path: "/billing", label: "Billing", ariaLabel: "Billing and subscription", allowedRoles: undefined },

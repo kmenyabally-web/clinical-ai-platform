@@ -26,8 +26,9 @@ export async function registerWithOrganisation(email, password, organisationName
   const organisationId = doc(collection(db, "organisations")).id;
   const name = organisationName.trim();
   const planKey = normalizePlanKey(options.planKey ?? PLANS.BASIC);
+  const organisationType = options.organisationType ?? options.type ?? "MENTAL_HEALTH";
 
-  await createOrganisation(organisationId, { name, status: "active", plan: planKey });
+  await createOrganisation(organisationId, { name, status: "active", plan: planKey, type: organisationType });
 
   await setDoc(doc(db, "users", uid), {
     orgId: organisationId,

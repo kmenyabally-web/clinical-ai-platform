@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import "./index.css";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider } from "./context/AuthContext";
 import { OrganisationProvider } from "./context/OrganisationContext";
@@ -11,6 +12,7 @@ import { initErrorMonitoring } from "./lib/errorMonitoring";
 import { runFirestoreTestWriteOnce } from "./services/firestoreTestWrite";
 
 initErrorMonitoring();
+console.log("🚀 SanctumCare System Loaded");
 if (import.meta.env.DEV) {
   runFirestoreTestWriteOnce();
 }

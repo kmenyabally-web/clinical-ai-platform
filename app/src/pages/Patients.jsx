@@ -15,6 +15,7 @@ function formatDate(value) {
 
 export default function Patients() {
   const { organisationId, organisation } = useOrganisation();
+  const { role } = useRole();
   const { currentServiceId, services } = useService();
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -53,7 +54,7 @@ export default function Patients() {
       : "All services";
 
   return (
-    <div style={{ padding: 40 }}>
+    <div style={styles.page}>
       <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
         <div>
           <h1 style={{ marginTop: 0 }}>Patients</h1>
@@ -76,7 +77,7 @@ export default function Patients() {
       />
 
       {error && (
-        <div role="alert" style={{ marginBottom: "1rem", padding: "1rem", background: "#fef2f2", borderRadius: 8, color: "#b91c1c" }}>
+        <div role="alert" style={styles.errorAlert}>
           {error}
         </div>
       )}
@@ -84,28 +85,27 @@ export default function Patients() {
       {loading && <p style={{ color: "#666" }}>Loading patients…</p>}
 
       {!loading && !error && patients.length === 0 && (
-        <p style={{ color: "#64748b", padding: "2rem", background: "#f8fafc", borderRadius: 12 }}>
-          No data available. Start by adding a patient with Add Patient.
-        </p>
+        <div style={styles.emptyState}>
+          <p style={{ marginTop: 0 }}>No patients yet.</p>
+          <button
+            type="button"
+            onClick={() => {
+              setShowCreateModal(true);
+              setCreateError(null);
+            }}
+            style={styles.emptyStateButton}
+          >
+            Create first patient
+          </button>
+        </div>
       )}
 
       {!loading && patients.length > 0 && (
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+        <ul style={styles.list}>
           {patients.map((p) => (
             <li
               key={p.id}
-              style={{
-                padding: "1rem 1.25rem",
-                marginBottom: 8,
-                background: "#fff",
-                border: "1px solid #e2e8f0",
-                borderRadius: 12,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                flexWrap: "wrap",
-                gap: 12,
-              }}
+              style={styles.listItem}
             >
               <div>
                 <strong style={{ fontSize: "1rem" }}>{p.name || "Unnamed patient"}</strong>
@@ -174,6 +174,56 @@ export default function Patients() {
     </div>
   );
 }
+
+const styles = {
+  page: {
+    maxWidth: 1080,
+    margin: "0 auto",
+    padding: 24,
+  },
+  errorAlert: {
+    marginBottom: "1rem",
+    padding: "1rem",
+    background: "#fef2f2",
+    borderRadius: 10,
+    border: "1px solid #fecaca",
+    color: "#b91c1c",
+  },
+  emptyState: {
+    color: "#64748b",
+    padding: "2rem",
+    background: "#f8fafc",
+    borderRadius: 12,
+    border: "1px solid #e2e8f0",
+  },
+  emptyStateButton: {
+    padding: "8px 16px",
+    borderRadius: 8,
+    border: "none",
+    background: "#005eb8",
+    color: "#fff",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  list: {
+    listStyle: "none",
+    padding: 0,
+    margin: 0,
+    border: "1px solid #e2e8f0",
+    borderRadius: 12,
+    overflow: "hidden",
+    background: "#ffffff",
+  },
+  listItem: {
+    padding: "1rem 1.25rem",
+    borderBottom: "1px solid #f1f5f9",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+};
 
 function CreatePatientModal({ organisationId, currentServiceId, services, onClose, onSubmit, loading, error }) {
   const [firstName, setFirstName] = useState("");

@@ -56,13 +56,24 @@ export async function getOrganisation(organisationId) {
  * @param {{ name: string, status?: string }} data
  * @returns {Promise<void>}
  */
-export async function createOrganisation(organisationId, data) {
-  if (!organisationId?.trim()) throw new Error("organisationId required");
+export async function createOrganisation(organisationIdOrData, maybeData) {
+  const data = typeof organisationIdOrData === "object" ? organisationIdOrData : maybeData;
+  const rawId = typeof organisationIdOrData === "string" ? organisationIdOrData : data?.organisationId;
   if (!data?.name?.trim()) throw new Error("Organisation name required");
+  const organisationId = (rawId ?? data?.name)
+    ?.toString()
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-");
+  if (!organisationId) throw new Error("organisationId required");
   const orgRef = doc(db, "organisations", organisationId);
   await setDoc(orgRef, {
     name: data.name.trim(),
+    organisationId,
+    plan: data.plan ?? "BASIC",
     status: data.status ?? "active",
+    active: data.active ?? true,
     createdAt: serverTimestamp(),
   });
+  return organisationId;
 }

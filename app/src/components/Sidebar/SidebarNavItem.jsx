@@ -31,20 +31,20 @@ export default function SidebarNavItem({ item, collapsed }) {
 
 const linkBase = {
   display: "block",
-  padding: "12px 16px",
-  borderRadius: "4px",
+  padding: "10px 12px",
+  borderRadius: "6px",
   textDecoration: "none",
-  fontSize: "14px",
-  fontWeight: 500,
+  fontSize: "13px",
+  fontWeight: 600,
   transition: "background-color 0.15s ease, color 0.15s ease",
   outline: "none",
 };
 const linkDefault = {
-  color: "#21303a",
+  color: "var(--text-muted)",
   backgroundColor: "transparent",
 };
 const linkActive = {
-  color: "#ffffff",
+  color: "var(--surface)",
   backgroundColor: NHS_BLUE,
 };
 

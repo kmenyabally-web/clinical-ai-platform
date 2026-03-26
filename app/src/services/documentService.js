@@ -117,7 +117,8 @@ export async function uploadDocument(organisationIdOrFile, payload, auditContext
 
     const ctx = await getUserContext();
     const claimsOrgId = ctx.organisationId;
-    const scopedOrgId = (claimsOrgId ?? "dev-org-001").toString().trim();
+    const scopedOrgId = (claimsOrgId ?? "").toString().trim() || null;
+    if (!scopedOrgId) throw new Error("organisationId required");
     const tenant = tenantFieldsFromContext({
       organisationId: scopedOrgId,
       hospitalId: ctx.hospitalId,

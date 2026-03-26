@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { listPatients } from "../services/patientService";
-import { fetchClinicalNotesForPatient, updateClinicalNoteAiOutputs } from "../services/noteService";
+import { fetchClinicalNotesForPatient } from "../services/noteService";
 import { generateClinicalReportSection } from "../services/aiService";
 import { useOrganisation } from "../context/OrganisationContext";
 import ActionBar from "../components/ActionBar";
@@ -25,6 +25,7 @@ const REPORT_TYPES = [
 
 export default function ClinicalAiReports() {
   const { organisationId, hasFeature } = useOrganisation();
+  const immutableClinicalRecords = true;
 
   const [patients, setPatients] = useState([]);
   const [patientsLoading, setPatientsLoading] = useState(true);
@@ -166,7 +167,7 @@ export default function ClinicalAiReports() {
         return;
       }
 
-      // Existing behaviour: CPA / Tribunal / MDT Review are generated and persisted to the latest note AI outputs.
+      // Clinical notes are immutable: generate preview output only.
       if (!latestNote?.id) throw new Error("No latest clinical note available for this patient.");
 
       const contextNotes = (notes ?? [])
@@ -189,8 +190,6 @@ export default function ClinicalAiReports() {
 
       const aiReportType =
         reportType === "CPA" ? "cpa" : reportType === "TRIBUNAL" ? "tribunal" : "mdtReview";
-      const reportKey = aiReportType;
-
       const section = await generateClinicalReportSection({
         reportType: aiReportType,
         patientId: selectedPatientId,
@@ -198,7 +197,6 @@ export default function ClinicalAiReports() {
         contextNotes,
       });
 
-      await updateClinicalNoteAiOutputs(latestNote.id, { [`reports.${reportKey}`]: section });
       if (reportType === "MDT") {
         // Persist the existing MDT Review core-flow, but render in MDT Ward Round-style grouping for consistency.
         const grouped = {};
@@ -213,7 +211,7 @@ export default function ClinicalAiReports() {
       } else {
         setReport(section);
       }
-      setLastGenerated({ reportType, noteId: latestNote.id, savedToNote: true });
+      setLastGenerated({ reportType, noteId: latestNote.id, savedToNote: false });
     } catch (e) {
       setReportError(e?.message ?? "Clinical report generation failed.");
     } finally {
@@ -324,6 +322,11 @@ export default function ClinicalAiReports() {
           {generating ? "Generating…" : "Generate report"}
         </button>
       </div>
+      {immutableClinicalRecords ? (
+        <div style={{ background: "#fffbeb", border: "1px solid #fde68a", padding: 12, borderRadius: 10, color: "#92400e", marginTop: 14, fontWeight: 800 }}>
+          This record cannot be edited. Add addendum instead.
+        </div>
+      ) : null}
 
       {patientsError ? (
         <div style={{ background: "#fef2f2", border: "1px solid #fecaca", padding: 12, borderRadius: 10, color: "#991b1b", marginTop: 14 }}>

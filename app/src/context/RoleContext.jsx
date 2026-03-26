@@ -36,7 +36,7 @@ export function RoleProvider({ children }) {
       .getIdTokenResult()
       .then((tr) => {
         if (cancelled) return;
-        const r = tr.claims?.role;
+        const r = tr.claims?.role || tr.claims?.claimRole;
         setClaimRole(typeof r === "string" && r.trim() ? r.trim() : null);
       })
       .catch(() => {
@@ -47,19 +47,23 @@ export function RoleProvider({ children }) {
     };
   }, [user]);
 
-  const role = useMemo(() => {
+  const roleState = useMemo(() => {
     const profile = userProfile;
+    const token = claimRole ? { claimRole } : null;
     const rawRole =
       profile?.role ||
       profile?.systemRole ||
-      claimRole ||
+      token?.claimRole ||
       "STAFF";
-    const finalRole = normalizeRole(String(rawRole)) ?? "Staff";
-    if (import.meta.env.DEV) {
-      console.log("Debug:", { role: finalRole });
-    }
-    return finalRole;
+    const role = String(rawRole).toUpperCase();
+    const isSuperAdmin = role === "SUPER_ADMIN";
+    const isGlobalAdmin = role === "SUPER_ADMIN" || profile?.isGlobalAdmin === true;
+    console.log("🔥 ROLE:", role, "GLOBAL:", isGlobalAdmin);
+    return { role, isGlobalAdmin, isSuperAdmin };
   }, [userProfile?.role, userProfile?.systemRole, claimRole]);
+  const role = normalizeRole(roleState.role) ?? roleState.role;
+  const isGlobalAdmin = roleState.isGlobalAdmin;
+  const isSuperAdmin = roleState.isSuperAdmin;
 
   const mdtRole = userProfile?.mdtRole ?? null;
 
@@ -69,6 +73,8 @@ export function RoleProvider({ children }) {
   const value = useMemo(
     () => ({
       role,
+      isGlobalAdmin,
+      isSuperAdmin,
       /** Clinical MDT label (Nurse, Psychologist, …). Not used for RBAC. */
       mdtRole,
       /** ADMIN | MANAGER | STAFF | INSPECTOR for display / analytics. */
@@ -91,7 +97,7 @@ export function RoleProvider({ children }) {
       canViewReports: () => canViewReportsFromSystemRole(role),
       isInspectorRole: () => isInspectorSystemRole(role),
     }),
-    [role, mdtRole, permissions, orgLoading, enterpriseRoleCode, organisationId, user]
+    [role, isGlobalAdmin, isSuperAdmin, mdtRole, permissions, orgLoading, enterpriseRoleCode, organisationId, user]
   );
 
   return (

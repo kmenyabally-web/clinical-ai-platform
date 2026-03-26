@@ -37,13 +37,18 @@ import Organisations from "./pages/management/Organisations";
 import Hospitals from "./pages/management/Hospitals";
 import Wards from "./pages/management/Wards";
 import Users from "./pages/management/Users";
-import CreateOrganisation from "./pages/CreateOrganisation";
+import CreateOrganisation from "./pages/setup/CreateOrganisation";
+import SystemOrganisations from "./pages/SystemOrganisations";
 import { MANAGEMENT_ALLOWED_ROLES } from "./config/routes";
+import LandingPage from "./pages/LandingPage";
+import FeatureGate from "./components/FeatureGate";
+import FeatureSettings from "./pages/FeatureSettings";
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
 
@@ -56,14 +61,9 @@ export default function App() {
           }
         />
 
-        <Route
-          path="/create-organisation"
-          element={
-            <ProtectedRoute>
-              <CreateOrganisation />
-            </ProtectedRoute>
-          }
-        />
+        <Route path="/setup/create-organisation" element={<CreateOrganisation />} />
+        <Route path="/system-admin/create-organisation" element={<CreateOrganisation />} />
+        <Route path="/create-organisation" element={<Navigate to="/setup/create-organisation" replace />} />
 
         <Route
           element={
@@ -72,7 +72,7 @@ export default function App() {
             </ProtectedRoute>
           }
         >
-          <Route path="/" element={<FirstSafeScreen />} />
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/organisation-dashboard" element={<OrganisationDashboard />} />
           <Route path="/reports" element={<ClinicalAiReports />} />
@@ -83,17 +83,77 @@ export default function App() {
           <Route path="/patients/:id/report-incident" element={<IncidentReportPage />} />
           <Route path="/incidents/new/:patientId" element={<IncidentFormPage />} />
           <Route path="/incidents" element={<Incidents />} />
-          <Route path="/clinical-notes" element={<ClinicalNotes />} />
-          <Route path="/behaviour" element={<BehaviourTracking />} />
-          <Route path="/mdt" element={<MdtReviews />} />
+          <Route
+            path="/clinical-notes"
+            element={
+              <FeatureGate feature="clinicalNotes">
+                <ClinicalNotes />
+              </FeatureGate>
+            }
+          />
+          <Route
+            path="/behaviour"
+            element={
+              <FeatureGate feature="risk">
+                <BehaviourTracking />
+              </FeatureGate>
+            }
+          />
+          <Route
+            path="/mdt"
+            element={
+              <FeatureGate feature="mdt">
+                <MdtReviews />
+              </FeatureGate>
+            }
+          />
           <Route path="/documents" element={<Documents />} />
-          <Route path="/care-plans" element={<CarePlans />} />
           <Route path="/staff-training" element={<StaffTraining />} />
-          <Route path="/compliance" element={<ComplianceOverview />} />
-          <Route path="/inspection-simulation" element={<InspectionSimulator />} />
-          <Route path="/inspection-simulator" element={<InspectionSimulator />} />
+          <Route
+            path="/care-plans"
+            element={
+              <FeatureGate feature="medication">
+                <CarePlans />
+              </FeatureGate>
+            }
+          />
+          <Route
+            path="/compliance"
+            element={
+              <FeatureGate feature="risk">
+                <ComplianceOverview />
+              </FeatureGate>
+            }
+          />
+          <Route
+            path="/inspection-simulation"
+            element={
+              <FeatureGate feature="inspection">
+                <InspectionSimulator />
+              </FeatureGate>
+            }
+          />
+          <Route
+            path="/inspection-simulator"
+            element={
+              <FeatureGate feature="inspection">
+                <InspectionSimulator />
+              </FeatureGate>
+            }
+          />
           <Route path="/audit-log" element={<AuditLog />} />
-          <Route path="/evidence-pack" element={<EvidencePack />} />
+          <Route
+            path="/evidence-pack"
+            element={
+              <FeatureGate feature="evidencePack">
+                <EvidencePack />
+              </FeatureGate>
+            }
+          />
+          <Route
+            path="/organisation/settings/features"
+            element={<FeatureSettings />}
+          />
           <Route
             path="/admin"
             element={
@@ -134,6 +194,7 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+          <Route path="/system-admin/organisations" element={<SystemOrganisations />} />
           <Route path="/management/organisation" element={<Navigate to="/management/organisations" replace />} />
         </Route>
 

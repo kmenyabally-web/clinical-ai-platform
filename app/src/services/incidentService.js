@@ -18,10 +18,21 @@ import { auth } from "../firebase";
 import { getUserContext } from "./authService";
 import { getPatientById } from "./patientService";
 import { logAuditEventNonBlocking } from "./auditService";
-import { assertTenantContext, tenantFieldsFromContext } from "../utils/tenantContext";
+import {
+  assertTenantContext,
+  tenantFieldsFromContext,
+  assertSameOrganisationData,
+  GENERIC_USER_ERROR_MESSAGE,
+} from "../utils/tenantContext";
 
 const INCIDENTS_COLLECTION = "incidents";
 const PATIENT_TIMELINE_COLLECTION = "patientTimeline";
+
+function assertRequiredWriteContext({ organisationId, hospitalId, userId }) {
+  if (!organisationId) throw new Error("Missing organisation");
+  if (!hospitalId) throw new Error("Missing hospital");
+  if (!userId) throw new Error("Missing user");
+}
 
 export const INCIDENT_TYPES = [
   "safeguarding",
@@ -64,9 +75,9 @@ export async function createIncidentLegacy({
   linkedEvidence = [],
   status = "open",
 }) {
-  if (!organisationId?.trim()) throw new Error("organisationId is required");
+  if (!organisationId?.trim()) throw new Error(GENERIC_USER_ERROR_MESSAGE);
   if (!serviceId?.trim()) throw new Error("serviceId is required");
-  if (!patientId?.trim()) throw new Error("patientId is required");
+  if (!patientId?.trim()) throw new Error(GENERIC_USER_ERROR_MESSAGE);
   if (!type?.trim()) throw new Error("type is required");
   if (!severity?.trim()) throw new Error("severity is required");
   if (!description?.trim()) throw new Error("description is required");
@@ -75,6 +86,11 @@ export async function createIncidentLegacy({
   const patient = await getPatientById(patientId.trim());
   const hospitalId = (patient.hospitalId && String(patient.hospitalId).trim()) || "";
   const wardId = (patient.wardId && String(patient.wardId).trim()) || "";
+  assertRequiredWriteContext({
+    organisationId,
+    hospitalId,
+    userId: auth.currentUser?.uid ?? reportedBy ?? null,
+  });
   assertTenantContext(organisationId, hospitalId);
 
   const incidentsRef = collection(db, INCIDENTS_COLLECTION);
@@ -161,7 +177,7 @@ export async function createIncidentLegacy({
  *
  * Implements the simplified Stage 6 incident creation required by the latest prompt:
  * - Writes to "incidents"
- * - Automatically attaches organisationId: "dev-org-001" (dev bypass)
+ * - Automatically attaches organisationId from user context
  * - createdAt: serverTimestamp()
  * - status: "open"
  * - Audits via logAuditEventNonBlocking
@@ -169,16 +185,23 @@ export async function createIncidentLegacy({
 export async function createIncident(incidentData) {
   const safePayload = incidentData && typeof incidentData === "object" ? incidentData : {};
   const ctx = await getUserContext();
+  const orgId = (ctx?.organisationId ?? "").toString().trim() || null;
+  if (!orgId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
   const tenant = tenantFieldsFromContext({
-    organisationId: "dev-org-001",
+    organisationId: orgId,
     hospitalId: ctx.hospitalId,
     wardId: ctx.wardId,
+  });
+  assertRequiredWriteContext({
+    organisationId: tenant.organisationId,
+    hospitalId: tenant.hospitalId,
+    userId: auth.currentUser?.uid ?? null,
   });
   assertTenantContext(tenant.organisationId, tenant.hospitalId);
 
   const incidentDoc = {
     ...safePayload,
-    organisationId: "dev-org-001",
+    organisationId: orgId,
     hospitalId: tenant.hospitalId,
     wardId: tenant.wardId,
     createdAt: serverTimestamp(),
@@ -225,9 +248,9 @@ export async function createIncidentReport({
   const { organisationId } = ctx;
   const reporterId = auth.currentUser?.uid || null;
 
-  if (!organisationId) throw new Error("Governance Error: organisationId is required.");
+  if (!organisationId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
   if (!reporterId) throw new Error("Governance Error: reporterId is required.");
-  if (!patientId?.trim()) throw new Error("patientId is required");
+  if (!patientId?.trim()) throw new Error(GENERIC_USER_ERROR_MESSAGE);
   if (!title?.trim()) throw new Error("title is required");
   if (!description?.trim()) throw new Error("description is required");
   if (!location?.trim()) throw new Error("location is required");
@@ -239,6 +262,11 @@ export async function createIncidentReport({
   const patient = await getPatientById(patientId.trim());
   const hospitalId = (patient.hospitalId && String(patient.hospitalId).trim()) || "";
   const wardId = (patient.wardId && String(patient.wardId).trim()) || "";
+  assertRequiredWriteContext({
+    organisationId,
+    hospitalId,
+    userId: reporterId,
+  });
   assertTenantContext(organisationId, hospitalId);
 
   const incidentsRef = collection(db, INCIDENTS_COLLECTION);
@@ -280,7 +308,7 @@ export async function createIncidentReport({
  */
 export async function fetchIncidentsForPatient(patientId, { limitCount = 20 } = {}) {
   const { organisationId } = await getUserContext();
-  if (!organisationId) throw new Error("Governance Error: organisationId is required.");
+  if (!organisationId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
   if (!patientId?.trim()) return [];
 
   // Validate tenant scope for this patient (organisation + hospital).
@@ -360,6 +388,7 @@ export async function fetchIncidents(organisationId, filters = {}) {
       linkedEvidence: Array.isArray(x.linkedEvidence) ? x.linkedEvidence : [],
     };
   });
+  mapped.forEach((row) => assertSameOrganisationData(row.organisationId, organisationId));
 
   // Hospital boundary enforcement for organisation-scoped incident listings.
   // Incidents themselves are scoped by organisationId only; we filter by the patient's hospitalId.

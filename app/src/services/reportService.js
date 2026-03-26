@@ -12,6 +12,7 @@ import { fetchDocumentCountsByDomain } from "./documentService";
 import { getSessionsForOrganisation } from "./inspectionService";
 import { getRiskLevel } from "./readinessService";
 import { logAuditEventNonBlocking, logAction } from "./auditService";
+import { getUserContext } from "./authService";
 import { CQC_DOCUMENT_DOMAINS } from "../config/documentDomains";
 import { DOMAIN_TO_STATS_FIELD } from "../config/documentDomains";
 
@@ -20,6 +21,12 @@ export { processClinicalNote };
 const DEDUCTION_OVERDUE = 3;
 const DEDUCTION_HIGH_SEVERITY = 5;
 const DEDUCTION_MISSING_EVIDENCE = 5;
+
+function assertRequiredWriteContext({ organisationId, hospitalId, userId }) {
+  if (!organisationId) throw new Error("Missing organisation");
+  if (!hospitalId) throw new Error("Missing hospital");
+  if (!userId) throw new Error("Missing user");
+}
 
 /**
  * Domain summary for report: name, score, readiness level.
@@ -99,7 +106,7 @@ export async function generateEvidenceSummary(organisationId) {
 }
 
 /**
- * Generate full CQC Readiness Report. Runs all data fetches in parallel for performance.
+ * Generate full SanctumCare clinical report. Runs all data fetches in parallel for performance.
  * Uses compliance_stats where possible. Logs REPORT_GENERATED on success.
  *
  * @param {string} organisationId
@@ -118,6 +125,12 @@ export async function generateEvidenceSummary(organisationId) {
  */
 export async function generateReadinessReport(organisationId, auditContext, options = {}) {
   if (!organisationId?.trim()) throw new Error("organisationId required");
+  const ctx = await getUserContext();
+  assertRequiredWriteContext({
+    organisationId: organisationId?.trim() || null,
+    hospitalId: ctx?.hospitalId ? String(ctx.hospitalId).trim() : null,
+    userId: auth.currentUser?.uid ?? auditContext?.userId ?? null,
+  });
   const { serviceId } = options;
 
   const [organisation, service, stats, domains, actions, evidenceCounts, sessions] = await Promise.all([
@@ -218,7 +231,7 @@ export async function generateReadinessReport(organisationId, auditContext, opti
       action: "REPORT_GENERATED",
       entityType: "REPORT",
       entityId: `readiness-${organisationId}-${Date.now()}`,
-      entityName: "CQC Readiness Report",
+      entityName: "SanctumCare Clinical Report",
       previousValue: null,
       newValue: { reportType: "readiness", readinessScore, riskLevel },
     });
@@ -251,6 +264,11 @@ async function getPatientNotes(patientId, organisationId, hospitalId) {
  * CPA report from aggregated notes (multi-section JSON via Gemini).
  */
 export async function generateCPAReport(patientId, context) {
+  assertRequiredWriteContext({
+    organisationId: context?.organisationId ? String(context.organisationId).trim() : null,
+    hospitalId: context?.hospitalId ? String(context.hospitalId).trim() : null,
+    userId: auth.currentUser?.uid ?? null,
+  });
   const combined = await getPatientNotes(
     patientId,
     context.organisationId,
@@ -286,6 +304,11 @@ mental_state, risk_assessment, progress, medication_issues, safeguarding, recomm
  * Tribunal report from aggregated notes (multi-section JSON via Gemini).
  */
 export async function generateTribunalReport(patientId, context) {
+  assertRequiredWriteContext({
+    organisationId: context?.organisationId ? String(context.organisationId).trim() : null,
+    hospitalId: context?.hospitalId ? String(context.hospitalId).trim() : null,
+    userId: auth.currentUser?.uid ?? null,
+  });
   const combined = await getPatientNotes(
     patientId,
     context.organisationId,

@@ -11,11 +11,52 @@ import {
   FOCUS_OUTLINE_OFFSET,
 } from "./constants";
 import SidebarNavItem from "./SidebarNavItem";
+import { APP_CONFIG } from "../../config/appConfig";
+import { usePermissions } from "../../hooks/usePermissions";
 
 export default function Sidebar() {
   const { organisation, organisationId, isPlatformAdmin } = useOrganisation();
-  const { isAllowed } = useRole();
+  const { isAllowed, isGlobalAdmin, isSuperAdmin } = useRole();
+  const permissions = usePermissions();
   const [collapsed, setCollapsed] = useState(false);
+
+  const features = organisation?.features ?? null;
+  const isFeatureEnabled = (slug) => {
+    if (!slug) return true;
+    return features?.[slug] === true;
+  };
+
+  const navFeatureRequirements = {
+    "/clinical-notes": "clinicalNotes",
+    "/care-plans": "medication",
+    "/mdt": "mdt",
+    "/behaviour": "risk",
+    "/compliance": "risk",
+    "/evidence-pack": "evidencePack",
+    "/inspection-simulator": "inspection",
+  };
+
+  const navPermissionRequirements = {
+    "/clinical-notes": "canWriteNotes",
+    "/care-plans": "canAccessMedication_OR_CARELOGS",
+    "/mdt": "canAccessMDT",
+    "/behaviour": "canAccessBehaviour",
+    "/compliance": "canAccessBehaviour",
+    "/reports": "canGenerateReports",
+    "/evidence-pack": "canGenerateReports",
+    "/inspection-simulation": "canGenerateReports",
+  };
+
+  const isNavItemPermitted = (itemPath) => {
+    const permKey = navPermissionRequirements[itemPath];
+    if (!permKey) return true;
+    if (permKey === "canAccessMedication_OR_CARELOGS") {
+      return Boolean(permissions?.canAccessMedication || permissions?.canAccessCareLogs);
+    }
+
+    // Safe fallback: if role missing, permissions object is empty => undefined => false.
+    return Boolean(permissions?.[permKey]);
+  };
 
   const visibleItems = useMemo(
     () =>
@@ -23,10 +64,10 @@ export default function Sidebar() {
         item.platformAdminOnly
           ? isPlatformAdmin
           : item.allowedRoles == null
-            ? true
+            ? isFeatureEnabled(navFeatureRequirements[item.path]) && isNavItemPermitted(item.path)
             : (organisationId || isPlatformAdmin) && isAllowed(item.allowedRoles)
       ),
-    [isAllowed, isPlatformAdmin, organisationId]
+    [isAllowed, isPlatformAdmin, organisationId, features, permissions]
   );
 
   // DEBUG: force management nav (Users, etc.) — set back to role-based check after auth/RBAC verified.
@@ -36,12 +77,15 @@ export default function Sidebar() {
     if (!showManagementSection) return [];
     return MANAGEMENT_NAV_ITEMS.filter((item) =>
       item.platformAdminOnly
-        ? isPlatformAdmin
+        ? isPlatformAdmin || isGlobalAdmin
         : item.allowedRoles == null
           ? true
-          : (organisationId || isPlatformAdmin) && isAllowed(item.allowedRoles)
+          : (
+              (organisationId || isPlatformAdmin) &&
+              (isAllowed(item.allowedRoles) || (isGlobalAdmin && !!organisationId))
+            )
     );
-  }, [isAllowed, isPlatformAdmin, organisationId, showManagementSection]);
+  }, [isAllowed, isPlatformAdmin, isGlobalAdmin, organisationId, showManagementSection]);
 
   const width = collapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH_EXPANDED;
   const toggleAriaLabel = collapsed ? "Expand sidebar" : "Collapse sidebar";
@@ -54,14 +98,14 @@ export default function Sidebar() {
           outline-offset: ${FOCUS_OUTLINE_OFFSET}px;
         }
         .sidebar-nav-link:not([aria-current]):hover {
-          background-color: #f0f4f8;
-          color: #21303a;
+          background-color: var(--surface-muted);
+          color: var(--text-primary);
         }
         .sidebar-toggle {
           transition: background-color 0.15s ease, border-color 0.15s ease;
         }
         .sidebar-toggle:hover {
-          background-color: #f0f4f8;
+          background-color: var(--surface-muted);
           border-color: ${NHS_BLUE};
         }
         .sidebar-toggle:focus-visible {
@@ -79,8 +123,17 @@ export default function Sidebar() {
         }}
       >
         <div style={header}>
-          <div style={brand(collapsed)}>
-            {collapsed ? "CQC" : (organisation?.name?.trim() || (isPlatformAdmin ? "Platform Admin" : "CQC Platform"))}
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+            <div style={brand(collapsed)}>
+              {collapsed
+                ? APP_CONFIG.name
+                : organisation?.name?.trim() || (isPlatformAdmin ? "Platform Admin" : APP_CONFIG.name)}
+            </div>
+            {!collapsed && !organisation?.name?.trim() && !isPlatformAdmin ? (
+              <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {APP_CONFIG.tagline}
+              </div>
+            ) : null}
           </div>
           <button
             type="button"
@@ -102,7 +155,7 @@ export default function Sidebar() {
               style={{
                 marginTop: 12,
                 paddingTop: 12,
-                borderTop: "1px solid #e8edf2",
+                borderTop: "1px solid var(--border)",
               }}
             >
               {!collapsed ? (
@@ -111,7 +164,7 @@ export default function Sidebar() {
                     fontSize: 11,
                     fontWeight: 800,
                     letterSpacing: "0.02em",
-                    color: "#64748b",
+                    color: "var(--text-muted)",
                     textTransform: "uppercase",
                     padding: "4px 8px 8px",
                   }}
@@ -126,6 +179,40 @@ export default function Sidebar() {
               ))}
             </div>
           ) : null}
+          {isSuperAdmin ? (
+            <div
+              style={{
+                marginTop: 12,
+                paddingTop: 12,
+                borderTop: "1px solid var(--border)",
+              }}
+            >
+              {!collapsed ? (
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 800,
+                    letterSpacing: "0.02em",
+                    color: "var(--text-muted)",
+                    textTransform: "uppercase",
+                    padding: "4px 8px 8px",
+                  }}
+                >
+                  SYSTEM
+                </div>
+              ) : (
+                <div style={{ height: 8 }} aria-hidden />
+              )}
+              <SidebarNavItem
+                item={{
+                  path: "/system-admin/organisations",
+                  label: "🌍 Manage Organisations",
+                  ariaLabel: "Manage Organisations",
+                }}
+                collapsed={collapsed}
+              />
+            </div>
+          ) : null}
         </nav>
       </aside>
     </>
@@ -133,8 +220,8 @@ export default function Sidebar() {
 }
 
 const sidebarRoot = {
-  backgroundColor: "#ffffff",
-  borderRight: "1px solid #e8edf2",
+  backgroundColor: "var(--surface)",
+  borderRight: "1px solid var(--border)",
   display: "flex",
   flexDirection: "column",
   flexShrink: 0,
@@ -148,14 +235,14 @@ const header = {
   justifyContent: "space-between",
   gap: "8px",
   padding: "16px 12px",
-  borderBottom: "1px solid #e8edf2",
+  borderBottom: "1px solid var(--border)",
   minHeight: "56px",
 };
 
 const brand = (collapsed) => ({
   color: NHS_BLUE,
-  fontWeight: 600,
-  fontSize: collapsed ? "12px" : "16px",
+  fontWeight: 700,
+  fontSize: collapsed ? "12px" : "15px",
   lineHeight: 1.3,
   overflow: "hidden",
   textOverflow: "ellipsis",
@@ -167,9 +254,9 @@ const toggleButton = {
   width: "36px",
   height: "36px",
   padding: 0,
-  border: "1px solid #d8dde5",
-  borderRadius: "4px",
-  backgroundColor: "#fff",
+  border: "1px solid var(--border)",
+  borderRadius: "6px",
+  backgroundColor: "var(--surface)",
   color: NHS_BLUE,
   fontSize: "16px",
   cursor: "pointer",

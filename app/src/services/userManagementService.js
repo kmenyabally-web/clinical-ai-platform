@@ -17,7 +17,7 @@ async function ensureAuthTokenForCallable() {
 import { getUserContext } from "./authService";
 import { isPlatformAdmin } from "./platformAdminService";
 import { hasPermission } from "../config/rbac";
-import { logAudit } from "./auditService";
+import { logAudit, logAuditEvent } from "./auditService";
 import { SYSTEM_ROLES } from "../constants/systemRoles";
 import { MDT_ROLES } from "../constants/mdtRoles";
 
@@ -95,6 +95,23 @@ export async function createOrganisationUserAccount(payload) {
   await logAudit("CREATE_USER", {
     userId: data.uid ?? data.userId ?? null,
     organisationId: payload?.organisationId ?? ctx.organisationId ?? null,
+  });
+  void logAuditEvent({
+    action: "CREATE_USER",
+    user: {
+      uid: auth.currentUser?.uid ?? null,
+      email: auth.currentUser?.email ?? null,
+      role: ctx?.role ?? null,
+    },
+    organisationId: payload?.organisationId ?? ctx.organisationId ?? null,
+    hospitalId: payload?.hospitalId ?? null,
+    wardId: payload?.wardId ?? null,
+    metadata: {
+      createdUserId: data.uid ?? data.userId ?? null,
+      createdUserEmail: payload?.email ?? null,
+      createdUserRole: payload?.role ?? null,
+      createdUserMdtRole: payload?.mdtRole ?? null,
+    },
   });
   return data;
 }

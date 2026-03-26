@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import "./index.css";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider } from "./context/AuthContext";
 import { OrganisationProvider } from "./context/OrganisationContext";
@@ -9,6 +10,7 @@ import { ServiceProvider } from "./context/ServiceContext";
 import { initErrorMonitoring } from "./lib/errorMonitoring";
 
 initErrorMonitoring();
+console.log("🚀 SanctumCare System Loaded");
 
 // Provider order: Auth → Organisation → Role → Service (needs org + user) → App.
 ReactDOM.createRoot(document.getElementById("root")).render(

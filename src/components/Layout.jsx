@@ -1,10 +1,17 @@
 import Sidebar from "./Sidebar";
 import Header from "./Header";
+import { useRole } from "../context/RoleContext";
+import { useLocation } from "react-router-dom";
 
 export default function Layout({ children }) {
+  const { role } = useRole();
+  const location = useLocation();
+  const isSuperAdmin = role === "SUPER_ADMIN";
+  const isSystemAdminRoute = location.pathname.includes("/system-admin");
+
   return (
     <div style={styles.app}>
-      <Sidebar />
+      <Sidebar isSuperAdmin={isSuperAdmin} showManagementMenu={!isSystemAdminRoute} />
       <div style={styles.main}>
         <Header />
         <div style={styles.content}>

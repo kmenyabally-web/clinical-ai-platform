@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { collection, getDocs, query, orderBy } from "firebase/firestore";
+import { collection, getDocs, query, orderBy, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { getUserContext } from "../services/authService";
 import { formatUkDateTime } from "../utils/dateFormat";
@@ -13,7 +13,6 @@ export default function AuditLog() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [forbidden, setForbidden] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -23,36 +22,44 @@ export default function AuditLog() {
         if (mounted) {
           setRows([]);
           setLoading(false);
-          setForbidden(false);
         }
         return;
       }
       setLoading(true);
       setError(null);
-      setForbidden(false);
       try {
         const { organisationId } = await getUserContext();
-        if (organisationId !== "dev-org-001") {
+        if (!organisationId) {
           if (mounted) {
-            setForbidden(true);
             setRows([]);
           }
           return;
         }
 
-        const q = query(
-          collection(db, "audit_logs"),
-          orderBy("timestamp", "desc")
-        );
-        const snapshot = await getDocs(q);
-        const docs = snapshot?.docs ?? [];
-
+        let docs = [];
+        try {
+          const q = query(
+            collection(db, "audit_logs"),
+            where("organisationId", "==", organisationId),
+            orderBy("createdAt", "desc")
+          );
+          const snapshot = await getDocs(q);
+          docs = snapshot?.docs ?? [];
+        } catch {
+          const q = query(
+            collection(db, "audit_logs"),
+            where("organisationId", "==", organisationId),
+            orderBy("timestamp", "desc")
+          );
+          const snapshot = await getDocs(q);
+          docs = snapshot?.docs ?? [];
+        }
         const list = docs.map((d) => {
           const x = d?.data?.() ?? {};
           return {
             id: d?.id ?? "",
-            timestamp: x.timestamp ?? null,
-            action: x.action ?? "",
+            timestamp: x.createdAt ?? x.timestamp ?? null,
+            action: x.action ?? x.eventType ?? "",
             userEmail: x.userEmail ?? x.user ?? "",
             metadata: x.metadata ?? {},
           };
@@ -73,7 +80,7 @@ export default function AuditLog() {
   }, [hasFeature]);
 
   if (orgLoading) {
-    return <div style={styles.text}>Loading…</div>;
+    return <div style={styles.pageText}>Loading…</div>;
   }
 
   if (!hasFeature("audit")) {
@@ -90,26 +97,17 @@ export default function AuditLog() {
     );
   }
 
-  if (forbidden) {
-    return (
-      <div style={styles.forbiddenBox}>
-        <h2 style={styles.forbiddenTitle}>403 – Governance Restricted</h2>
-        <p style={styles.forbiddenText}>
-          Access to the compliance audit log is limited to organisation dev-org-001.
-        </p>
-      </div>
-    );
-  }
-
   if (loading) {
-    return <div style={styles.text}>Loading audit log…</div>;
+    return <div style={styles.pageText}>Loading audit log…</div>;
   }
 
   if (error) {
     return (
       <div style={styles.errorBox}>
-        <div style={styles.errorTitle}>Failed to load audit log</div>
-        <div style={styles.errorText}>{error?.message || String(error)}</div>
+        <div style={styles.errorPanel}>
+          <div style={styles.errorTitle}>Failed to load audit log</div>
+          <div style={styles.errorText}>{error?.message || String(error)}</div>
+        </div>
       </div>
     );
   }
@@ -118,7 +116,7 @@ export default function AuditLog() {
     <div style={styles.container}>
       <h1 style={styles.title}>Compliance Audit Log</h1>
       <p style={styles.subtitle}>
-        Read-only view of key governance and clinical-support actions across dev-org-001.
+        Read-only view of key governance and clinical-support actions for your organisation.
       </p>
 
       <div style={styles.tableWrapper}>
@@ -221,9 +219,16 @@ function getBadgeStyle(action, metadata) {
 }
 
 const styles = {
+  pageText: {
+    maxWidth: 1100,
+    margin: "0 auto",
+    padding: "24px",
+    color: "#334155",
+  },
   container: {
     maxWidth: 1100,
     margin: "0 auto",
+    padding: "24px",
     fontFamily: "sans-serif",
   },
   title: {
@@ -242,6 +247,7 @@ const styles = {
     border: "1px solid #e2e8f0",
     overflow: "hidden",
     backgroundColor: "#ffffff",
+    boxShadow: "0 4px 14px rgba(15, 23, 42, 0.04)",
   },
   table: {
     width: "100%",
@@ -262,24 +268,29 @@ const styles = {
     color: "#0f172a",
     verticalAlign: "top",
   },
-  text: {
-    fontFamily: "sans-serif",
-    color: "#334155",
-  },
   errorBox: {
+    maxWidth: 1100,
+    margin: "0 auto",
+    marginTop: "8px",
+    padding: "24px",
+    fontFamily: "sans-serif",
+    boxSizing: "border-box",
+  },
+  errorTitle: {
+    fontWeight: 900,
+    marginBottom: 6,
+    color: "#7f1d1d",
+  },
+  errorText: {
+    fontSize: 13,
+    color: "#7f1d1d",
+  },
+  errorPanel: {
     padding: 14,
     borderRadius: 12,
     border: "1px solid #fecaca",
     backgroundColor: "#fef2f2",
     color: "#7f1d1d",
-    fontFamily: "sans-serif",
-  },
-  errorTitle: {
-    fontWeight: 900,
-    marginBottom: 4,
-  },
-  errorText: {
-    fontSize: 13,
   },
   forbiddenBox: {
     maxWidth: 640,

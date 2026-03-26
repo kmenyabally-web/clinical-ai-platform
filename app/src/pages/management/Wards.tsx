@@ -159,8 +159,15 @@ export default function Wards() {
 
   return (
     <div style={s.page}>
-      <h1 style={s.h1}>Wards</h1>
-      <p style={s.muted}>Wards belong to a hospital; organisation is stored for tenant isolation.</p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div>
+          <h1 style={s.h1}>Wards</h1>
+          <p style={s.muted}>Wards belong to a hospital; organisation is stored for tenant isolation.</p>
+        </div>
+        <button type="button" onClick={openWardModal} style={s.btnPrimary}>
+          + Add Ward
+        </button>
+      </div>
 
       <ActionBar
         actions={[
@@ -211,6 +218,13 @@ export default function Wards() {
 
       {loading ? (
         <p style={s.muted}>Loading…</p>
+      ) : rows.length === 0 ? (
+        <div>
+          <p style={s.muted}>No wards yet.</p>
+          <button type="button" onClick={openWardModal} style={s.btnPrimary}>
+            Create first ward
+          </button>
+        </div>
       ) : (
         <table style={s.table}>
           <thead>
@@ -232,13 +246,6 @@ export default function Wards() {
                 </td>
               </tr>
             ))}
-            {rows.length === 0 ? (
-              <tr>
-                <td style={s.td} colSpan={3}>
-                  No wards in this scope. Select organisation and hospital, then add a ward.
-                </td>
-              </tr>
-            ) : null}
           </tbody>
         </table>
       )}

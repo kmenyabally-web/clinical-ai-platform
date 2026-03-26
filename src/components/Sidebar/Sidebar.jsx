@@ -10,20 +10,30 @@ import {
   FOCUS_OUTLINE_OFFSET,
 } from "./constants";
 import SidebarNavItem from "./SidebarNavItem";
+import { APP_CONFIG } from "../../config/appConfig";
 
-export default function Sidebar() {
+export default function Sidebar({ isSuperAdmin: isSuperAdminProp = false, showManagementMenu = true }) {
   const { organisation, organisationId, isPlatformAdmin } = useOrganisation();
-  const { isAllowed } = useRole();
+  const { isAllowed, isSuperAdmin: isSuperAdminFromContext } = useRole();
   const [collapsed, setCollapsed] = useState(false);
+  const isSuperAdmin = isSuperAdminProp || isSuperAdminFromContext;
 
   const visibleItems = useMemo(
-    () =>
-      NAV_ITEMS.filter((item) =>
-        item.platformAdminOnly
-          ? isPlatformAdmin
-          : organisationId && isAllowed(item.allowedRoles)
-      ),
-    [isAllowed, isPlatformAdmin, organisationId]
+    () => {
+      if (isSuperAdmin) {
+        // Super admins get system-level access without tenant binding.
+        return NAV_ITEMS.filter((item) => item.platformAdminOnly || item.path === "/admin");
+      }
+
+      return NAV_ITEMS.filter((item) => {
+        if (item.platformAdminOnly) return isPlatformAdmin;
+        // Tenant-only menus should only appear when org is bound.
+        const tenantMenuLabels = new Set(["Hospitals", "Wards", "Users", "Patients"]);
+        if (tenantMenuLabels.has(item.label)) return Boolean(organisationId);
+        return organisationId && isAllowed(item.allowedRoles);
+      });
+    },
+    [isAllowed, isPlatformAdmin, organisationId, isSuperAdmin]
   );
 
   const width = collapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH_EXPANDED;
@@ -63,7 +73,9 @@ export default function Sidebar() {
       >
         <div style={header}>
           <div style={brand(collapsed)}>
-            {collapsed ? "CQC" : (organisation?.name?.trim() || (isPlatformAdmin ? "Platform Admin" : "CQC Platform"))}
+            {collapsed
+              ? APP_CONFIG.name
+              : organisation?.name?.trim() || (isPlatformAdmin ? "Platform Admin" : APP_CONFIG.name)}
           </div>
           <button
             type="button"
@@ -80,6 +92,48 @@ export default function Sidebar() {
           {(visibleItems ?? []).map((item, idx) => (
             item ? <SidebarNavItem key={item.path ?? idx} item={item} collapsed={collapsed} /> : null
           ))}
+          {isSuperAdmin && showManagementMenu ? (
+            <div
+              style={{
+                marginTop: 12,
+                paddingTop: 12,
+                borderTop: "1px solid #e8edf2",
+              }}
+            >
+              {!collapsed ? (
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 800,
+                    letterSpacing: "0.02em",
+                    color: "#64748b",
+                    textTransform: "uppercase",
+                    padding: "4px 8px 8px",
+                  }}
+                >
+                  System Admin
+                </div>
+              ) : (
+                <div style={{ height: 8 }} aria-hidden />
+              )}
+              <SidebarNavItem
+                item={{
+                  label: "Manage Organisations",
+                  path: "/system-admin/organisations",
+                  ariaLabel: "Manage organisations",
+                }}
+                collapsed={collapsed}
+              />
+              <SidebarNavItem
+                item={{
+                  label: "Create Organisation",
+                  path: "/system-admin/create-organisation",
+                  ariaLabel: "Create organisation",
+                }}
+                collapsed={collapsed}
+              />
+            </div>
+          ) : null}
         </nav>
       </aside>
     </>

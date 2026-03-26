@@ -130,8 +130,22 @@ export default function Users() {
 
   return (
     <div style={s.page}>
-      <h1 style={s.h1}>Users</h1>
-      <p style={s.muted}>Invite users and assign roles and hospital / ward scope.</p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div>
+          <h1 style={s.h1}>Users</h1>
+          <p style={s.muted}>Invite users and assign roles and hospital / ward scope.</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            if (!effectiveOrgId?.trim()) return;
+            setShowAddUser(true);
+          }}
+          style={s.btnPrimary}
+        >
+          + Add User
+        </button>
+      </div>
 
       <ActionBar
         actions={[
@@ -168,6 +182,20 @@ export default function Users() {
 
       {loading ? (
         <p style={s.muted}>Loading…</p>
+      ) : users.length === 0 ? (
+        <div>
+          <p style={s.muted}>No users in this organisation.</p>
+          <button
+            type="button"
+            onClick={() => {
+              if (!effectiveOrgId?.trim()) return;
+              setShowAddUser(true);
+            }}
+            style={s.btnPrimary}
+          >
+            Create first user
+          </button>
+        </div>
       ) : (
         <div style={{ overflowX: "auto" }}>
           <table style={s.table}>
@@ -194,7 +222,6 @@ export default function Users() {
               ))}
             </tbody>
           </table>
-          {users.length === 0 ? <p style={s.muted}>No users in this organisation.</p> : null}
         </div>
       )}
 

@@ -5,6 +5,8 @@ const RoleContext = createContext();
 
 export const RoleProvider = ({ children, profile }) => {
   const [role, setRole] = useState("STAFF");
+  const [isGlobalAdmin, setIsGlobalAdmin] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -28,20 +30,30 @@ export const RoleProvider = ({ children, profile }) => {
         const rawRole =
           profile?.role ||
           profile?.systemRole ||
-          token?.claims?.role ||
           token?.claims?.claimRole ||
+          token?.claims?.role ||
           "STAFF";
 
         const resolvedRole = String(rawRole).toUpperCase();
+        const resolvedIsGlobalAdmin =
+          resolvedRole === "SUPER_ADMIN" || profile?.isGlobalAdmin === true;
+        const resolvedIsSuperAdmin = resolvedRole === "SUPER_ADMIN";
+
+        console.log("🔥 ROLE:", resolvedRole, "GLOBAL:", resolvedIsGlobalAdmin);
+        console.log("🔥 SUPER ADMIN:", resolvedIsSuperAdmin);
 
         if (import.meta.env.DEV) {
           console.log("Debug:", { role: resolvedRole });
         }
 
         setRole(resolvedRole);
+        setIsGlobalAdmin(resolvedIsGlobalAdmin);
+        setIsSuperAdmin(resolvedIsSuperAdmin);
       } catch (error) {
         console.error("Role resolution error:", error);
         setRole("STAFF");
+        setIsGlobalAdmin(false);
+        setIsSuperAdmin(false);
       } finally {
         setLoading(false);
       }
@@ -51,7 +63,7 @@ export const RoleProvider = ({ children, profile }) => {
   }, [profile]);
 
   return (
-    <RoleContext.Provider value={{ role, loading }}>
+    <RoleContext.Provider value={{ role, isGlobalAdmin, isSuperAdmin, loading }}>
       {children}
     </RoleContext.Provider>
   );

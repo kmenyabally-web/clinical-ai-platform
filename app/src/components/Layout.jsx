@@ -2,20 +2,27 @@ import Sidebar from "./Sidebar";
 import Header from "./Header";
 import { useOrganisation } from "../context/OrganisationContext";
 import { useAuth } from "../context/AuthContext";
-import { Link, Outlet, useLocation } from "react-router-dom";
-import CreateOrganisation from "../pages/setup/CreateOrganisation";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import SystemStatus from "./SystemStatus";
+import { APP_CONFIG } from "../config/appConfig";
 
 export default function Layout() {
   const { user } = useAuth();
-  const { organisationId, hospitalId, isPlatformAdmin, loading, needsSetup } = useOrganisation();
+  const { organisationId, hospitalId, isPlatformAdmin, loading, userProfile } = useOrganisation();
   const location = useLocation();
+  const navigate = useNavigate();
+  const missingOrganisation = !loading && user && !organisationId;
 
   const showHospitalWarning = !loading && !!organisationId && !hospitalId && !isPlatformAdmin;
 
-  if (!loading && user && needsSetup) {
-    return <CreateOrganisation />;
-  }
+  const appName = APP_CONFIG?.name || "SanctumCare";
+  const appTagline = APP_CONFIG?.tagline || "Clinical Intelligence & Compliance Platform";
+  console.log("🔥 BRAND CHECK:", appName);
+
+  console.log("🧠 ORG STATE:", {
+    organisationId,
+    userProfile,
+  });
 
   return (
     <div style={layoutStyles.app}>
@@ -23,6 +30,31 @@ export default function Layout() {
       <div style={layoutStyles.main}>
         <Header />
         <div style={layoutStyles.content}>
+          <div style={layoutStyles.productHeader}>
+            <h1
+              style={{
+                fontWeight: 700,
+                fontSize: "22px",
+                letterSpacing: "-0.02em",
+                margin: 0,
+                color: "var(--text-primary)",
+              }}
+            >
+              {appName}
+            </h1>
+            <p
+              style={{
+                margin: "6px 0 0 0",
+                fontSize: "12px",
+                color: "var(--text-muted)",
+                fontWeight: 700,
+                letterSpacing: "0.01em",
+              }}
+            >
+              {appTagline}
+            </p>
+            {!APP_CONFIG?.name ? <h1>SanctumCare</h1> : null}
+          </div>
           <div style={layoutStyles.subNav} className="top-nav">
             <NavLink to="/" label="Home" active={location.pathname === "/"} />
             <NavLink
@@ -35,25 +67,89 @@ export default function Layout() {
               label="Patient List"
               active={location.pathname.startsWith("/patients")}
             />
+            {organisationId ? (
+              <Link
+                to="/organisation/settings/features"
+                style={{
+                  ...layoutStyles.link,
+                  padding: "8px 10px",
+                  fontSize: 12,
+                  fontWeight: 900,
+                }}
+              >
+                ⚙️ Feature Settings
+              </Link>
+            ) : null}
           </div>
+          {missingOrganisation ? (
+            <>
+              {console.warn("⚠️ Missing organisation — entering recovery mode")}
+              <div
+                style={{
+                  background: "var(--background)",
+                  color: "var(--text-muted)",
+                  padding: "12px",
+                  borderRadius: "6px",
+                  border: "1px solid var(--border)",
+                  marginBottom: "10px",
+                }}
+              >
+                ⚠️ No organisation assigned. You are in recovery mode.
+              </div>
+              <button
+                onClick={() => navigate("/system-admin/create-organisation")}
+                style={{
+                  background: "var(--primary)",
+                  color: "white",
+                  padding: "10px 16px",
+                  borderRadius: "6px",
+                  marginTop: "10px",
+                  marginBottom: "10px",
+                  border: "none",
+                  cursor: "pointer",
+                }}
+              >
+                ➕ Create Organisation
+              </button>
+            </>
+          ) : null}
           {showHospitalWarning ? (
             <div
               role="status"
               style={{
                 marginBottom: 12,
                 padding: "10px 14px",
-                borderRadius: 8,
-                border: "1px solid #fcd34d",
-                background: "#fffbeb",
-                color: "#92400e",
+                borderRadius: 6,
+                border: "1px solid var(--border)",
+                background: "var(--surface)",
+                color: "var(--text-muted)",
                 fontSize: "0.875rem",
               }}
             >
               <strong>No hospital assigned.</strong> Some features need a hospital — contact admin if
               required.
+              <div style={{ marginTop: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => navigate("/management/hospitals")}
+                  style={{
+                    background: "var(--primary)",
+                    color: "white",
+                    padding: "8px 12px",
+                    borderRadius: "6px",
+                    border: "none",
+                    cursor: "pointer",
+                  }}
+                >
+                  Create Hospital
+                </button>
+              </div>
             </div>
           ) : null}
           <Outlet />
+          <footer style={layoutStyles.footer}>
+            © {new Date().getFullYear()} {appName}. All rights reserved.
+          </footer>
         </div>
       </div>
       <SystemStatus />
@@ -79,7 +175,7 @@ const layoutStyles = {
   app: {
     display: "flex",
     height: "100vh",
-    backgroundColor: "#f5f7fa",
+    backgroundColor: "var(--background)",
   },
   main: {
     flex: 1,
@@ -87,8 +183,11 @@ const layoutStyles = {
     flexDirection: "column",
   },
   content: {
-    padding: "32px",
+    padding: "24px",
     overflowY: "auto",
+    maxWidth: 1100,
+    width: "100%",
+    margin: "0 auto",
   },
   subNav: {
     display: "flex",
@@ -99,15 +198,29 @@ const layoutStyles = {
   link: {
     display: "inline-block",
     padding: "8px 12px",
-    borderRadius: 10,
+    borderRadius: 6,
     textDecoration: "none",
-    fontWeight: 800,
-    fontSize: 13,
-    color: "#0f172a",
-    backgroundColor: "#ffffff",
-    border: "1px solid #e2e8f0",
+    fontWeight: 700,
+    fontSize: 12,
+    color: "var(--text-primary)",
+    backgroundColor: "var(--surface)",
+    border: "1px solid var(--border)",
   },
   linkActive: {
-    backgroundColor: "#e2e8f0",
+    backgroundColor: "var(--surface-muted)",
+    borderColor: "var(--border)",
+  },
+  productHeader: {
+    marginBottom: 12,
+    paddingBottom: 12,
+    borderBottom: "1px solid var(--border)",
+  },
+  productName: {},
+  productTagline: {},
+  footer: {
+    marginTop: 40,
+    paddingTop: 12,
+    fontSize: 12,
+    color: "var(--text-muted)",
   },
 };

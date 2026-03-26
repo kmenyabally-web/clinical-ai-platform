@@ -13,6 +13,7 @@
 
 import { auth } from "../firebase";
 import { getCurrentUserProfile } from "./organisation";
+import { GENERIC_USER_ERROR_MESSAGE } from "../utils/tenantContext";
 
 /**
  * getUserContext()
@@ -91,9 +92,8 @@ export async function getUserContext() {
   if (!wardId && profileWardId) wardId = profileWardId;
 
   if (!organisationId) {
-    throw new Error(
-      "Governance Context Missing: organisationId claim is required at Stage 2."
-    );
+    console.error("Governance context missing: organisationId");
+    throw new Error(GENERIC_USER_ERROR_MESSAGE);
   }
 
   return {

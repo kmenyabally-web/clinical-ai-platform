@@ -14,11 +14,22 @@ import {
 } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { getUserContext } from "./authService";
-import { logAuditEventNonBlocking, logAction, logAudit } from "./auditService";
+import { logAuditEventNonBlocking, logAction, logAudit, logAuditEvent } from "./auditService";
 import { addDocLogged } from "../utils/firestoreWrite";
 import { safeModeFields } from "../utils/safeMode";
+import {
+  GENERIC_USER_ERROR_MESSAGE,
+  requirePatientId,
+  assertSameOrganisationData,
+} from "../utils/tenantContext";
 
 const PATIENTS_COLLECTION = "patients";
+
+function assertRequiredWriteContext({ organisationId, hospitalId, userId }) {
+  if (!organisationId) throw new Error("Missing organisation");
+  if (!hospitalId) throw new Error("Missing hospital");
+  if (!userId) throw new Error("Missing user");
+}
 
 /**
  * @param {Record<string, unknown>} filters
@@ -29,9 +40,7 @@ const PATIENTS_COLLECTION = "patients";
 export async function listPatientMetadata(filters = {}) {
   const { organisationId, hospitalId: ctxHospitalId, wardId: ctxWardId } = await getUserContext();
 
-  if (!organisationId) {
-    throw new Error("Governance Error: organisationId is required for Stage 3.");
-  }
+  if (!organisationId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
 
   const hospitalId = filters.hospitalId != null ? String(filters.hospitalId).trim() : (ctxHospitalId != null ? String(ctxHospitalId).trim() : "");
   const wardId = filters.wardId != null ? String(filters.wardId).trim() : (ctxWardId != null ? String(ctxWardId).trim() : "");
@@ -148,9 +157,12 @@ export async function createPatient(params) {
       ? String(ctx.wardId).trim()
       : "";
 
-  if (!resolvedHospitalId) {
-    throw new Error("hospitalId is required to create a patient.");
-  }
+  if (!resolvedHospitalId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
+  assertRequiredWriteContext({
+    organisationId,
+    hospitalId: resolvedHospitalId,
+    userId: auth.currentUser?.uid ?? null,
+  });
 
   const firstName = (params.firstName ?? "").toString().trim();
   const lastName = (params.lastName ?? "").toString().trim();
@@ -192,6 +204,21 @@ export async function createPatient(params) {
     organisationId,
     patientId: docRef.id,
   });
+  void logAuditEvent({
+    action: "CREATE_PATIENT",
+    user: {
+      uid: auth.currentUser?.uid ?? null,
+      email: auth.currentUser?.email ?? null,
+    },
+    organisationId,
+    hospitalId: resolvedHospitalId,
+    wardId: resolvedWardId || null,
+    patientId: docRef.id,
+    metadata: {
+      name,
+      serviceId: patientPayload.serviceId ?? null,
+    },
+  });
 
   return { id: docRef.id };
 }
@@ -200,15 +227,10 @@ export async function createPatient(params) {
  * getPatientById(id)
  */
 export async function getPatientById(id) {
-  const patientId = (id ?? "").toString().trim();
-  if (!patientId) {
-    throw new Error("Patient id is required.");
-  }
+  const patientId = requirePatientId(id);
 
   const { organisationId, hospitalId: ctxHospitalId, wardId: ctxWardId } = await getUserContext();
-  if (!organisationId) {
-    throw new Error("Governance Error: organisationId is required.");
-  }
+  if (!organisationId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
 
   const ref = doc(db, PATIENTS_COLLECTION, patientId);
   const snap = await getDoc(ref);
@@ -221,11 +243,7 @@ export async function getPatientById(id) {
 
   const data = snap.data() || {};
 
-  if (data.organisationId && data.organisationId !== organisationId) {
-    const err = new Error("403 Forbidden: Governance Breach");
-    err.status = 403;
-    throw err;
-  }
+  if (data.organisationId) assertSameOrganisationData(data.organisationId, organisationId);
 
   if (ctxHospitalId && typeof data.hospitalId === "string" && data.hospitalId.trim() && data.hospitalId.trim() !== ctxHospitalId) {
     const err = new Error("403 Forbidden: hospital scope mismatch");

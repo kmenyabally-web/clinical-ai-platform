@@ -267,8 +267,8 @@ export default function Dashboard() {
       )}
 
       {!loading && !error && (
-        <section aria-label="CQC Readiness" style={{ marginTop: "1.5rem" }}>
-          <h2 style={{ fontSize: "1.1rem", marginBottom: "0.75rem" }}>CQC Readiness</h2>
+        <section aria-label="SanctumCare Clinical Report readiness" style={{ marginTop: "1.5rem" }}>
+          <h2 style={{ fontSize: "1.1rem", marginBottom: "0.75rem" }}>SanctumCare Readiness</h2>
           <p style={{ fontSize: "0.875rem", color: "#666", marginBottom: "0.75rem" }}>
             Based on uploaded evidence for the selected service. Each domain needs at least 3 documents for 100%.
           </p>
@@ -468,7 +468,7 @@ export default function Dashboard() {
             border: "1px solid #e0e0e0",
           }}
         >
-          <h2 style={{ fontSize: "1.1rem", marginTop: 0, marginBottom: "0.5rem" }}>CQC Readiness Report</h2>
+          <h2 style={{ fontSize: "1.1rem", marginTop: 0, marginBottom: "0.5rem" }}>SanctumCare Clinical Report</h2>
           <p style={{ margin: 0, color: "#555", fontSize: "0.875rem" }}>
             Generate or view a structured compliance report with organisation summary, domain scores, risk indicators, evidence coverage, and inspection simulation results.
           </p>

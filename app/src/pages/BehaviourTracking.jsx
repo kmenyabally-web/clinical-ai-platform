@@ -6,6 +6,7 @@ import PatientTimeline from "../components/PatientTimeline";
 import { fetchBehaviourForPatient } from "../services/behaviourService";
 import { useRole } from "../context/RoleContext";
 import { useOrganisation } from "../context/OrganisationContext";
+import { usePermissions } from "../hooks/usePermissions";
 
 function safeString(v) {
   return typeof v === "string" ? v : "";
@@ -14,6 +15,7 @@ function safeString(v) {
 export default function BehaviourTracking() {
   const { organisationId, hasFeature } = useOrganisation();
   const { isInspectorRole } = useRole();
+  const permissions = usePermissions();
 
   const [patients, setPatients] = useState([]);
   const [patientsLoading, setPatientsLoading] = useState(true);
@@ -101,6 +103,12 @@ export default function BehaviourTracking() {
   return (
     <div style={{ padding: "2rem", maxWidth: 980, margin: "0 auto", fontFamily: "sans-serif" }}>
       <h1 style={{ marginTop: 0 }}>Behaviour Tracking</h1>
+
+      {!permissions?.canAccessBehaviour ? (
+        <div style={{ background: "#fef2f2", border: "1px solid #fecaca", padding: "12px 14px", borderRadius: 10, color: "#991b1b", marginBottom: 14 }}>
+          Your role does not have access to behaviour tracking.
+        </div>
+      ) : null}
 
       {!organisationId ? (
         <div style={{ background: "#fef2f2", border: "1px solid #fecaca", padding: "12px 14px", borderRadius: 10, color: "#991b1b", marginBottom: 14 }}>

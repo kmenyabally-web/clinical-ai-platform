@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { productionLogger } from "../lib/productionLogger";
+import { APP_CONFIG } from "../config/appConfig";
 
 export default function Login() {
   const { user, login, loading } = useAuth();
@@ -51,7 +52,10 @@ export default function Login() {
 
   return (
     <div style={{ padding: "2rem", maxWidth: 420 }}>
-      <h1>Login</h1>
+      <h1>{APP_CONFIG.name}</h1>
+      <p style={{ marginTop: 6, marginBottom: 18, color: "var(--text-muted)", fontWeight: 700, fontSize: 13 }}>
+        Secure Clinical &amp; Compliance System
+      </p>
 
       {error && (
         <div

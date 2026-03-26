@@ -14,7 +14,7 @@ const cardStyle = {
 };
 
 /**
- * CQC Readiness Report page. Admin/Manager can generate; Staff/Auditor can view.
+ * SanctumCare Clinical Report page. Admin/Manager can generate; Staff/Auditor can view.
  */
 export default function Reports() {
   const { organisationId } = useOrganisation();
@@ -60,7 +60,7 @@ export default function Reports() {
     printWindow.document.write(`
       <!DOCTYPE html>
       <html>
-        <head><title>CQC Readiness Report</title>
+        <head><title>SanctumCare Clinical Report</title>
           <style>
             body { font-family: system-ui, sans-serif; padding: 1rem; max-width: 800px; margin: 0 auto; }
             h1 { font-size: 1.5rem; } h2 { font-size: 1.2rem; margin-top: 1.5rem; }
@@ -86,14 +86,14 @@ export default function Reports() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `cqc-readiness-report-${report.organisation?.id ?? "org"}-${report.generatedAt?.slice(0, 10) ?? "export"}.json`;
+    a.download = `sanctumcare-clinical-report-${report.organisation?.id ?? "org"}-${report.generatedAt?.slice(0, 10) ?? "export"}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }
 
   return (
     <div style={{ padding: "1rem 0" }}>
-      <h1 style={{ marginTop: 0 }}>CQC Readiness Report</h1>
+      <h1 style={{ marginTop: 0 }}>SanctumCare Clinical Report</h1>
 
       {error && (
         <p role="alert" style={{ color: "#c62828", marginBottom: "1rem" }}>
@@ -110,7 +110,7 @@ export default function Reports() {
       {canGenerate && !report && (
         <div style={cardStyle}>
           <p style={{ marginTop: 0 }}>
-            Generate a structured CQC Readiness Report with organisation summary, domain scores, risk indicators, evidence coverage, and latest inspection simulation results.
+            Generate a structured SanctumCare Clinical Report with organisation summary, domain scores, risk indicators, evidence coverage, and latest inspection simulation results.
           </p>
           <div style={{ marginBottom: "1rem" }}>
             <label style={{ marginRight: 8 }}>Scope:</label>

@@ -12,6 +12,53 @@ const AUDIT_LOGS_COLLECTION = "auditLogs";
 /** Lightweight action log collection (pre-flight observability). */
 const AUDIT_ACTIONS_COLLECTION = "audit_logs";
 
+function normalizeAuditPayload(input = {}) {
+  return {
+    action: input.action ?? input.eventType ?? "UNKNOWN",
+    user: input.user ?? null,
+    userId: input.userId ?? input.user?.uid ?? auth.currentUser?.uid ?? null,
+    userEmail: input.userEmail ?? input.user?.email ?? auth.currentUser?.email ?? null,
+    role: input.role ?? input.user?.role ?? null,
+    organisationId: input.organisationId ?? null,
+    hospitalId: input.hospitalId ?? null,
+    wardId: input.wardId ?? null,
+    patientId: input.patientId ?? null,
+    metadata: input.metadata && typeof input.metadata === "object" ? input.metadata : {},
+  };
+}
+
+/**
+ * Canonical audit writer (compliance events collection: `audit_logs`).
+ * Supports rich actor + tenant context payloads.
+ * @param {object} payload
+ */
+export async function writeAuditEvent(payload) {
+  const row = normalizeAuditPayload(payload);
+  try {
+    if (!row.action || !String(row.action).trim()) {
+      throw new Error("Missing audit action");
+    }
+    if (!row.organisationId || !String(row.organisationId).trim()) {
+      throw new Error("Missing audit organisationId");
+    }
+    await addDoc(collection(db, AUDIT_ACTIONS_COLLECTION), {
+      action: String(row.action),
+      userId: row.userId,
+      userEmail: row.userEmail,
+      role: row.role,
+      organisationId: row.organisationId ?? null,
+      hospitalId: row.hospitalId ?? null,
+      wardId: row.wardId ?? null,
+      patientId: row.patientId ?? null,
+      metadata: row.metadata,
+      createdAt: serverTimestamp(),
+      timestamp: serverTimestamp(),
+    });
+  } catch (err) {
+    console.error("Audit log failed:", err);
+  }
+}
+
 /**
  * Mandatory compliance-style audit row (Stage 10B).
  * @param {string} action
@@ -19,11 +66,20 @@ const AUDIT_ACTIONS_COLLECTION = "audit_logs";
  */
 export async function logAudit(action, metadata = {}) {
   try {
+    let organisationId = metadata.organisationId ?? null;
+    if (!organisationId) {
+      try {
+        const ctx = await getUserContext();
+        organisationId = ctx?.organisationId ?? null;
+      } catch {
+        organisationId = null;
+      }
+    }
     await addDoc(collection(db, AUDIT_ACTIONS_COLLECTION), {
       action,
       metadata,
       userId: metadata.userId ?? auth.currentUser?.uid ?? null,
-      organisationId: metadata.organisationId ?? null,
+      organisationId,
       timestamp: serverTimestamp(),
     });
   } catch (err) {
@@ -35,12 +91,23 @@ export async function logAudit(action, metadata = {}) {
  * @param {string} action
  * @param {string | null | undefined} userId
  */
-export async function logAction(action, userId) {
+export async function logAction(action, userId, organisationId = null) {
   try {
+    let resolvedOrg = organisationId;
+    if (!resolvedOrg) {
+      try {
+        const ctx = await getUserContext();
+        resolvedOrg = ctx?.organisationId ?? null;
+      } catch {
+        resolvedOrg = null;
+      }
+    }
     await addDoc(collection(db, AUDIT_ACTIONS_COLLECTION), {
       action,
       userId: userId ?? null,
+      organisationId: resolvedOrg,
       createdAt: serverTimestamp(),
+      timestamp: serverTimestamp(),
     });
   } catch (e) {
     console.warn("[audit] logAction failed:", e);
@@ -51,7 +118,27 @@ export async function logAction(action, userId) {
  * @param {string} eventType
  * @param {{ userId?: string | null, patientId?: string | null, organisationId?: string | null, metadata?: Record<string, unknown> | null }} [options]
  */
-export async function logAuditEvent(eventType, options = {}) {
+export async function logAuditEvent(eventTypeOrPayload, options = {}) {
+  // New shape: logAuditEvent({ action, user, organisationId, ... })
+  if (eventTypeOrPayload && typeof eventTypeOrPayload === "object" && !Array.isArray(eventTypeOrPayload)) {
+    const incoming = normalizeAuditPayload(eventTypeOrPayload);
+    let ctx = null;
+    if (!incoming.organisationId || !incoming.hospitalId || !incoming.wardId) {
+      try {
+        ctx = await getUserContext();
+      } catch {
+        ctx = null;
+      }
+    }
+    return writeAuditEvent({
+      ...incoming,
+      organisationId: incoming.organisationId ?? ctx?.organisationId ?? null,
+      hospitalId: incoming.hospitalId ?? ctx?.hospitalId ?? null,
+      wardId: incoming.wardId ?? ctx?.wardId ?? null,
+    });
+  }
+
+  const eventType = eventTypeOrPayload;
   const userId = options.userId ?? auth.currentUser?.uid ?? null;
   let organisationId = options.organisationId ?? null;
   let ctx = null;
@@ -85,10 +172,21 @@ export async function logAuditEvent(eventType, options = {}) {
     timestamp: serverTimestamp(),
   };
 
+  await writeAuditEvent({
+    action: String(eventType ?? "UNKNOWN"),
+    userId: payload.userId,
+    organisationId: payload.organisationId,
+    hospitalId: payload.hospitalId,
+    wardId: payload.wardId,
+    patientId: payload.patientId,
+    metadata: payload.metadata ?? {},
+  });
+
+  // Keep legacy collection for backward compatibility.
   try {
     await addDoc(collection(db, AUDIT_LOGS_COLLECTION), payload);
-  } catch (e) {
-    console.warn("[audit] logAuditEvent write failed:", e);
+  } catch {
+    /* non-fatal legacy sink */
   }
 }
 

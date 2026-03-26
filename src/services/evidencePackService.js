@@ -136,7 +136,7 @@ export async function generateBundle({ organisationId, patientId, patientDisplay
   ]);
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const packName = `CQC_Evidence_Pack_${safeName(patientDisplayName || pid)}_${timestamp}`;
+  const packName = `SanctumCare_Evidence_Pack_${safeName(patientDisplayName || pid)}_${timestamp}`;
   const zip = new JSZip();
 
   const carePlansFolder = zip.folder("Care_Plans");

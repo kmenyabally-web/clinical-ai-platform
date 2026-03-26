@@ -1,4 +1,6 @@
 import JSZip from "jszip";
+import { collection, getDocs, query, where } from "firebase/firestore";
+import { db } from "../firebase";
 import { fetchClinicalNotesForPatient } from "./noteService";
 import { listCarePlansForPatient } from "./carePlanManagementService";
 import { fetchDocuments } from "./documentService";
@@ -67,7 +69,8 @@ function carePlanToText(cp) {
 }
 
 /**
- * Build a ZIP blob for CQC inspection evidence: clinical notes, care plans (as .txt), and organisation documents (files).
+ * Build a ZIP blob for SanctumCare inspection evidence: clinical notes, care plans (as .txt),
+ * and organisation documents (files).
  */
 export async function buildEvidencePackZip({ organisationId, patientId, patientName }) {
   const org = (organisationId ?? "").trim();
@@ -77,7 +80,7 @@ export async function buildEvidencePackZip({ organisationId, patientId, patientN
 
   const dateStr = new Date().toISOString().slice(0, 10);
   const namePart = safeFilename(patientName || pid);
-  const root = `CQC_Evidence_Pack_${dateStr}_${namePart}`;
+  const root = `SanctumCare_Evidence_Pack_${dateStr}_${namePart}`;
 
   const zip = new JSZip();
 
@@ -90,7 +93,7 @@ export async function buildEvidencePackZip({ organisationId, patientId, patientN
   const documents = docResult?.documents ?? [];
 
   const readme = [
-    "CQC Evidence Pack — Inspection bundle",
+    "SanctumCare Evidence Pack — Inspection bundle",
     `Generated (UTC): ${new Date().toISOString()}`,
     `Organisation ID: ${org}`,
     `Patient ID: ${pid}`,
@@ -163,4 +166,29 @@ export async function buildEvidencePackZip({ organisationId, patientId, patientN
 
   const blob = await zip.generateAsync({ type: "blob" });
   return { blob, rootFolderName: root, counts: { notes: notes.length, carePlans: carePlans.length, documents: documents.length } };
+}
+
+/**
+ * Simple evidence pack payload for on-screen CQC export review.
+ */
+export async function generateEvidencePack({ organisationId }) {
+  const org = String(organisationId ?? "").trim();
+  if (!org) throw new Error("organisationId is required");
+
+  const [notesSnap, auditSnap, inspectionSnap] = await Promise.all([
+    getDocs(query(collection(db, "notes"), where("organisationId", "==", org))),
+    getDocs(query(collection(db, "audit_logs"), where("organisationId", "==", org))),
+    getDocs(query(collection(db, "inspection_reports"), where("organisationId", "==", org))),
+  ]);
+
+  const notes = (notesSnap?.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
+  const audits = (auditSnap?.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
+  const inspections = (inspectionSnap?.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
+
+  return {
+    summary: `Total notes: ${notes.length}, Audit events: ${audits.length}, Inspection reports: ${inspections.length}`,
+    notes,
+    audits,
+    inspections,
+  };
 }

@@ -29,12 +29,13 @@ export default function SystemStatus({ context: contextProp, role: roleProp }) {
         type="button"
         onClick={() => setOpen(!open)}
         style={{
-          background: "#111",
-          color: "#0f0",
-          border: "none",
+          background: "var(--surface)",
+          color: "var(--text-primary)",
+          border: "1px solid var(--border)",
           padding: "6px 10px",
           borderRadius: "6px",
           cursor: "pointer",
+          fontWeight: 600,
         }}
       >
         🧠 System
@@ -43,15 +44,14 @@ export default function SystemStatus({ context: contextProp, role: roleProp }) {
       {open ? (
         <div
           style={{
-            background: "#000",
-            color: "#0f0",
+            background: "var(--surface)",
+            color: "var(--text-primary)",
             padding: "10px",
             fontSize: "12px",
             marginTop: "5px",
             borderRadius: "6px",
-            opacity: 0.9,
             maxWidth: "220px",
-            boxShadow: "0 0 10px rgba(0,0,0,0.5)",
+            border: "1px solid var(--border)",
           }}
         >
           <div>

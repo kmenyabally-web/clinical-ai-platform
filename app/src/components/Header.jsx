@@ -12,7 +12,7 @@ export default function Header() {
   return (
     <div style={styles.header}>
       <div style={styles.orgRow}>
-        <span>
+        <span style={styles.orgText}>
           {`Organisation: ${organisation?.name?.trim() || "Unknown"}`}
         </span>
         <ServiceSwitcher />
@@ -27,7 +27,7 @@ export default function Header() {
               style={{
                 fontSize: 12,
                 fontWeight: 800,
-                color: "#0f172a",
+                color: "var(--text-primary)",
                 backgroundColor: "#e0f2fe",
                 border: "1px solid #7dd3fc",
                 padding: "2px 8px",
@@ -49,16 +49,18 @@ export default function Header() {
 
 const styles = {
   header: {
-    height: "64px",
-    backgroundColor: "#ffffff",
-    borderBottom: "1px solid #e0e0e0",
+    minHeight: "64px",
+    backgroundColor: "var(--surface)",
+    borderBottom: "1px solid var(--border)",
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: "0 24px",
+    padding: "10px 24px",
   },
-  org: {
-    fontWeight: 500,
+  orgText: {
+    fontWeight: 700,
+    color: "var(--text-primary)",
+    fontSize: 13,
   },
   orgRow: {
     display: "flex",
@@ -72,11 +74,13 @@ const styles = {
     gap: "16px",
   },
   button: {
-    padding: "6px 12px",
-    backgroundColor: "#005eb8",
+    padding: "8px 12px",
+    backgroundColor: "var(--primary)",
     color: "white",
     border: "none",
-    borderRadius: "4px",
+    borderRadius: "6px",
     cursor: "pointer",
+    fontWeight: 700,
+    fontSize: 12,
   },
 };

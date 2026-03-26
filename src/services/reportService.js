@@ -94,7 +94,7 @@ export async function generateEvidenceSummary(organisationId) {
 }
 
 /**
- * Generate full CQC Readiness Report. Runs all data fetches in parallel for performance.
+ * Generate full SanctumCare clinical report. Runs all data fetches in parallel for performance.
  * Uses compliance_stats where possible. Logs REPORT_GENERATED on success.
  *
  * @param {string} organisationId
@@ -213,7 +213,7 @@ export async function generateReadinessReport(organisationId, auditContext, opti
       action: "REPORT_GENERATED",
       entityType: "REPORT",
       entityId: `readiness-${organisationId}-${Date.now()}`,
-      entityName: "CQC Readiness Report",
+      entityName: "SanctumCare Clinical Report",
       previousValue: null,
       newValue: { reportType: "readiness", readinessScore, riskLevel },
     });

@@ -6,6 +6,16 @@ const GEMINI_MODEL =
   (import.meta.env.VITE_GEMINI_MODEL && String(import.meta.env.VITE_GEMINI_MODEL).trim()) ||
   "gemini-2.5-flash";
 
+function isUncertain(text) {
+  const t = String(text ?? "").toLowerCase();
+  return (
+    t.includes("not sure") ||
+    t.includes("unsure") ||
+    t.includes("insufficient information") ||
+    t.includes("cannot determine")
+  );
+}
+
 function requireApiKey() {
   const key = import.meta.env.VITE_GEMINI_API_KEY;
   if (!key || typeof key !== "string" || !key.trim()) {
@@ -55,7 +65,7 @@ export async function generateClinicalCarePlan(details) {
     const result = await model.generateContent(prompt);
 
     const text = result?.response?.text?.() ?? "";
-    if (!text.trim()) {
+    if (!text.trim() || isUncertain(text)) {
       return null;
     }
     return text.trim();
@@ -137,7 +147,7 @@ export async function generateInspectorChallenge(data) {
     const prompt = buildInspectorPrompt(data);
     const result = await model.generateContent(prompt);
     const text = result?.response?.text?.() ?? "";
-    if (!text.trim()) {
+    if (!text.trim() || isUncertain(text)) {
       return null;
     }
     return text.trim();
@@ -194,7 +204,7 @@ export async function generateInspectorAuditFeedback(data, managerResponse) {
     const prompt = buildInspectorAuditPrompt(data, managerResponse);
     const result = await model.generateContent(prompt);
     const text = result?.response?.text?.() ?? "";
-    if (!text.trim()) {
+    if (!text.trim() || isUncertain(text)) {
       return null;
     }
     return text.trim();
@@ -261,7 +271,7 @@ export async function generateCandourLetter(incidentData, patientData) {
     const prompt = buildCandourLetterPrompt(incidentData, patientData);
     const result = await model.generateContent(prompt);
     const text = result?.response?.text?.() ?? "";
-    if (!text.trim()) {
+    if (!text.trim() || isUncertain(text)) {
       return null;
     }
     return text.trim();

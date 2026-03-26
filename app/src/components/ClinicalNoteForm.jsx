@@ -1,6 +1,6 @@
 /** [ENABLEMENT GATE: STAGE 11 - CLINICAL NOTES SYSTEM] */
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 const MOODS = [
   { value: "😊", label: "Good" },
@@ -11,6 +11,11 @@ const MOODS = [
 export default function ClinicalNoteForm({ onSubmit, loading = false }) {
   const [content, setContent] = useState("");
   const [mood, setMood] = useState("😐");
+  const textareaRef = useRef(null);
+
+  useEffect(() => {
+    textareaRef.current?.focus();
+  }, []);
 
   function handleSubmit(e) {
     e.preventDefault();
@@ -18,6 +23,7 @@ export default function ClinicalNoteForm({ onSubmit, loading = false }) {
     onSubmit({ content: content.trim(), mood });
     setContent("");
     setMood("😐");
+    textareaRef.current?.focus();
   }
 
   return (
@@ -27,8 +33,17 @@ export default function ClinicalNoteForm({ onSubmit, loading = false }) {
           Quick update *
         </label>
         <textarea
+          ref={textareaRef}
           value={content}
           onChange={(e) => setContent(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && e.ctrlKey) {
+              e.preventDefault();
+              if (!loading && content.trim()) {
+                handleSubmit(e);
+              }
+            }
+          }}
           rows={8}
           required
           placeholder="Type a brief clinical note update…"

@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
+import { useRole } from "../context/RoleContext";
+import { useNavigate } from "react-router-dom";
 import {
   getPlatformStats,
   listOrganisationsWithDetails,
@@ -75,6 +77,8 @@ function BarChart({ data, title, maxBars = 12 }) {
 
 export default function AdminPanel() {
   const { user } = useAuth();
+  const { isSuperAdmin } = useRole();
+  const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [orgs, setOrgs] = useState([]);
   const [metrics, setMetrics] = useState(null);
@@ -232,14 +236,25 @@ export default function AdminPanel() {
       <div style={cardStyle}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
           <h2 style={{ margin: 0, fontSize: "1.2rem" }}>Organisations</h2>
-          <button
-            type="button"
-            onClick={refresh}
-            disabled={!!actionLoading}
-            style={{ padding: "6px 12px", border: "1px solid #ccc", borderRadius: 6, background: "#fff", cursor: "pointer" }}
-          >
-            Refresh
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            {isSuperAdmin ? (
+              <button
+                type="button"
+                onClick={() => navigate("/system-admin/create-organisation")}
+                style={{ padding: "6px 12px", border: "1px solid #ccc", borderRadius: 6, background: "#fff", cursor: "pointer" }}
+              >
+                + Create Organisation
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={refresh}
+              disabled={!!actionLoading}
+              style={{ padding: "6px 12px", border: "1px solid #ccc", borderRadius: 6, background: "#fff", cursor: "pointer" }}
+            >
+              Refresh
+            </button>
+          </div>
         </div>
         <div style={{ overflowX: "auto" }}>
           <table style={tableStyle}>

@@ -96,8 +96,15 @@ export default function Hospitals() {
 
   return (
     <div style={s.page}>
-      <h1 style={s.h1}>Hospitals</h1>
-      <p style={s.muted}>Register hospitals and scope them to an organisation.</p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div>
+          <h1 style={s.h1}>Hospitals</h1>
+          <p style={s.muted}>Register hospitals and scope them to an organisation.</p>
+        </div>
+        <button type="button" onClick={openHospitalModal} style={s.btnPrimary}>
+          + Add Hospital
+        </button>
+      </div>
 
       <ActionBar
         actions={[
@@ -144,6 +151,13 @@ export default function Hospitals() {
 
       {loading ? (
         <p style={s.muted}>Loading…</p>
+      ) : rows.length === 0 ? (
+        <div>
+          <p style={s.muted}>No hospitals yet.</p>
+          <button type="button" onClick={openHospitalModal} style={s.btnPrimary}>
+            Create first hospital
+          </button>
+        </div>
       ) : (
         <table style={s.table}>
           <thead>
@@ -161,13 +175,6 @@ export default function Hospitals() {
                 </td>
               </tr>
             ))}
-            {rows.length === 0 ? (
-              <tr>
-                <td style={s.td} colSpan={2}>
-                  No hospitals yet. Add a hospital for this organisation.
-                </td>
-              </tr>
-            ) : null}
           </tbody>
         </table>
       )}

@@ -4,10 +4,40 @@
  */
 export const TENANT_UNSCOPED_HOSPITAL = "__tenant_unscoped__";
 export const TENANT_UNSCOPED_WARD = "__tenant_unscoped__";
+export const GENERIC_USER_ERROR_MESSAGE = "Something went wrong. Please try again.";
 
 export function assertTenantContext(organisationId, hospitalId) {
   if (!organisationId || !hospitalId) {
-    throw new Error("Missing tenant context");
+    throw new Error(GENERIC_USER_ERROR_MESSAGE);
+  }
+}
+
+export function requireOrganisationId(organisationId) {
+  if (!organisationId || !String(organisationId).trim()) {
+    throw new Error(GENERIC_USER_ERROR_MESSAGE);
+  }
+  return String(organisationId).trim();
+}
+
+export function requireHospitalId(hospitalId) {
+  if (!hospitalId || !String(hospitalId).trim()) {
+    throw new Error(GENERIC_USER_ERROR_MESSAGE);
+  }
+  return String(hospitalId).trim();
+}
+
+export function requirePatientId(patientId) {
+  if (!patientId || !String(patientId).trim()) {
+    throw new Error(GENERIC_USER_ERROR_MESSAGE);
+  }
+  return String(patientId).trim();
+}
+
+export function assertSameOrganisationData(dataOrganisationId, userOrganisationId) {
+  const dataOrg = (dataOrganisationId ?? "").toString().trim();
+  const userOrg = (userOrganisationId ?? "").toString().trim();
+  if (!dataOrg || !userOrg || dataOrg !== userOrg) {
+    throw new Error(GENERIC_USER_ERROR_MESSAGE);
   }
 }
 

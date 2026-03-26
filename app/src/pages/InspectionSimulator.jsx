@@ -3,15 +3,18 @@ import { useOrganisation } from "../context/OrganisationContext";
 import { useService } from "../context/ServiceContext";
 import { fetchIncidents } from "../services/incidentService";
 import { listCarePlans } from "../services/carePlanManagementService";
+import { runInspection } from "../services/cqcEngine";
 import {
   generateInspectorChallenge,
   generateInspectorAuditFeedback,
 } from "../services/aiService";
 
 export default function InspectionSimulator() {
-  const { organisationId } = useOrganisation();
+  const { organisationId, hospitalId } = useOrganisation();
   const { currentServiceId } = useService();
   const [inspectionData, setInspectionData] = useState({ incidents: [], carePlans: [] });
+  const [report, setReport] = useState(null);
+  const [runningInspection, setRunningInspection] = useState(false);
   const [managerResponse, setManagerResponse] = useState("");
   const [auditFeedback, setAuditFeedback] = useState("");
   const [messages, setMessages] = useState([
@@ -89,6 +92,23 @@ export default function InspectionSimulator() {
     }
   }
 
+  async function handleRunInspection() {
+    if (!organisationId) {
+      setError("Organisation context missing.");
+      return;
+    }
+    setError("");
+    setRunningInspection(true);
+    try {
+      const result = await runInspection({ organisationId, hospitalId: hospitalId ?? null });
+      setReport(result);
+    } catch (e) {
+      setError(e?.message ?? "Inspection run failed.");
+    } finally {
+      setRunningInspection(false);
+    }
+  }
+
   return (
     <div style={{ padding: "2rem", maxWidth: 960 }}>
       <h1 style={{ marginTop: 0, marginBottom: "0.25rem" }}>AI Inspection Simulator</h1>
@@ -112,6 +132,24 @@ export default function InspectionSimulator() {
         }}
       >
         {loading ? "Generating challenge..." : "Start Mock Inspection"}
+      </button>
+      <button
+        type="button"
+        onClick={handleRunInspection}
+        disabled={runningInspection}
+        style={{
+          padding: "10px 16px",
+          borderRadius: 8,
+          border: "1px solid #005eb8",
+          background: "#ffffff",
+          color: "#005eb8",
+          fontWeight: 700,
+          cursor: runningInspection ? "default" : "pointer",
+          marginBottom: 12,
+          marginLeft: 8,
+        }}
+      >
+        {runningInspection ? "Running inspection..." : "Run Inspection"}
       </button>
 
       {error ? (
@@ -231,6 +269,33 @@ export default function InspectionSimulator() {
           <pre style={{ margin: 0, whiteSpace: "pre-wrap", color: "#0f172a", fontFamily: "inherit" }}>
             {auditFeedback}
           </pre>
+        </section>
+      ) : null}
+
+      {report ? (
+        <section
+          aria-label="Inspection result"
+          style={{
+            marginTop: 12,
+            background: "#fff",
+            border: "1px solid #e2e8f0",
+            borderRadius: 12,
+            padding: "1rem",
+          }}
+        >
+          <h2 style={{ marginTop: 0 }}>Inspection Result</h2>
+          <p style={{ margin: "4px 0" }}>Score: <strong>{report.score}</strong></p>
+          <p style={{ margin: "4px 0" }}>Rating: <strong>{report.rating}</strong></p>
+
+          <h3 style={{ marginBottom: 6 }}>Risks</h3>
+          {(report.risks ?? []).map((r) => (
+            <div key={r}>- {r}</div>
+          ))}
+
+          <h3 style={{ marginBottom: 6, marginTop: 12 }}>Recommendations</h3>
+          {(report.recommendations ?? []).map((r) => (
+            <div key={r}>- {r}</div>
+          ))}
         </section>
       ) : null}
     </div>

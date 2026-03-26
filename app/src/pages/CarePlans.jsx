@@ -126,7 +126,8 @@ export default function CarePlans() {
     setRecentError(null);
     try {
       const claims = await getUserContext().catch(() => ({}));
-      const org = (organisationContextId || claims?.organisationId || "dev-org-001").toString();
+      const org = (organisationContextId || claims?.organisationId || null)?.toString() ?? "";
+      if (!org) throw new Error("organisationId required");
       const list = await listAiCarePlanDraftsForPatient(org, selectedPatientId);
       setRecentPlans(Array.isArray(list) ? list : []);
     } catch (err) {
@@ -165,7 +166,8 @@ export default function CarePlans() {
     setTrainingError(null);
     try {
       const claims = await getUserContext().catch(() => ({}));
-      const org = (organisationContextId || claims?.organisationId || "dev-org-001").toString();
+      const org = (organisationContextId || claims?.organisationId || null)?.toString() ?? "";
+      if (!org) throw new Error("organisationId required");
       setActiveOrganisationId(org);
       const q = query(collection(db, "staff_training"), where("organisationId", "==", org));
       const snap = await getDocs(q);
@@ -256,7 +258,8 @@ export default function CarePlans() {
       setCompetencyWarning(null);
       try {
         const claims = await getUserContext().catch(() => ({}));
-        const org = (organisationContextId || claims?.organisationId || "dev-org-001").toString();
+        const org = (organisationContextId || claims?.organisationId || null)?.toString() ?? "";
+        if (!org) throw new Error("organisationId required");
         const trainingRows = await listStaffTraining(org, currentServiceId ?? null);
         const validCounts = countValidStaffByTraining(trainingRows);
         const patientName = selectedPatient
@@ -328,7 +331,8 @@ export default function CarePlans() {
     setSaveLoading(true);
     try {
       const claims = await getUserContext().catch(() => ({}));
-      const org = (organisationContextId || claims?.organisationId || "dev-org-001").toString();
+      const org = (organisationContextId || claims?.organisationId || null)?.toString() ?? "";
+      if (!org) throw new Error("organisationId required");
       await saveAiCarePlanDraft({
         patientId: selectedPatient.id,
         content: generatedPlan,
@@ -344,7 +348,7 @@ export default function CarePlans() {
   }
 
   return (
-    <div style={{ padding: "2rem", maxWidth: 1040, margin: "0 auto" }}>
+    <div style={{ padding: "24px", maxWidth: 1080, margin: "0 auto" }}>
       <style>{`
         @keyframes cqcSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
@@ -362,7 +366,7 @@ export default function CarePlans() {
       >
         <div>
           <h1 style={{ margin: 0, marginBottom: "0.25rem" }}>AI Care Plan Generator</h1>
-          <p style={{ margin: 0, color: "#555", fontSize: "0.9rem" }}>
+          <p style={{ margin: 0, color: "#64748b", fontSize: "0.9rem" }}>
             Generate a Regulation 9 compliant draft for clinician review.
           </p>
           <p style={{ margin: "0.35rem 0 0 0", color: "#777", fontSize: "0.85rem" }}>

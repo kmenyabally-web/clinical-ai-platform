@@ -66,7 +66,7 @@ export default function FirstSafeScreen() {
   if (!isAuthenticated) {
     return (
       <View style={styles.container}>
-        <Text style={styles.title}>Digital CQC Readiness Environment</Text>
+        <Text style={styles.title}>SanctumCare Clinical Readiness Environment</Text>
         <Text style={styles.detailText}>You are not currently signed in.</Text>
         <Text style={styles.footer}>
           System Operating under Stage 2 Governance: Non-Clinical Metadata Read
@@ -79,7 +79,7 @@ export default function FirstSafeScreen() {
   // Success state: authenticated, governance context verified
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Digital CQC Readiness Environment</Text>
+      <Text style={styles.title}>SanctumCare Clinical Readiness Environment</Text>
       <View style={styles.card}>
         <Text style={styles.label}>User Email</Text>
         <Text style={styles.value}>{userEmail}</Text>

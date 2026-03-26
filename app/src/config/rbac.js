@@ -15,6 +15,8 @@ export const ROLE_PERMISSIONS = {
 
 const ROLE_ALIASES = {
   ADMIN: "Admin",
+  SUPER_ADMIN: "Admin",
+  GLOBAL_ADMIN: "Admin",
   STAFF: "Staff",
   staff: "Staff",
   admin: "Admin",
@@ -41,7 +43,10 @@ export function normalizeRole(role) {
   if (role == null || typeof role !== "string") return null;
   const t = role.trim();
   if (!t) return null;
-  const mapped = ROLE_ALIASES[t] ?? (Object.prototype.hasOwnProperty.call(ROLE_PERMISSIONS, t) ? t : null);
+  const mapped =
+    ROLE_ALIASES[t] ??
+    ROLE_ALIASES[t.toUpperCase()] ??
+    (Object.prototype.hasOwnProperty.call(ROLE_PERMISSIONS, t) ? t : null);
   if (mapped === "Auditor") return "Inspector";
   return mapped;
 }

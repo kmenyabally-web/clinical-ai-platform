@@ -180,18 +180,18 @@ export default function Incidents() {
   }
 
   return (
-    <div style={{ padding: "2rem" }}>
+    <div style={{ padding: "24px", maxWidth: 1120, margin: "0 auto" }}>
       <div
         className="page-header"
         style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: "1.5rem" }}
       >
         <div>
           <h1 style={{ margin: 0, marginBottom: "0.25rem" }}>Incidents & Safeguarding</h1>
-          <p style={{ margin: 0, fontSize: "0.9rem", color: "#555" }}>
+          <p style={{ margin: 0, fontSize: "0.9rem", color: "#64748b" }}>
             Record and review safeguarding concerns and incidents linked to patients.
           </p>
           {user?.email && (
-            <p style={{ margin: 0, marginTop: "0.25rem", fontSize: "0.8rem", color: "#999" }}>
+            <p style={{ margin: 0, marginTop: "0.25rem", fontSize: "0.8rem", color: "#94a3b8" }}>
               Signed in as {user.email} ({role || "Staff"})
             </p>
           )}
@@ -293,7 +293,16 @@ export default function Incidents() {
         />
       </section>
 
-      <section aria-label="Incidents list">
+      <section
+        aria-label="Incidents list"
+        style={{
+          background: "#ffffff",
+          border: "1px solid #e2e8f0",
+          borderRadius: 12,
+          padding: "1rem 1.25rem",
+          boxShadow: "0 4px 14px rgba(15, 23, 42, 0.04)",
+        }}
+      >
         <h2 style={{ fontSize: "1rem", marginBottom: "0.5rem" }}>Incidents</h2>
         {loading && (
           <div

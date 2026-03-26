@@ -1,16 +1,19 @@
 import { useAuth } from "../context/AuthContext";
 import { useOrganisation } from "../context/OrganisationContext";
+import { useRole } from "../context/RoleContext";
 import NotificationBell from "./NotificationBell";
 import ServiceSwitcher from "./ServiceSwitcher";
 
 export default function Header() {
   const { user, logout } = useAuth();
   const { organisation, organisationId } = useOrganisation();
+  const { role } = useRole();
+  const isSuperAdmin = role === "SUPER_ADMIN";
 
   return (
     <div style={styles.header}>
       <div style={styles.orgRow}>
-        <span>{organisation?.name ? `Organisation: ${organisation.name}` : "Organisation: —"}</span>
+        <span>{isSuperAdmin ? "Organisation: System Level" : (organisation?.name ? `Organisation: ${organisation.name}` : "Organisation: —")}</span>
         <ServiceSwitcher />
       </div>
 

@@ -11,6 +11,11 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { normalizePlanKey } from "../utils/featureAccess";
+import {
+  DEFAULT_ORG_FEATURES,
+  getFeaturesForOrganisationType,
+  getRolesForOrganisationType,
+} from "../config/organisationTemplates";
 
 /**
  * Fetch the current user's document to get organisationId.
@@ -55,6 +60,13 @@ export async function getOrganisation(organisationId) {
   }
   const data = orgSnap.data?.() ?? {};
   const rawPlan = data.plan ?? data.subscriptionPlan ?? null;
+  const featuresFromDoc = data.features && typeof data.features === "object" ? data.features : null;
+  const baseFromType = getFeaturesForOrganisationType(data.type ?? data.organisationType ?? data.orgType ?? null);
+  const effectiveFeatures = {
+    ...baseFromType,
+    ...(featuresFromDoc ? featuresFromDoc : {}),
+    audit: true,
+  };
   const organisation = {
     id: orgSnap.id ?? organisationId,
     name: data.name ?? "",
@@ -64,6 +76,8 @@ export async function getOrganisation(organisationId) {
     status: data.status ?? null,
     openActionCount: typeof data.openActionCount === "number" ? data.openActionCount : 0,
     highRiskActionCount: typeof data.highRiskActionCount === "number" ? data.highRiskActionCount : 0,
+    features: effectiveFeatures,
+    roles: Array.isArray(data.roles) ? data.roles : getRolesForOrganisationType(data.type ?? data.organisationType ?? data.orgType ?? null),
   };
   return organisation;
 }
@@ -79,10 +93,21 @@ export async function createOrganisation(organisationId, data) {
   if (!data?.name?.trim()) throw new Error("Organisation name required");
   const orgRef = doc(db, "organisations", organisationId);
   const plan = data.plan != null ? normalizePlanKey(data.plan) : "BASIC";
+  const typeField = data.type ?? data.organisationType ?? data.orgType ?? null;
+  const baseFromType = getFeaturesForOrganisationType(typeField);
+  const effectiveFeatures = {
+    ...baseFromType,
+    ...(data.features && typeof data.features === "object" ? data.features : {}),
+    audit: true,
+  };
+  const effectiveRoles = Array.isArray(data.roles) ? data.roles : getRolesForOrganisationType(typeField);
   await setDoc(orgRef, {
     name: data.name.trim(),
     plan,
     status: data.status ?? "active",
+    features: effectiveFeatures,
+    roles: effectiveRoles,
+    ...(typeField ? { type: typeField } : null),
     createdAt: serverTimestamp(),
   });
 }

@@ -212,6 +212,17 @@ export default function PatientDetail() {
     }
   }
 
+  const latestNote = useMemo(() => {
+    if (!Array.isArray(notes) || notes.length === 0) return null;
+    return notes
+      .slice()
+      .sort((a, b) => {
+        const aMs = new Date(a?.createdAt?.seconds ? a.createdAt.seconds * 1000 : a?.createdAt ?? 0).getTime();
+        const bMs = new Date(b?.createdAt?.seconds ? b.createdAt.seconds * 1000 : b?.createdAt ?? 0).getTime();
+        return bMs - aMs;
+      })[0];
+  }, [notes]);
+
   async function handleCPA() {
     if (!requireAdminRole(userRole)) return;
     const patientId = patient?.id ?? id;
@@ -337,9 +348,53 @@ export default function PatientDetail() {
         </div>
       ) : null}
 
+      <div style={styles.hubCard}>
+        <div style={styles.hubTitle}>Patient Hub</div>
+        <p style={styles.hubText}>Use quick actions to document care and generate MDT outputs from one place.</p>
+        <div style={styles.actionsRow}>
+          <Link to="/clinical-notes" style={styles.primaryAction}>
+            Add Note
+          </Link>
+          <Link to={`/incidents/new/${id}`} style={styles.secondaryAction}>
+            Add Incident
+          </Link>
+          <button type="button" onClick={handleMDT} disabled={mdtWardRoundLoading} style={styles.secondaryActionBtn}>
+            {mdtWardRoundLoading ? "Generating MDT…" : "MDT"}
+          </button>
+        </div>
+        <div style={styles.hubLinksRow}>
+          <a href="#clinical-intelligence" style={styles.hubLink}>Clinical Intelligence</a>
+          <a href="#reports-preview" style={styles.hubLink}>Report Preview</a>
+          <a href="#timeline" style={styles.hubLink}>Timeline</a>
+        </div>
+      </div>
+
+      {latestNote && !redactSensitive ? (
+        <div style={styles.insightStrip}>
+          <span style={styles.insightTitle}>Latest AI Insight</span>
+          <span style={styles.insightBadge}>Mood: {latestNote?.structured?.mood || latestNote?.mood || "N/A"}</span>
+          <span style={styles.insightBadge}>Risk: {(latestNote?.structured?.risk || latestNote?.risk || "unknown").toString().toUpperCase()}</span>
+          <span style={styles.insightSummary}>{latestNote?.structured?.summary || latestNote?.aiSummary || "No AI summary yet."}</span>
+        </div>
+      ) : null}
+
+      {notesError ? (
+        <div role="status" style={styles.softWarning}>
+          Notes could not be fully loaded. You can continue working and try refresh shortly.
+        </div>
+      ) : null}
+
+      {showRiskUi && !redactSensitive && !notesLoading && !notesError && (
+        <div style={styles.riskLegendRow}>
+          <span style={{ ...styles.riskPill, ...styles.riskScoreHigh }}>High</span>
+          <span style={{ ...styles.riskPill, ...styles.riskScoreMedium }}>Medium</span>
+          <span style={{ ...styles.riskPill, ...styles.riskScoreLow }}>Low</span>
+        </div>
+      )}
+
       <div style={styles.actionsRow}>
         <Link to={`/incidents/new/${id}`} style={styles.primaryAction}>
-          Report Incident (Stage 6)
+          Report Incident
         </Link>
       </div>
 
@@ -387,7 +442,7 @@ export default function PatientDetail() {
       </div>
 
       {!redactSensitive ? (
-        <div style={styles.clinicalIntelSection}>
+        <div id="clinical-intelligence" style={styles.clinicalIntelSection}>
           <h2 style={styles.clinicalIntelHeading}>Clinical Intelligence</h2>
           <p style={styles.clinicalIntelIntro}>
             Daily summaries, MDT roll-ups by author clinical role, and structured fields on each note below.
@@ -477,7 +532,7 @@ export default function PatientDetail() {
             </div>
           </div>
 
-          <div style={styles.reportGeneratorCard}>
+          <div id="reports-preview" style={styles.reportGeneratorCard}>
             <h3 style={styles.clinicalIntelCardTitle}>Clinical reports</h3>
             <p style={styles.clinicalIntelHint}>
               CPA and Tribunal outputs from aggregated notes (organisation + hospital scoped).
@@ -515,7 +570,12 @@ export default function PatientDetail() {
             ) : null}
             {report ? (
               <div className="report-box" style={styles.reportBox}>
-                <h3 style={styles.aiSummaryTitle}>Generated Report</h3>
+                <div style={styles.reportPreviewHeader}>
+                  <h3 style={styles.aiSummaryTitle}>Report Preview</h3>
+                  <button type="button" style={styles.previewPrintBtn} onClick={() => window.print()}>
+                    Print Preview
+                  </button>
+                </div>
                 <pre style={styles.reportPre}>{JSON.stringify(report, null, 2)}</pre>
               </div>
             ) : null}
@@ -540,7 +600,7 @@ export default function PatientDetail() {
         </div>
       )}
 
-      <div style={styles.tabsWrap}>
+      <div id="timeline" style={styles.tabsWrap}>
         <PatientClinicalIntelligenceTabs
           patientId={id}
           notes={notes.slice(0, 50)}
@@ -650,8 +710,112 @@ const styles = {
   },
   actionsRow: {
     display: "flex",
+    flexWrap: "wrap",
     gap: 10,
     marginBottom: 12,
+  },
+  hubCard: {
+    marginBottom: 12,
+    backgroundColor: "#ffffff",
+    border: "1px solid #e2e8f0",
+    borderRadius: 10,
+    padding: "12px 14px",
+  },
+  hubTitle: {
+    margin: "0 0 4px 0",
+    fontSize: 14,
+    fontWeight: 900,
+    color: "#0f172a",
+  },
+  hubText: {
+    margin: "0 0 10px 0",
+    color: "#475569",
+    fontSize: 13,
+  },
+  secondaryAction: {
+    display: "inline-block",
+    padding: "10px 14px",
+    backgroundColor: "#ffffff",
+    color: "#0f172a",
+    borderRadius: 10,
+    textDecoration: "none",
+    fontWeight: 800,
+    fontSize: 13,
+    border: "1px solid #cbd5e1",
+  },
+  secondaryActionBtn: {
+    display: "inline-block",
+    padding: "10px 14px",
+    backgroundColor: "#ffffff",
+    color: "#0f172a",
+    borderRadius: 10,
+    textDecoration: "none",
+    fontWeight: 800,
+    fontSize: 13,
+    border: "1px solid #cbd5e1",
+    cursor: "pointer",
+  },
+  hubLinksRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+  hubLink: {
+    color: "#2563eb",
+    textDecoration: "none",
+    fontWeight: 700,
+    fontSize: 12,
+  },
+  insightStrip: {
+    marginBottom: 12,
+    backgroundColor: "#f8fafc",
+    border: "1px solid #e2e8f0",
+    borderRadius: 10,
+    padding: "10px 12px",
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 8,
+    alignItems: "center",
+  },
+  insightTitle: {
+    fontSize: 12,
+    fontWeight: 900,
+    color: "#0f172a",
+  },
+  insightBadge: {
+    fontSize: 12,
+    fontWeight: 800,
+    color: "#334155",
+    backgroundColor: "#ffffff",
+    border: "1px solid #e2e8f0",
+    borderRadius: 999,
+    padding: "2px 8px",
+  },
+  insightSummary: {
+    fontSize: 12,
+    color: "#475569",
+  },
+  softWarning: {
+    marginBottom: 12,
+    padding: "10px 12px",
+    borderRadius: 10,
+    border: "1px solid #fde68a",
+    backgroundColor: "#fffbeb",
+    color: "#92400e",
+    fontSize: 13,
+    fontWeight: 700,
+  },
+  riskLegendRow: {
+    display: "flex",
+    gap: 8,
+    marginBottom: 10,
+  },
+  riskPill: {
+    fontSize: 11,
+    fontWeight: 900,
+    padding: "3px 8px",
+    borderRadius: 999,
+    border: "1px solid transparent",
   },
   primaryAction: {
     display: "inline-block",
@@ -759,6 +923,23 @@ const styles = {
     borderRadius: 8,
     backgroundColor: "#f8fafc",
     border: "1px solid #e2e8f0",
+  },
+  reportPreviewHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+    gap: 8,
+  },
+  previewPrintBtn: {
+    padding: "6px 10px",
+    borderRadius: 8,
+    border: "1px solid #cbd5e1",
+    backgroundColor: "#ffffff",
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: "pointer",
   },
   reportPre: {
     margin: 0,

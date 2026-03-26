@@ -1,6 +1,22 @@
-// Multi-tenant isolation: authenticated users only; document organisationId must match profile org.
-// Note: `resource` is not available on create — create uses request.resource only.
-
+// SanctumCare Firestore Security Rules (production-ready)
+//
+// Critical principles enforced:
+// - Every request must be authenticated
+// - Every document is scoped to organisationId
+// - No cross-tenant reads/writes
+// - Notes are immutable (update/delete denied)
+// - Audit logs protected from non-admin roles (read)
+// - Default deny for everything else
+// - Tenant collections: documents, evidence, behaviours, risk_alerts, staff_training (org-scoped CRU)
+//
+// NOTE: This ruleset assumes `users/{uid}` contains:
+// - organisationId (or orgId)
+// - role (string like "Admin"/"Manager"/"SUPER_ADMIN") and optional isGlobalAdmin boolean
+//
+// Identity resolution:
+// - If `users/{uid}` exists, organisationId, role, and isGlobalAdmin come ONLY from Firestore (never token).
+// - If the profile doc does not exist yet (onboarding), claims on `request.auth.token` are used temporarily.
+//
 rules_version = '2';
 
 service cloud.firestore {
@@ -10,66 +26,324 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function userOrg() {
-      let u = get(/databases/$(database)/documents/users/$(request.auth.uid));
-      return u.data.organisationId != null
-        ? u.data.organisationId
-        : u.data.orgId;
+    // Safe read: never `get` users/{uid} unless the document exists (avoids rule failures during onboarding).
+    function getUserSafe() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data
+        : null;
     }
 
-    function sameOrg(resource) {
-      return resource.data.organisationId == userOrg();
+    function tokenOrgId() {
+      return request.auth.token.organisationId != null
+        ? request.auth.token.organisationId
+        : request.auth.token.orgId;
     }
 
-    // Token + profile: allow when document org matches JWT claim or Firestore user profile org.
-    function tenantMatches(resource) {
-      return resource.data.organisationId != null
-        && (
-          resource.data.organisationId == request.auth.token.organisationId
-          || sameOrg(resource)
-        );
+    function docOrgId(data) {
+      return data.organisationId != null ? data.organisationId : data.orgId;
     }
 
-    // Own profile: required for client bootstrap (org claim may lag; rules read Firestore users/{uid}).
+    function getOrgId() {
+      let u = getUserSafe();
+      return u != null ? docOrgId(u) : tokenOrgId();
+    }
+
+    function sameOrganisation(orgId) {
+      return isAuthenticated() && orgId != null && getOrgId() == orgId;
+    }
+
+    // Always returns a string (empty when no role) so rule types stay consistent.
+    function getRole() {
+      let u = getUserSafe();
+      return u != null
+        ? (u.role != null ? string(u.role) : (u.systemRole != null ? string(u.systemRole) : ''))
+        : (request.auth.token.role != null ? string(request.auth.token.role) : '');
+    }
+
+    function roleUpper() {
+      return getRole().upper();
+    }
+
+    function isAdmin() {
+      return roleUpper() in ['ADMIN', 'MANAGER', 'SUPER_ADMIN', 'GLOBAL_ADMIN'];
+    }
+
+    function isGlobalAdmin() {
+      let u = getUserSafe();
+      return u != null
+        ? u.isGlobalAdmin == true
+        : request.auth.token.isGlobalAdmin == true;
+    }
+
+    // =========
+    // Organisations
+    // =========
+    match /organisations/{orgId} {
+      allow read: if isAuthenticated() && sameOrganisation(orgId);
+      allow create, update, delete: if isAuthenticated() && isGlobalAdmin();
+    }
+
+    // =========
+    // Users
+    // =========
     match /users/{userId} {
-      allow read: if isAuthenticated() && request.auth.uid == userId;
-      allow create: if isAuthenticated() && request.auth.uid == userId;
-      allow update: if isAuthenticated() && request.auth.uid == userId;
+      // Users can read within their organisation.
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+
+      // Allow the authenticated user to create their own profile doc.
+      // (This keeps onboarding functional; staff/admin-only creation applies to other users.)
+      allow create: if isAuthenticated()
+        && request.auth.uid == userId
+        && docOrgId(request.resource.data) != null
+        && getOrgId() == docOrgId(request.resource.data);
+
+      // Admins can create users in their organisation.
+      allow create: if isAuthenticated()
+        && isAdmin()
+        && sameOrganisation(docOrgId(request.resource.data));
+
+      // Users can only update their own doc; organisation cannot be changed.
+      allow update: if isAuthenticated()
+        && request.auth.uid == userId
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data);
+
+      // Admins can manage user docs within their organisation.
+      allow update: if isAuthenticated()
+        && isAdmin()
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data);
+
+      allow delete: if isAuthenticated()
+        && isAdmin()
+        && sameOrganisation(docOrgId(resource.data));
+    }
+
+    // =========
+    // Patients
+    // =========
+    match /patients/{patientId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+
+      allow create: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId);
+
+      allow update, delete: if isAuthenticated()
+        && sameOrganisation(resource.data.organisationId)
+        && request.resource.data.organisationId == resource.data.organisationId;
+    }
+
+    // =========
+    // Notes (immutable)
+    // =========
+    match /notes/{noteId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+
+      allow create: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId);
+
+      allow update: if false;
       allow delete: if false;
     }
 
-    match /patients/{patientId} {
-      allow read: if isAuthenticated() && tenantMatches(resource);
+    // =========
+    // Note addendums (append-only alternative to editing notes)
+    // =========
+    match /note_addendums/{addendumId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+
       allow create: if isAuthenticated()
         && request.resource.data.organisationId != null
-        && (
-          request.resource.data.organisationId == request.auth.token.organisationId
-          || request.resource.data.organisationId == userOrg()
-        );
-      allow update, delete: if isAuthenticated()
-        && tenantMatches(resource)
-        && request.resource.data.organisationId == userOrg();
+        && sameOrganisation(request.resource.data.organisationId);
+
+      allow update: if false;
+      allow delete: if false;
     }
 
-    match /notes/{noteId} {
-      allow read: if isAuthenticated() && tenantMatches(resource);
+    // =========
+    // Incidents
+    // =========
+    match /incidents/{incidentId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+
       allow create: if isAuthenticated()
         && request.resource.data.organisationId != null
-        && (
-          request.resource.data.organisationId == request.auth.token.organisationId
-          || request.resource.data.organisationId == userOrg()
-        );
-      allow update, delete: if isAuthenticated()
-        && tenantMatches(resource)
-        && request.resource.data.organisationId == userOrg();
+        && sameOrganisation(request.resource.data.organisationId);
+
+      // Client writes an `incidentId` after creation; allow update within same org.
+      allow update: if isAuthenticated()
+        && sameOrganisation(resource.data.organisationId)
+        && request.resource.data.organisationId == resource.data.organisationId;
+
+      allow delete: if false;
     }
 
-    match /{collection}/{docId} {
-      allow read: if isAuthenticated() && sameOrg(resource);
-      allow create: if isAuthenticated() && request.resource.data.organisationId == userOrg();
-      allow update, delete: if isAuthenticated()
-        && sameOrg(resource)
-        && request.resource.data.organisationId == userOrg();
+    // =========
+    // Patient timeline
+    // =========
+    match /patient_timeline/{timelineId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+
+      allow create: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId);
+
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // =========
+    // Services / Hospitals / Wards
+    // (Needed for onboarding + tenant setup flows.)
+    // =========
+    match /services/{serviceId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow create, update: if isAuthenticated()
+        && isAdmin()
+        && sameOrganisation(request.resource.data.organisationId);
+      allow delete: if false;
+    }
+
+    match /hospitals/{hospitalId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow create, update: if isAuthenticated()
+        && isAdmin()
+        && sameOrganisation(request.resource.data.organisationId);
+      allow delete: if false;
+    }
+
+    match /wards/{wardId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow create, update: if isAuthenticated()
+        && isAdmin()
+        && sameOrganisation(request.resource.data.organisationId);
+      allow delete: if false;
+    }
+
+    // =========
+    // Audit logs
+    // =========
+    match /audit_logs/{logId} {
+      allow read: if isAuthenticated()
+        && isAdmin()
+        && sameOrganisation(resource.data.organisationId);
+
+      // Allow creation for authenticated users, but scoped to their organisation.
+      allow create: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId);
+
+      allow update, delete: if false;
+    }
+
+    // Legacy audit sink
+    match /auditLogs/{logId} {
+      allow read: if isAuthenticated()
+        && isAdmin()
+        && sameOrganisation(resource.data.organisationId);
+
+      allow create: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId);
+
+      allow update, delete: if false;
+    }
+
+    // =========
+    // Inspection reports (if/when stored)
+    // =========
+    match /inspection_reports/{reportId} {
+      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow create: if isAuthenticated() && isAdmin() && sameOrganisation(request.resource.data.organisationId);
+      allow update, delete: if false;
+    }
+
+    // =========
+    // Subscriptions
+    // =========
+    match /subscriptions/{subId} {
+      allow read: if isAuthenticated()
+        && resource.data.organisationId != null
+        && sameOrganisation(resource.data.organisationId);
+
+      allow create, update, delete: if isAuthenticated()
+        && isGlobalAdmin()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId);
+    }
+
+    // =========
+    // Documents (managed uploads: category, expiry, etc.)
+    // =========
+    match /documents/{documentId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if isAuthenticated()
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data);
+    }
+
+    // =========
+    // Evidence (CQC domain uploads)
+    // =========
+    match /evidence/{evidenceId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if isAuthenticated()
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data);
+    }
+
+    // =========
+    // Behaviour tracking (linked to clinical notes)
+    // =========
+    match /behaviours/{behaviourId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if isAuthenticated()
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data);
+    }
+
+    // =========
+    // Risk alerts (derived from notes / risk engine)
+    // =========
+    match /risk_alerts/{alertId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if isAuthenticated()
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data);
+    }
+
+    // =========
+    // Staff training / competency records
+    // =========
+    match /staff_training/{trainingId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if isAuthenticated()
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data);
+    }
+
+    // =========
+    // Fail-safe: deny everything else.
+    // =========
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

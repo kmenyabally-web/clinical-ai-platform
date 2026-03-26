@@ -103,10 +103,10 @@ export default function ComplianceOverview() {
     : [];
 
   return (
-    <div style={{ padding: "2rem" }}>
+    <div style={{ padding: "24px", maxWidth: 1120, margin: "0 auto" }}>
       <header style={{ marginBottom: "1.5rem" }}>
         <h1 style={{ margin: 0, marginBottom: "0.25rem" }}>Compliance overview</h1>
-        <p style={{ margin: 0, fontSize: "0.95rem", color: "#555" }}>
+        <p style={{ margin: 0, fontSize: "0.95rem", color: "#64748b" }}>
           CQC readiness scores by domain. All data is scoped by organisation and service.
         </p>
         {organisation?.name && (
@@ -141,7 +141,7 @@ export default function ComplianceOverview() {
 
       {!loading && score && (
         <>
-          <section style={{ marginBottom: "1.5rem" }}>
+          <section style={{ marginBottom: "1.5rem", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "1rem 1.1rem", boxShadow: "0 4px 14px rgba(15, 23, 42, 0.04)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
               <h2 style={{ fontSize: "1.1rem", margin: 0 }}>Compliance scores</h2>
               <button
@@ -257,7 +257,7 @@ export default function ComplianceOverview() {
           </section>
 
           {allScores.length > 1 && (
-            <section>
+            <section style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "1rem 1.1rem", boxShadow: "0 4px 14px rgba(15, 23, 42, 0.04)" }}>
               <h2 style={{ fontSize: "1.1rem", margin: "0 0 0.5rem 0" }}>Scores by service</h2>
               <div
                 style={{

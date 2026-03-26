@@ -6,7 +6,7 @@ export default function ActionBar({ actions = [] }) {
       style={{
         display: "flex",
         gap: "10px",
-        marginBottom: "20px",
+        marginBottom: "16px",
         flexWrap: "wrap",
       }}
     >
@@ -16,13 +16,19 @@ export default function ActionBar({ actions = [] }) {
           type="button"
           onClick={action.onClick}
           style={{
-            padding: "10px 16px",
-            borderRadius: "8px",
-            border: "none",
-            background: action.type === "generate" ? "#7c3aed" : "#2563eb",
-            color: "#fff",
+            padding: "10px 14px",
+            borderRadius: "6px",
+            border: action.type === "secondary" ? "1px solid var(--border)" : "none",
+            background:
+              action.type === "generate"
+                ? "var(--primary)"
+                : action.type === "secondary"
+                  ? "var(--surface)"
+                  : "var(--primary)",
+            color: action.type === "secondary" ? "var(--text-primary)" : "#fff",
             cursor: "pointer",
-            fontWeight: 500,
+            fontWeight: 700,
+            fontSize: 13,
           }}
         >
           {action.label}

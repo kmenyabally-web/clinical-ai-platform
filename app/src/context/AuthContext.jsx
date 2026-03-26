@@ -35,20 +35,24 @@ export function AuthProvider({ children }) {
     return signInWithEmailAndPassword(auth, email, password);
   }
 
-  function logout() {
-    if (DEV_AUTH_BYPASS) {
-      const mockUser = {
-        uid: "dev-user",
-        email: "developer@local.dev",
-        displayName: "Development User",
-        role: "admin",
-        organisationId: "dev-organisation",
-      };
-      setUser(mockUser);
-      return Promise.resolve();
+  const handleSignOut = async () => {
+    try {
+      if (!DEV_AUTH_BYPASS && user?.uid) {
+        productionLogger.auth.signOut(user.uid);
+      }
+      if (!DEV_AUTH_BYPASS) {
+        await signOut(auth);
+      } else {
+        setUser(null);
+      }
+      window.location.href = "/login";
+    } catch (e) {
+      console.error("Sign out failed", e);
     }
-    if (user?.uid) productionLogger.auth.signOut(user.uid);
-    return signOut(auth);
+  };
+
+  function logout() {
+    return handleSignOut();
   }
 
   useEffect(() => {
@@ -92,6 +96,7 @@ export function AuthProvider({ children }) {
     isAuthenticated: !!user,
     login,
     logout,
+    handleSignOut,
     loading,
   };
 

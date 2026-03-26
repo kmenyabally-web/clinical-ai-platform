@@ -18,6 +18,8 @@ export function mapSystemRoleToEnterpriseCode(
   const table: Record<string, EnterpriseRoleCode> = {
     Admin: "ADMIN",
     ADMIN: "ADMIN",
+    SUPER_ADMIN: "ADMIN",
+    GLOBAL_ADMIN: "ADMIN",
     Manager: "MANAGER",
     MANAGER: "MANAGER",
     Staff: "STAFF",
@@ -36,7 +38,7 @@ export function canViewClinicalNotesAccess(
   mdtRole: string | null | undefined
 ): boolean {
   const s = (systemRole ?? "").trim();
-  if (["Admin", "Manager", "Inspector", "Auditor"].includes(s)) return true;
+  if (["Admin", "Manager", "Inspector", "Auditor", "SUPER_ADMIN", "GLOBAL_ADMIN"].includes(s)) return true;
   if (s === "Staff" || s === "QualityLead") return Boolean((mdtRole ?? "").trim());
   return false;
 }
@@ -46,7 +48,7 @@ export function canEditClinicalNotesAccess(
   mdtRole: string | null | undefined
 ): boolean {
   const s = (systemRole ?? "").trim();
-  if (["Admin", "Manager"].includes(s)) return true;
+  if (["Admin", "Manager", "SUPER_ADMIN", "GLOBAL_ADMIN"].includes(s)) return true;
   if (s === "Inspector" || s === "Auditor") return false;
   if (s === "Staff" || s === "QualityLead") return Boolean((mdtRole ?? "").trim());
   return false;

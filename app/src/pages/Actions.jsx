@@ -92,7 +92,7 @@ export default function Actions() {
   }
 
   return (
-    <div>
+    <div style={{ maxWidth: 1120, margin: "0 auto", padding: "24px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem", flexWrap: "wrap", gap: "1rem" }}>
         <h1 style={{ margin: 0 }}>Compliance actions</h1>
         {canCreate && (
@@ -115,9 +115,9 @@ export default function Actions() {
       </div>
 
       {error && (
-        <p role="alert" style={{ color: "#c62828", marginBottom: "1rem" }}>
+        <div role="alert" style={{ marginBottom: "1rem", padding: "0.75rem 1rem", borderRadius: 12, border: "1px solid #fecaca", background: "#fef2f2", color: "#b91c1c" }}>
           {error}
-        </p>
+        </div>
       )}
 
       {loading ? (

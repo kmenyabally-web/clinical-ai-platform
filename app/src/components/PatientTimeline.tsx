@@ -68,37 +68,126 @@ function buildMerged(notes: Props["notes"], incidents: Props["incidents"]): Merg
   return out;
 }
 
-const riskTagStyle: React.CSSProperties = {
-  display: "inline-block",
-  fontSize: 11,
-  fontWeight: 800,
-  color: "#9a3412",
-  backgroundColor: "#ffedd5",
-  border: "1px solid #fdba74",
-  padding: "2px 8px",
-  borderRadius: 999,
-  marginRight: 6,
-  marginTop: 4,
+type GroupLabel = "TODAY" | "YESTERDAY" | "OLDER";
+type CompactItem = {
+  id: string;
+  group: GroupLabel;
+  sortKey: number;
+  time: string;
+  role: string;
+  summary: string;
 };
 
-const disciplineBadgeStyle: React.CSSProperties = {
-  fontSize: 12,
-  fontWeight: 900,
-  color: "#1e3a5f",
-  backgroundColor: "#e0f2fe",
-  border: "1px solid #7dd3fc",
-  padding: "2px 8px",
-  borderRadius: 999,
-};
+function toGroupLabel(sortKey: number): GroupLabel {
+  if (!sortKey) return "OLDER";
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
+  if (sortKey >= todayStart) return "TODAY";
+  if (sortKey >= yesterdayStart) return "YESTERDAY";
+  return "OLDER";
+}
 
-const structuredFieldsBlockStyle: React.CSSProperties = {
-  marginTop: 8,
-  padding: "8px 0 10px 0",
-  borderTop: "1px solid #e2e8f0",
-  fontSize: 12.5,
-  lineHeight: 1.5,
-  color: "#334155",
-};
+function formatTimeOnly(sortKey: number): string {
+  if (!sortKey) return "—";
+  return new Date(sortKey).toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function truncateSummary(text: string, max = 140): string {
+  const value = (text ?? "").trim();
+  if (!value) return "No summary available.";
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+}
+
+function buildCompactItems({
+  variant,
+  notes,
+  incidents,
+  noteTextMode,
+  redactSensitive,
+}: {
+  variant: PatientTimelineVariant;
+  notes: Array<ClinicalNote & { mood?: string | null }>;
+  incidents: TimelineIncident[];
+  noteTextMode: "raw" | "corrected";
+  redactSensitive: boolean;
+}): CompactItem[] {
+  if (variant === "notes") {
+    return notes
+      .map((note) => {
+        const sortKey = toMillis(note.createdAt);
+        const narrative = noteTextMode === "corrected" ? note.correctedNote ?? note.content : note.content;
+        const structuredSummary = note.structured?.summary ?? note.aiSummary ?? "";
+        const summary = redactSensitive ? "Clinical detail restricted for this role." : (structuredSummary || narrative || "");
+        return {
+          id: `n-${note.id}`,
+          group: toGroupLabel(sortKey),
+          sortKey,
+          time: formatTimeOnly(sortKey),
+          role: note.discipline || "Clinical",
+          summary: truncateSummary(summary),
+        };
+      })
+      .sort((a, b) => b.sortKey - a.sortKey);
+  }
+
+  if (variant === "incidents") {
+    return incidents
+      .map((incident) => {
+        const sortKey = toMillis(incident.occurredAt) || toMillis(incident.createdAt);
+        const severity = (incident.severity || "").toString().trim();
+        const summary = `${incident.title || "Incident"}${severity ? ` (${severity})` : ""}`;
+        return {
+          id: `i-${incident.id}`,
+          group: toGroupLabel(sortKey),
+          sortKey,
+          time: formatTimeOnly(sortKey),
+          role: "Incident",
+          summary: truncateSummary(summary),
+        };
+      })
+      .sort((a, b) => b.sortKey - a.sortKey);
+  }
+
+  return buildMerged(notes, incidents).map((entry) => {
+    if (entry.kind === "clinical_note") {
+      const note = entry.note;
+      const narrative = noteTextMode === "corrected" ? note.correctedNote ?? note.content : note.content;
+      const structuredSummary = note.structured?.summary ?? note.aiSummary ?? "";
+      const summary = redactSensitive ? "Clinical detail restricted for this role." : (structuredSummary || narrative || "");
+      return {
+        id: `n-${entry.id}`,
+        group: toGroupLabel(entry.sortKey),
+        sortKey: entry.sortKey,
+        time: formatTimeOnly(entry.sortKey),
+        role: note.discipline || "Clinical",
+        summary: truncateSummary(summary),
+      };
+    }
+
+    const severity = (entry.incident.severity || "").toString().trim();
+    const summary = `${entry.incident.title || "Incident"}${severity ? ` (${severity})` : ""}`;
+    return {
+      id: `i-${entry.id}`,
+      group: toGroupLabel(entry.sortKey),
+      sortKey: entry.sortKey,
+      time: formatTimeOnly(entry.sortKey),
+      role: "Incident",
+      summary: truncateSummary(summary),
+    };
+  });
+}
+
+function groupItems(items: CompactItem[]): Record<GroupLabel, CompactItem[]> {
+  return {
+    TODAY: items.filter((item) => item.group === "TODAY"),
+    YESTERDAY: items.filter((item) => item.group === "YESTERDAY"),
+    OLDER: items.filter((item) => item.group === "OLDER"),
+  };
+}
 
 export default function PatientTimeline({
   variant,
@@ -112,234 +201,53 @@ export default function PatientTimeline({
   redactSensitive = false,
   noteTextMode = "raw",
 }: Props) {
-  if (variant === "merged") {
-    if (loadingNotes || loadingIncidents) {
-      return <div style={metaStyle}>Loading timeline…</div>;
-    }
-    const merged = buildMerged(notes, incidents);
-    if (merged.length === 0) {
-      return <div style={emptyStyle}>No timeline events yet.</div>;
-    }
-    return (
-      <ul style={listStyle}>
-        {merged.map((entry) =>
-          entry.kind === "clinical_note" ? (
-            <li key={`n-${entry.id}`} style={itemStyle}>
-              <NoteBody
-                note={entry.note}
-                formatWhen={formatWhen}
-                showKindLabel
-                redactSensitive={redactSensitive}
-                noteTextMode={noteTextMode}
-              />
-            </li>
-          ) : (
-            <li key={`i-${entry.id}`} style={itemStyle}>
-              <IncidentBody incident={entry.incident} formatWhen={formatWhen} showKindLabel />
-            </li>
-          )
-        )}
-      </ul>
-    );
+  if (variant === "merged" && (loadingNotes || loadingIncidents)) {
+    return <div style={metaStyle}>Loading timeline…</div>;
+  }
+  if (variant === "notes" && loadingNotes) {
+    return <div style={metaStyle}>Loading…</div>;
+  }
+  if (variant === "incidents" && loadingIncidents) {
+    return <div style={metaStyle}>Loading…</div>;
   }
 
-  if (variant === "notes") {
-    if (loadingNotes) {
-      return <div style={metaStyle}>Loading…</div>;
-    }
-    if (!notes.length) {
-      return <div style={emptyStyle}>{emptyNotesMessage}</div>;
-    }
-    return (
-      <ul style={listStyle}>
-        {notes.map((n) => (
-            <li key={n.id} style={itemStyle}>
-            <NoteBody note={n} formatWhen={formatWhen} redactSensitive={redactSensitive} noteTextMode={noteTextMode} />
-          </li>
-        ))}
-      </ul>
-    );
+  const items = buildCompactItems({
+    variant,
+    notes,
+    incidents,
+    noteTextMode,
+    redactSensitive,
+  });
+  if (!items.length) {
+    if (variant === "notes") return <div style={emptyStyle}>{emptyNotesMessage}</div>;
+    if (variant === "incidents") return <div style={emptyStyle}>{emptyIncidentsMessage}</div>;
+    return <div style={emptyStyle}>No timeline events yet.</div>;
   }
 
-  if (variant === "incidents") {
-    if (loadingIncidents) {
-      return <div style={metaStyle}>Loading…</div>;
-    }
-    if (!incidents.length) {
-      return <div style={emptyStyle}>{emptyIncidentsMessage}</div>;
-    }
-    return (
-      <ul style={listStyle}>
-        {incidents.map((x) => (
-          <li key={x.id} style={itemStyle}>
-            <IncidentBody incident={x} formatWhen={formatWhen} />
-          </li>
-        ))}
-      </ul>
-    );
-  }
-
-  return null;
-}
-
-function NoteBody({
-  note,
-  formatWhen,
-  showKindLabel,
-  redactSensitive = false,
-  noteTextMode,
-}: {
-  note: ClinicalNote & { mood?: string | null };
-  formatWhen: (value: unknown) => string;
-  showKindLabel?: boolean;
-  redactSensitive?: boolean;
-  noteTextMode: "raw" | "corrected";
-}) {
-  const mood = note.structured?.mood ?? note.mood ?? "";
-  const behaviour = redactSensitive ? "" : (note.structured?.behaviour ?? "");
-  const engagement = redactSensitive ? "" : (note.structured?.engagement ?? "");
-  const risk = redactSensitive ? "" : (note.structured?.risk ?? "");
-  const moodLine = redactSensitive ? "Restricted" : (note.mood || note.structured?.mood || "N/A");
-  const behaviourLine = redactSensitive
-    ? "Restricted"
-    : note.behaviour || note.structured?.behaviour || "N/A";
-  const riskLine = redactSensitive ? "Restricted" : note.risk || note.structured?.risk || "N/A";
-  const physicalHealth = redactSensitive ? "" : (note.structured?.physicalHealth ?? "");
-  const medicationIssues = redactSensitive ? "" : (note.structured?.medicationIssues ?? "");
-  const progress = redactSensitive ? "" : (note.structured?.progress ?? note.structured?.summary ?? "");
-  const incidents = redactSensitive ? [] : (note.structured?.incidents ?? []);
-  const risks = redactSensitive ? [] : (note.structured?.riskIndicators ?? []);
-  const narrative = noteTextMode === "corrected" ? note.correctedNote ?? note.content : note.content;
+  const grouped = groupItems(items);
+  const sectionOrder: GroupLabel[] = ["TODAY", "YESTERDAY", "OLDER"];
 
   return (
-    <>
-      <div style={topRowStyle}>
-        <span style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-          {showKindLabel ? (
-            <span style={kindPillStyle}>Note</span>
-          ) : null}
-          <span style={disciplineBadgeStyle} title="MDT role">
-            [{note.discipline || "—"}]
-          </span>
-          {note.category ? (
-            <span style={categoryBadgeStyle}>{note.category}</span>
-          ) : null}
-        </span>
-        {mood ? <span style={moodStyle}>{mood}</span> : null}
-      </div>
-      <div style={structuredFieldsBlockStyle}>
-        <div>
-          <strong>Mood:</strong> {moodLine}
-        </div>
-        <div>
-          <strong>Behaviour:</strong> {behaviourLine}
-        </div>
-        <div>
-          <strong>Risk:</strong> {riskLine}
-        </div>
-      </div>
-      {behaviour ? (
-        <div style={behaviourStyle}>
-          <span style={subLabelStyle}>Behaviour: </span>
-          {behaviour}
-        </div>
-      ) : null}
-      {engagement ? (
-        <div style={behaviourStyle}>
-          <span style={subLabelStyle}>Engagement: </span>
-          {engagement}
-        </div>
-      ) : null}
-      {physicalHealth ? (
-        <div style={behaviourStyle}>
-          <span style={subLabelStyle}>Physical health: </span>
-          {physicalHealth}
-        </div>
-      ) : null}
-      {medicationIssues ? (
-        <div style={behaviourStyle}>
-          <span style={subLabelStyle}>Medication: </span>
-          {medicationIssues}
-        </div>
-      ) : null}
-      {risk ? (
-        <div style={behaviourStyle}>
-          <span style={subLabelStyle}>Risk: </span>
-          {risk}
-        </div>
-      ) : null}
-      {progress ? (
-        <div style={summaryStyle}>
-          <span style={subLabelStyle}>Progress: </span>
-          {progress}
-        </div>
-      ) : null}
-      {incidents.length > 0 ? (
-        <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {incidents.map((inc) => (
-            <span key={inc} style={riskTagStyle}>
-              {inc}
-            </span>
-          ))}
-        </div>
-      ) : null}
-      {risks.length > 0 ? (
-        <div style={riskRowStyle}>
-          {risks.map((r) => (
-            <span key={r} style={riskTagStyle}>
-              {r}
-            </span>
-          ))}
-        </div>
-      ) : null}
-      <div style={subStyle}>
-        <span>{formatWhen(note.createdAt) || "—"}</span>
-        <span> · </span>
-        <span>{note.authorEmail || "—"}</span>
-      </div>
-      {redactSensitive ? (
-        <div style={restrictedBannerStyle}>Structured risk and clinical detail are restricted for this role.</div>
-      ) : null}
-      {narrative ? <div style={contentStyle}>{narrative}</div> : null}
-    </>
-  );
-}
-
-const restrictedBannerStyle: React.CSSProperties = {
-  marginTop: 8,
-  padding: "8px 10px",
-  fontSize: 12,
-  fontWeight: 700,
-  color: "#92400e",
-  backgroundColor: "#fffbeb",
-  border: "1px solid #fcd34d",
-  borderRadius: 8,
-};
-
-function IncidentBody({
-  incident,
-  formatWhen,
-  showKindLabel,
-}: {
-  incident: TimelineIncident;
-  formatWhen: (value: unknown) => string;
-  showKindLabel?: boolean;
-}) {
-  return (
-    <>
-      <div style={incidentTopStyle}>
-        <span style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-          {showKindLabel ? <span style={kindPillIncidentStyle}>Incident</span> : null}
-          <span style={incidentTitleStyle}>{incident.title || "Incident"}</span>
-        </span>
-        <span style={severityStyle}>{(incident.severity || "").toUpperCase()}</span>
-      </div>
-      <div style={subStyle}>
-        <span>{formatWhen(incident.occurredAt || incident.createdAt) || "—"}</span>
-        <span> · </span>
-        <span>{incident.location || "—"}</span>
-      </div>
-    </>
+    <div>
+      {sectionOrder.map((section) =>
+        grouped[section].length > 0 ? (
+          <section key={section} style={sectionStyle}>
+            <h4 style={sectionHeadingStyle}>{section}</h4>
+            <ul style={listStyle}>
+              {grouped[section].map((item) => (
+                <li key={item.id} style={itemStyle}>
+                  <div style={compactRowStyle}>
+                    <span style={timeStyle}>{item.time}</span>
+                    <span style={roleStyle}>{item.role}</span>
+                  </div>
+                  <p style={summaryStyle}>{item.summary}</p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null
+      )}
+    </div>
   );
 }
 
@@ -354,68 +262,34 @@ const itemStyle: React.CSSProperties = {
   borderBottom: "1px solid #f1f5f9",
 };
 
-const topRowStyle: React.CSSProperties = {
+const compactRowStyle: React.CSSProperties = {
   display: "flex",
-  justifyContent: "space-between",
-  gap: 10,
+  gap: 8,
   alignItems: "center",
   flexWrap: "wrap",
 };
 
-const categoryBadgeStyle: React.CSSProperties = {
+const summaryStyle: React.CSSProperties = {
+  margin: "6px 0 0 0",
   fontSize: 12,
-  fontWeight: 900,
+  color: "#334155",
+  lineHeight: 1.4,
+};
+
+const timeStyle: React.CSSProperties = {
+  fontSize: 12,
+  color: "#475569",
+  fontWeight: 800,
+};
+
+const roleStyle: React.CSSProperties = {
+  fontSize: 12,
   color: "#0f172a",
   backgroundColor: "#f1f5f9",
   border: "1px solid #e2e8f0",
   padding: "2px 8px",
   borderRadius: 999,
-};
-
-const moodStyle: React.CSSProperties = {
-  fontSize: 16,
-  lineHeight: 1,
-};
-
-const behaviourStyle: React.CSSProperties = {
-  marginTop: 8,
-  fontSize: 12,
-  color: "#334155",
-  lineHeight: 1.4,
-};
-
-const summaryStyle: React.CSSProperties = {
-  marginTop: 8,
-  fontSize: 12,
-  color: "#1e3a5f",
-  lineHeight: 1.45,
-  fontStyle: "italic",
-};
-
-const subLabelStyle: React.CSSProperties = {
   fontWeight: 800,
-  color: "#475569",
-};
-
-const riskRowStyle: React.CSSProperties = {
-  marginTop: 8,
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 4,
-};
-
-const subStyle: React.CSSProperties = {
-  marginTop: 6,
-  fontSize: 12,
-  color: "#475569",
-};
-
-const contentStyle: React.CSSProperties = {
-  marginTop: 8,
-  fontSize: 12,
-  color: "#334155",
-  whiteSpace: "pre-wrap",
-  lineHeight: 1.4,
 };
 
 const emptyStyle: React.CSSProperties = {
@@ -431,41 +305,15 @@ const metaStyle: React.CSSProperties = {
   fontWeight: 800,
 };
 
-const incidentTopStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 10,
-  alignItems: "baseline",
+const sectionStyle: React.CSSProperties = {
+  marginBottom: 12,
 };
 
-const incidentTitleStyle: React.CSSProperties = {
-  fontWeight: 900,
-  color: "#0f172a",
-  fontSize: 13,
-};
-
-const severityStyle: React.CSSProperties = {
-  fontSize: 12,
-  fontWeight: 900,
-  color: "#0f172a",
-  backgroundColor: "#f1f5f9",
-  border: "1px solid #e2e8f0",
-  padding: "2px 8px",
-  borderRadius: 999,
-};
-
-const kindPillStyle: React.CSSProperties = {
+const sectionHeadingStyle: React.CSSProperties = {
+  margin: "0 0 6px 0",
   fontSize: 11,
   fontWeight: 900,
+  letterSpacing: "0.06em",
   textTransform: "uppercase",
-  color: "#0369a1",
-  backgroundColor: "#e0f2fe",
-  padding: "2px 8px",
-  borderRadius: 999,
-};
-
-const kindPillIncidentStyle: React.CSSProperties = {
-  ...kindPillStyle,
-  color: "#9a3412",
-  backgroundColor: "#ffedd5",
+  color: "#64748b",
 };

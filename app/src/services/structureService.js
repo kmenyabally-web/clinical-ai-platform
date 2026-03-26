@@ -18,6 +18,7 @@ import { auth, db } from "../firebase";
 import { getUserContext } from "./authService";
 import { isPlatformAdmin } from "./platformAdminService";
 import { assertTenantContext, TENANT_UNSCOPED_WARD } from "../utils/tenantContext";
+import { logAuditEvent } from "./auditService";
 
 const HOSPITALS_COLLECTION = "hospitals";
 const WARDS_COLLECTION = "wards";
@@ -116,6 +117,17 @@ export async function createHospital(organisationId, data) {
     wardId: TENANT_UNSCOPED_WARD,
     createdAt: serverTimestamp(),
   });
+  void logAuditEvent({
+    action: "CREATE_HOSPITAL",
+    user: {
+      uid: auth.currentUser?.uid ?? null,
+      email: auth.currentUser?.email ?? null,
+    },
+    organisationId,
+    hospitalId: ref.id,
+    wardId: TENANT_UNSCOPED_WARD,
+    metadata: { name: data.name.trim() },
+  });
   return { id: ref.id };
 }
 
@@ -137,6 +149,17 @@ export async function createWard(organisationId, hospitalId, data) {
     organisationId,
     wardId: ref.id,
     createdAt: serverTimestamp(),
+  });
+  void logAuditEvent({
+    action: "CREATE_WARD",
+    user: {
+      uid: auth.currentUser?.uid ?? null,
+      email: auth.currentUser?.email ?? null,
+    },
+    organisationId,
+    hospitalId,
+    wardId: ref.id,
+    metadata: { name: data.name.trim() },
   });
   return { id: ref.id };
 }

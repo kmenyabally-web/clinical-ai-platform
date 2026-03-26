@@ -12,6 +12,8 @@ import {
   getPlanLimits,
   BILLING_CYCLES,
 } from "../services/billingService";
+import { getSubscription as getPreStripeSubscription, MOCK_PLANS } from "../services/subscriptionService";
+import { hasFeature as hasPlanFeature } from "../utils/featureAccess.js";
 import { PLANS as PLAN_DEFS } from "../constants/plans";
 import { formatUkDate } from "../utils/dateFormat";
 
@@ -36,6 +38,7 @@ export default function Billing() {
   const { role, can } = useRole();
   const [searchParams, setSearchParams] = useSearchParams();
   const [subscription, setSubscription] = useState<Awaited<ReturnType<typeof getSubscription>>>(null);
+  const [preStripeSubscription, setPreStripeSubscription] = useState<Awaited<ReturnType<typeof getPreStripeSubscription>>>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
@@ -60,6 +63,14 @@ export default function Billing() {
       .then(setSubscription)
       .catch((e: Error) => setError(e?.message ?? "Failed to load subscription"))
       .finally(() => setLoading(false));
+  }, [organisationId]);
+
+  useEffect(() => {
+    if (!organisationId) {
+      setPreStripeSubscription(null);
+      return;
+    }
+    getPreStripeSubscription(organisationId).then(setPreStripeSubscription).catch(() => setPreStripeSubscription(null));
   }, [organisationId]);
 
   async function handleChangePlanLocal(newPlanKey: string) {
@@ -171,90 +182,121 @@ export default function Billing() {
       )}
 
       {subscription && (
-        <>
-          <div style={cardStyle}>
-            <h2 style={{ marginTop: 0, fontSize: "1.2rem" }}>Current plan</h2>
-            <p style={{ fontSize: "1.25rem", fontWeight: 700, marginBottom: 0 }}>{subscription.planName}</p>
-            <p style={{ color: "#666", marginTop: 4 }}>
-              Billing cycle: <strong>{subscription.billingCycle}</strong>
-            </p>
-            <p style={{ color: "#666", marginTop: 4 }}>
-              Renewal date: <strong>{formatDate(subscription.endDate)}</strong>
-            </p>
-            <p style={{ fontSize: "0.875rem", color: "#888", marginTop: 8 }}>
-              Service limit:{" "}
-              {getPlanLimits(subscription.planName).maxServices == null
-                ? "Unlimited"
-                : getPlanLimits(subscription.planName).maxServices}
-            </p>
-          </div>
+        <div style={cardStyle}>
+          <h2 style={{ marginTop: 0, fontSize: "1.2rem" }}>Current plan</h2>
+          <p style={{ fontSize: "1.25rem", fontWeight: 700, marginBottom: 0 }}>{subscription.planName}</p>
+          <p style={{ color: "#666", marginTop: 4 }}>
+            Billing cycle: <strong>{subscription.billingCycle}</strong>
+          </p>
+          <p style={{ color: "#666", marginTop: 4 }}>
+            Renewal date: <strong>{formatDate(subscription.endDate)}</strong>
+          </p>
+          <p style={{ fontSize: "0.875rem", color: "#888", marginTop: 8 }}>
+            Service limit:{" "}
+            {getPlanLimits(subscription.planName).maxServices == null
+              ? "Unlimited"
+              : getPlanLimits(subscription.planName).maxServices}
+          </p>
+        </div>
+      )}
 
-          <div style={cardStyle}>
-            <h2 style={{ marginTop: 0, fontSize: "1.2rem" }}>Plans &amp; pricing</h2>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-                gap: 12,
-              }}
-            >
-              {(Object.keys(PLAN_DEFS) as Array<keyof typeof PLAN_DEFS>).map((key) => {
-                const def = PLAN_DEFS[key];
-                const isCurrent = currentKey === key;
-                const priceLabel = def.price === 0 ? "Free" : `£${def.price}/mo`;
-                return (
-                  <div
-                    key={key}
+      <div style={cardStyle}>
+        <h2 style={{ marginTop: 0, fontSize: "1.2rem" }}>Pre-Stripe plan access</h2>
+        <p style={{ color: "#666", marginTop: 0 }}>
+          Current plan: <strong>{preStripeSubscription?.plan ?? "FREE"}</strong>
+        </p>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: "left", padding: "8px 6px", borderBottom: "1px solid #e5e7eb" }}>Plan</th>
+                <th style={{ textAlign: "left", padding: "8px 6px", borderBottom: "1px solid #e5e7eb" }}>Evidence Pack</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(MOCK_PLANS).map(([plan, features]) => (
+                <tr key={plan}>
+                  <td style={{ padding: "8px 6px", borderBottom: "1px solid #f1f5f9", fontWeight: 700 }}>{plan}</td>
+                  <td style={{ padding: "8px 6px", borderBottom: "1px solid #f1f5f9" }}>
+                    {features.evidencePack ? "Enabled" : "Locked"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p style={{ color: "#64748b", marginBottom: 0, marginTop: 10, fontSize: "0.85rem" }}>
+          Effective access now:{" "}
+          <strong>{hasPlanFeature(preStripeSubscription, "evidencePack") ? "Evidence Pack enabled" : "Evidence Pack locked"}</strong>
+        </p>
+      </div>
+
+      <div style={cardStyle}>
+        <h2 style={{ marginTop: 0, fontSize: "1.2rem" }}>Plans &amp; pricing</h2>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+            gap: 12,
+          }}
+        >
+          {(Object.keys(PLAN_DEFS) as Array<keyof typeof PLAN_DEFS>).map((key) => {
+            const def = PLAN_DEFS[key];
+            const isCurrent = currentKey === key;
+            const priceLabel = def.price === 0 ? "Free" : `£${def.price}/mo`;
+            return (
+              <div
+                key={key}
+                style={{
+                  border: `1px solid ${isCurrent ? "#1976d2" : "#e0e0e0"}`,
+                  borderRadius: 12,
+                  padding: "1rem",
+                  background: isCurrent ? "#e3f2fd" : "#fafafa",
+                }}
+              >
+                <div style={{ fontWeight: 800, fontSize: "1.1rem" }}>{def.name}</div>
+                <div style={{ fontSize: "1.25rem", marginTop: 8 }}>{priceLabel}</div>
+                <ul style={{ margin: "0.75rem 0 0 1rem", padding: 0, fontSize: "0.85rem", color: "#555" }}>
+                  {def.features.map((f) => (
+                    <li key={f}>{f}</li>
+                  ))}
+                </ul>
+                {canManageBilling && !isCurrent && (
+                  <button
+                    type="button"
+                    disabled={actionLoading}
+                    onClick={() => handleSelectPlan(key)}
                     style={{
-                      border: `1px solid ${isCurrent ? "#1976d2" : "#e0e0e0"}`,
-                      borderRadius: 12,
-                      padding: "1rem",
-                      background: isCurrent ? "#e3f2fd" : "#fafafa",
+                      marginTop: 12,
+                      width: "100%",
+                      padding: "8px 12px",
+                      background: "#1976d2",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: 8,
+                      cursor: actionLoading ? "not-allowed" : "pointer",
+                      fontWeight: 600,
                     }}
                   >
-                    <div style={{ fontWeight: 800, fontSize: "1.1rem" }}>{def.name}</div>
-                    <div style={{ fontSize: "1.25rem", marginTop: 8 }}>{priceLabel}</div>
-                    <ul style={{ margin: "0.75rem 0 0 1rem", padding: 0, fontSize: "0.85rem", color: "#555" }}>
-                      {def.features.map((f) => (
-                        <li key={f}>{f}</li>
-                      ))}
-                    </ul>
-                    {canManageBilling && !isCurrent && (
-                      <button
-                        type="button"
-                        disabled={actionLoading}
-                        onClick={() => handleSelectPlan(key)}
-                        style={{
-                          marginTop: 12,
-                          width: "100%",
-                          padding: "8px 12px",
-                          background: "#1976d2",
-                          color: "#fff",
-                          border: "none",
-                          borderRadius: 8,
-                          cursor: actionLoading ? "not-allowed" : "pointer",
-                          fontWeight: 600,
-                        }}
-                      >
-                        {key === PLANS.BASIC ? "Switch to Basic" : `Upgrade to ${def.name}`}
-                      </button>
-                    )}
-                    {isCurrent && (
-                      <p style={{ marginTop: 12, marginBottom: 0, fontSize: "0.85rem", color: "#1976d2" }}>
-                        Current plan
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            <p style={{ fontSize: "0.8rem", color: "#888", marginTop: 12, marginBottom: 0 }}>
-              Paid upgrades use Stripe Checkout (configure Cloud Functions and <code>VITE_FIREBASE_FUNCTIONS_URL</code>).
-              Basic can be selected without payment.
-            </p>
-          </div>
+                    {key === PLANS.BASIC ? "Switch to Basic" : `Upgrade to ${def.name}`}
+                  </button>
+                )}
+                {isCurrent && (
+                  <p style={{ marginTop: 12, marginBottom: 0, fontSize: "0.85rem", color: "#1976d2" }}>
+                    Current plan
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <p style={{ fontSize: "0.8rem", color: "#888", marginTop: 12, marginBottom: 0 }}>
+          Paid upgrades use Stripe Checkout (configure Cloud Functions and <code>VITE_FIREBASE_FUNCTIONS_URL</code>).
+          Basic can be selected without payment.
+        </p>
+      </div>
 
-          {canManageBilling && (
+      {subscription && canManageBilling && (
             <div style={cardStyle}>
               <h2 style={{ marginTop: 0, fontSize: "1.2rem" }}>Change plan (quick)</h2>
               <p style={{ color: "#666", marginBottom: "1rem" }}>
@@ -300,8 +342,6 @@ export default function Billing() {
                 </button>
               </div>
             </div>
-          )}
-        </>
       )}
     </div>
   );

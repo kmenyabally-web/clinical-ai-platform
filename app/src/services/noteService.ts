@@ -14,7 +14,7 @@ import {
   where,
 } from "firebase/firestore";
 import { db, auth } from "../firebase";
-import { logAction, logAudit } from "./auditService";
+import { logAction, logAudit, logAuditEvent } from "./auditService";
 import { safeModeFields } from "../utils/safeMode";
 import { getUserContext } from "./authService";
 import { addTimelineEntry, PATIENT_TIMELINE_COLLECTION } from "./patientTimelineService";
@@ -36,6 +36,21 @@ import type {
 
 /** Primary collection for clinical notes (Firestore source of truth). */
 export const NOTES_COLLECTION = "notes";
+export const NOTE_ADDENDUMS_COLLECTION = "note_addendums";
+
+function assertRequiredWriteContext({
+  organisationId,
+  hospitalId,
+  userId,
+}: {
+  organisationId?: string | null;
+  hospitalId?: string | null;
+  userId?: string | null;
+}) {
+  if (!organisationId) throw new Error("Missing organisation");
+  if (!hospitalId) throw new Error("Missing hospital");
+  if (!userId) throw new Error("Missing user");
+}
 
 /** Legacy collection — read-only merge for existing deployments. New writes use {@link NOTES_COLLECTION}. */
 const LEGACY_CLINICAL_NOTES_COLLECTION = "clinical_notes";
@@ -235,6 +250,7 @@ export async function addClinicalNote(
   }
 
   const { organisationId, hospitalId: ctxHospitalId, wardId: ctxWardId, role: authorRole } = await getUserContext();
+  const userId = auth.currentUser?.uid ?? null;
   if (!organisationId) throw new Error("Governance Error: organisationId is missing.");
 
   const mdtProfile = auth.currentUser?.uid ? await getCurrentUserProfile(auth.currentUser.uid) : null;
@@ -276,6 +292,7 @@ export async function addClinicalNote(
   if (!hospitalId) {
     throw new Error("hospitalId is required to create clinical notes.");
   }
+  assertRequiredWriteContext({ organisationId, hospitalId, userId });
 
   const aiResult = (await processClinicalNote(content).catch(() => null)) as Record<string, unknown> | null;
 
@@ -396,6 +413,24 @@ export async function addClinicalNote(
     organisationId,
     patientId: targetPatientId,
     noteId: noteSnap.id,
+  });
+  void logAuditEvent({
+    action: "CREATE_NOTE",
+    user: {
+      uid: auth.currentUser?.uid ?? null,
+      email: auth.currentUser?.email ?? null,
+      role: authorRole ?? null,
+    },
+    organisationId,
+    hospitalId,
+    wardId,
+    patientId: targetPatientId,
+    metadata: {
+      noteId: noteSnap.id,
+      preview: content.slice(0, 100),
+      category,
+      discipline,
+    },
   });
 
   return { id: noteSnap.id };
@@ -531,6 +566,7 @@ export async function fetchClinicalNotesForPatient(
  */
 export async function saveClinicalNote(note: ClinicalNote): Promise<{ id: string }> {
   const { organisationId, hospitalId: ctxHospitalId, wardId: ctxWardId, role: ctxRole } = await getUserContext();
+  const userId = auth.currentUser?.uid ?? null;
   if (!organisationId) throw new Error("Governance Error: organisationId is missing.");
   if (!ctxHospitalId) throw new Error("hospitalId is required for clinical note writes.");
 
@@ -564,6 +600,7 @@ export async function saveClinicalNote(note: ClinicalNote): Promise<{ id: string
   const hospitalId = patient.hospitalId || (ctxHospitalId ? String(ctxHospitalId) : "");
   const wardId = patient.wardId || (ctxWardId ? String(ctxWardId) : "");
   if (!hospitalId) throw new Error("hospitalId is required to save clinical notes.");
+  assertRequiredWriteContext({ organisationId, hospitalId, userId });
 
   const authorId = auth.currentUser?.uid ?? null;
   const authorRole = ctxRole ?? note.authorRole ?? null;
@@ -606,27 +643,7 @@ export async function saveClinicalNote(note: ClinicalNote): Promise<{ id: string
   const noteId = (note.id ?? "").toString().trim();
 
   if (noteId) {
-    const ref = doc(db, NOTES_COLLECTION, noteId);
-    await updateDoc(ref, updatePayload);
-    try {
-      await addTimelineEntry({
-        organisationId,
-        patientId,
-        hospitalId,
-        wardId,
-        serviceId: null,
-        eventType: "clinical_note",
-        eventTitle: `${category} clinical note (updated)`,
-        eventDescription: content,
-        sourceCollection: NOTES_COLLECTION,
-        sourceId: noteId,
-        createdBy: authorEmail,
-        metadata: { category, discipline, structured },
-      });
-    } catch {
-      console.warn("Clinical note timeline update entry failed (non-fatal).");
-    }
-    return { id: noteId };
+    throw new Error("This record cannot be edited. Add addendum instead.");
   }
 
   assertTenantContext(organisationId, hospitalId);
@@ -685,6 +702,24 @@ export async function saveClinicalNote(note: ClinicalNote): Promise<{ id: string
   }
 
   void logAction("CLINICAL_NOTE_CREATE", auth.currentUser?.uid ?? null);
+  void logAuditEvent({
+    action: "CREATE_NOTE",
+    user: {
+      uid: auth.currentUser?.uid ?? null,
+      email: auth.currentUser?.email ?? null,
+      role: authorRole ?? null,
+    },
+    organisationId,
+    hospitalId,
+    wardId,
+    patientId,
+    metadata: {
+      noteId: noteSnap.id,
+      preview: content.slice(0, 100),
+      category,
+      discipline,
+    },
+  });
 
   return { id: noteSnap.id };
 }
@@ -697,10 +732,100 @@ export async function updateClinicalNoteAiOutputs(
   noteId: string,
   aiPatch: Record<string, unknown>
 ): Promise<void> {
-  const id = (noteId ?? "").toString().trim();
-  if (!id) throw new Error("noteId is required.");
-  if (!aiPatch || typeof aiPatch !== "object") throw new Error("aiPatch is required.");
+  void noteId;
+  void aiPatch;
+  throw new Error("This record cannot be edited. Add addendum instead.");
+}
 
-  const ref = doc(db, NOTES_COLLECTION, id);
-  await updateDoc(ref, aiPatch);
+export async function addAddendum(noteId: string, text: string): Promise<{ id: string }> {
+  const id = (noteId ?? "").toString().trim();
+  const addendumText = (text ?? "").toString().trim();
+  if (!id) throw new Error("noteId is required.");
+  if (!addendumText) throw new Error("addendum text is required.");
+
+  const { organisationId, hospitalId: ctxHospitalId, wardId: ctxWardId, role } = await getUserContext();
+  const userId = auth.currentUser?.uid ?? null;
+  const userEmail = auth.currentUser?.email ?? null;
+  assertRequiredWriteContext({
+    organisationId: organisationId ? String(organisationId) : null,
+    hospitalId: ctxHospitalId ? String(ctxHospitalId) : null,
+    userId,
+  });
+
+  const noteRef = doc(db, NOTES_COLLECTION, id);
+  const noteSnap = await getDoc(noteRef);
+  if (!noteSnap.exists()) throw new Error("Note not found.");
+  const note = noteSnap.data() as Record<string, unknown>;
+
+  const noteOrgId = typeof note.organisationId === "string" ? note.organisationId : "";
+  const noteHospitalId = typeof note.hospitalId === "string" ? note.hospitalId : "";
+  const noteWardId = typeof note.wardId === "string" ? note.wardId : "";
+  const patientId = typeof note.patientId === "string" ? note.patientId : "";
+  if (!noteOrgId || noteOrgId !== organisationId) throw new Error("403 Forbidden: organisation scope mismatch");
+  if (!noteHospitalId || noteHospitalId !== ctxHospitalId) throw new Error("403 Forbidden: hospital scope mismatch");
+
+  const addendum = await addDoc(collection(db, NOTE_ADDENDUMS_COLLECTION), {
+    organisationId,
+    hospitalId: noteHospitalId,
+    wardId: noteWardId || (ctxWardId ? String(ctxWardId) : ""),
+    noteId: id,
+    patientId,
+    text: addendumText,
+    authorId: userId,
+    authorEmail: userEmail,
+    authorRole: role ?? null,
+    createdAt: serverTimestamp(),
+  });
+
+  void logAuditEvent({
+    action: "ADD_NOTE_ADDENDUM",
+    user: {
+      uid: userId,
+      email: userEmail,
+      role: role ?? null,
+    },
+    organisationId,
+    hospitalId: noteHospitalId,
+    wardId: noteWardId || null,
+    patientId,
+    metadata: {
+      noteId: id,
+      addendumId: addendum.id,
+      preview: addendumText.slice(0, 100),
+    },
+  });
+
+  return { id: addendum.id };
+}
+
+export async function fetchAddendumsForNote(noteId: string): Promise<
+  Array<{
+    id: string;
+    text: string;
+    authorEmail: string | null;
+    createdAt: unknown;
+  }>
+> {
+  const id = (noteId ?? "").toString().trim();
+  if (!id) return [];
+  const { organisationId, hospitalId } = await getUserContext();
+  if (!organisationId || !hospitalId) return [];
+
+  const q = query(
+    collection(db, NOTE_ADDENDUMS_COLLECTION),
+    where("organisationId", "==", organisationId),
+    where("hospitalId", "==", hospitalId),
+    where("noteId", "==", id),
+    orderBy("createdAt", "asc")
+  );
+  const snap = await getDocs(q);
+  return (snap.docs ?? []).map((d) => {
+    const x = d.data() as Record<string, unknown>;
+    return {
+      id: d.id,
+      text: typeof x.text === "string" ? x.text : "",
+      authorEmail: typeof x.authorEmail === "string" ? x.authorEmail : null,
+      createdAt: x.createdAt ?? null,
+    };
+  });
 }

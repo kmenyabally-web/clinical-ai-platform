@@ -244,7 +244,7 @@ export default function Documents() {
   }
 
   return (
-    <div>
+    <div style={{ maxWidth: 1120, margin: "0 auto", padding: "24px" }}>
       <div
         className="page-header"
         style={{
@@ -258,7 +258,7 @@ export default function Documents() {
       >
         <div>
           <h1 style={{ margin: 0 }}>Documents</h1>
-          <p style={{ margin: "0.25rem 0 0 0", fontSize: "0.9rem", color: "#555" }}>
+          <p style={{ margin: "0.25rem 0 0 0", fontSize: "0.9rem", color: "#64748b" }}>
             Organise and monitor documents by category.
           </p>
         </div>
@@ -310,9 +310,19 @@ export default function Documents() {
       </div>
 
       {error && (
-        <p role="alert" style={{ color: "#c62828", marginBottom: "1rem" }}>
+        <div
+          role="alert"
+          style={{
+            marginBottom: "1rem",
+            padding: "0.75rem 1rem",
+            background: "#fef2f2",
+            border: "1px solid #fecaca",
+            borderRadius: 12,
+            color: "#b91c1c",
+          }}
+        >
           {error}
-        </p>
+        </div>
       )}
 
       {loading ? (

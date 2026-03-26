@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from "react";
 import PatientTimeline from "./PatientTimeline";
 import { generateClinicalReportSection } from "../services/aiService";
-import { updateClinicalNoteAiOutputs } from "../services/noteService";
 
 function toMillis(value) {
   if (!value) return 0;
@@ -31,6 +30,7 @@ export default function PatientClinicalIntelligenceTabs({
   formatWhen,
   refreshNotes,
 }) {
+  const immutableClinicalRecords = true;
   const [activeTab, setActiveTab] = useState("notes"); // notes | timeline | summaries | mdt | reports | care
 
   // MDT filtering (discipline + date range) applies to Summaries/MDT/Reports/Care Folder tabs.
@@ -92,11 +92,9 @@ export default function PatientClinicalIntelligenceTabs({
         contextNotes,
       });
 
-      // Store under the most recent matching note; keeps UI consistent and avoids overwriting raw note content.
-      const reportKey = reportType === "cpa" ? "cpa" : reportType === "tribunal" ? "tribunal" : "mdtReview";
-      await updateClinicalNoteAiOutputs(latestNote.id, { [`reports.${reportKey}`]: section });
-
-      void refreshNotes?.();
+      // Clinical notes are immutable. Report output is preview-only unless saved as a new clinical addendum/note.
+      void section;
+      throw new Error("This record cannot be edited. Add addendum instead.");
     } catch (e) {
       setReportError(e?.message ?? "Report generation failed.");
     } finally {
@@ -222,6 +220,7 @@ export default function PatientClinicalIntelligenceTabs({
             onGenerateCPA={() => handleGenerateReport("cpa")}
             onGenerateTribunal={() => handleGenerateReport("tribunal")}
             onGenerateMdtReview={() => handleGenerateReport("mdtReview")}
+            immutableClinicalRecords={immutableClinicalRecords}
           />
         )}
 
@@ -310,7 +309,7 @@ function MdtReviewsPanel({ notes, redactSensitive, formatWhen }) {
   );
 }
 
-function ReportsPanel({ patientId, notes, discipline, loading, error, onGenerateCPA, onGenerateTribunal, onGenerateMdtReview }) {
+function ReportsPanel({ patientId, notes, discipline, loading, error, onGenerateCPA, onGenerateTribunal, onGenerateMdtReview, immutableClinicalRecords }) {
   const latest = notes?.slice().sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt))[0];
 
   const cpa = latest?.reports?.cpa;
@@ -320,16 +319,21 @@ function ReportsPanel({ patientId, notes, discipline, loading, error, onGenerate
   return (
     <div>
       <div style={styles.reportActions}>
-        <button type="button" style={styles.reportBtn} onClick={onGenerateCPA} disabled={loading}>
+        <button type="button" style={styles.reportBtn} onClick={onGenerateCPA} disabled={loading || immutableClinicalRecords}>
           {loading ? "Generating…" : "Generate CPA report"}
         </button>
-        <button type="button" style={styles.reportBtn} onClick={onGenerateTribunal} disabled={loading}>
+        <button type="button" style={styles.reportBtn} onClick={onGenerateTribunal} disabled={loading || immutableClinicalRecords}>
           {loading ? "Generating…" : "Generate Tribunal report"}
         </button>
-        <button type="button" style={styles.reportBtn} onClick={onGenerateMdtReview} disabled={loading}>
+        <button type="button" style={styles.reportBtn} onClick={onGenerateMdtReview} disabled={loading || immutableClinicalRecords}>
           {loading ? "Generating…" : "Generate MDT review"}
         </button>
       </div>
+      {immutableClinicalRecords ? (
+        <div role="status" style={styles.warningBox}>
+          This record cannot be edited. Add addendum instead.
+        </div>
+      ) : null}
 
       {error ? <div role="alert" style={styles.errorBox}>{error}</div> : null}
 
@@ -571,6 +575,16 @@ const styles = {
     background: "#fef2f2",
     border: "1px solid #fecaca",
     color: "#991b1b",
+    fontWeight: 900,
+    fontSize: 13,
+    marginBottom: 12,
+  },
+  warningBox: {
+    padding: "12px 14px",
+    borderRadius: 12,
+    background: "#fffbeb",
+    border: "1px solid #fde68a",
+    color: "#92400e",
     fontWeight: 900,
     fontSize: 13,
     marginBottom: 12,

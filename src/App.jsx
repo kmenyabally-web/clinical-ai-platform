@@ -19,12 +19,22 @@ import Billing from "./pages/Billing";
 import AdminPanel from "./pages/AdminPanel";
 import Unauthorised from "./pages/Unauthorised";
 import IncidentFormPage from "./components/IncidentFormPage";
+import { useRole } from "./context/RoleContext";
+import CreateOrganisation from "./pages/CreateOrganisation";
+import SystemOrganisations from "./pages/SystemOrganisations";
 
 const Governance = () => <h1>Governance</h1>;
 const Safeguarding = () => <h1>Safeguarding</h1>;
 const MentalCapacity = () => <h1>Mental Capacity</h1>;
 const Staffing = () => <h1>Staffing & Training</h1>;
 const CarePlanning = () => <h1>Care Planning</h1>;
+
+const SuperAdminRoute = ({ children }) => {
+  const { loading, isSuperAdmin } = useRole();
+  if (loading) return <div>Loading...</div>;
+  if (!isSuperAdmin) return <Navigate to="/dashboard" replace />;
+  return children;
+};
 
 export default function App() {
   return (
@@ -38,6 +48,43 @@ export default function App() {
           element={
             <ProtectedRoute>
               <Unauthorised />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/system-admin/organisations"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <SuperAdminRoute>
+                  <SystemOrganisations />
+                </SuperAdminRoute>
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/system-admin/create-organisation"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <SuperAdminRoute>
+                  <CreateOrganisation />
+                </SuperAdminRoute>
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/organisation-dashboard"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <Dashboard />
+              </Layout>
             </ProtectedRoute>
           }
         />

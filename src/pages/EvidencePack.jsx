@@ -83,7 +83,7 @@ export default function EvidencePack() {
 
   return (
     <div style={{ padding: "2rem" }}>
-      <h1 style={{ margin: "0 0 0.5rem", color: "#0f172a" }}>CQC Evidence Pack Generator</h1>
+      <h1 style={{ margin: "0 0 0.5rem", color: "#0f172a" }}>SanctumCare Evidence Pack Generator</h1>
       <p style={{ margin: "0 0 1.5rem", color: "#475569", maxWidth: 720 }}>
         Generate an inspection-ready ZIP bundle containing care plans, clinical note summaries, and a manifest for audit trail purposes.
       </p>

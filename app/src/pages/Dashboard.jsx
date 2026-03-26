@@ -57,13 +57,17 @@ export default function Dashboard() {
     let cancelled = false;
 
     async function loadIncidentStats() {
-      // Stage 7 prompt explicitly requests dev-org-001 and a direct Firestore query.
-      const orgForStage7 = "dev-org-001";
+      if (!organisationId) {
+        setIncidentStats({ totalIncidents: 0, highSeverityIncidents: 0, pendingActions: 0 });
+        setRecentIncidents([]);
+        setIncidentStatsLoading(false);
+        return;
+      }
       setIncidentStatsLoading(true);
       try {
         const q = query(
           collection(db, "incidents"),
-          where("organisationId", "==", orgForStage7)
+          where("organisationId", "==", organisationId)
         );
         const snapshot = await getDocs(q);
         const docs = snapshot?.docs ?? [];
@@ -129,17 +133,21 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [organisationId]);
 
   useEffect(() => {
     let cancelled = false;
     async function loadAuditLogsCount() {
+      if (!organisationId) {
+        setAuditLogsCount(0);
+        setAuditLogsCountLoading(false);
+        return;
+      }
       setAuditLogsCountLoading(true);
       try {
-        // Safety: Firestore security rules should enforce org scoping.
         const q = query(
           collection(db, "audit_logs"),
-          where("organisationId", "==", "dev-org-001"),
+          where("organisationId", "==", organisationId),
           orderBy("timestamp", "desc"),
           limit(50)
         );
@@ -156,7 +164,7 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [organisationId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -294,7 +302,7 @@ export default function Dashboard() {
   };
 
   return (
-    <div style={{ padding: 40 }}>
+    <div style={styles.page}>
       <style>{`
         @keyframes urgentPulse {
           0% { transform: scale(1); opacity: 1; }
@@ -327,9 +335,9 @@ export default function Dashboard() {
           flex-shrink: 0;
         }
       `}</style>
-      <h1 style={{ marginTop: 0 }}>Compliance Dashboard</h1>
+      <h1 style={styles.title}>Compliance Dashboard</h1>
       {organisation?.name && (
-        <p style={{ margin: "0 0 1rem 0", color: "#555", fontSize: "0.95rem" }}>
+        <p style={styles.subtitle}>
           {organisation.name}
           {currentServiceId ? ` · ${currentServiceName}` : ""}
         </p>
@@ -442,7 +450,7 @@ export default function Dashboard() {
         </div>
       ) : null}
 
-      <section style={{ marginBottom: "1.5rem" }}>
+      <section style={styles.section}>
         <h2 style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>Dashboard</h2>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 20 }}>
           <div className="stat-card" style={{ padding: 20, background: "#f3f3f3", borderRadius: 12 }}>
@@ -550,7 +558,7 @@ export default function Dashboard() {
         </div>
       </section>
 
-      <section aria-label="Recent incidents" style={{ marginBottom: "1.5rem" }}>
+      <section aria-label="Recent incidents" style={styles.section}>
         <h2 style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>Recent Activity (Last 5 incidents)</h2>
         <div style={{ background: "#ffffff", borderRadius: 12, border: "1px solid #e2e8f0", overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -588,7 +596,7 @@ export default function Dashboard() {
         </div>
       </section>
 
-      <section aria-label="CQC compliance scores">
+      <section aria-label="CQC compliance scores" style={styles.section}>
         <h2 style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>CQC compliance scores</h2>
         {complianceLoading && (
           <p style={{ color: "#666" }}>Loading compliance scores…</p>
@@ -643,5 +651,31 @@ const tableStyles = {
     borderBottom: "1px solid #f1f5f9",
     color: "#0f172a",
     fontSize: "0.85rem",
+  },
+};
+
+const styles = {
+  page: {
+    maxWidth: 1120,
+    margin: "0 auto",
+    padding: "24px",
+  },
+  title: {
+    marginTop: 0,
+    marginBottom: 6,
+    color: "#0f172a",
+  },
+  subtitle: {
+    margin: "0 0 1rem 0",
+    color: "#64748b",
+    fontSize: "0.95rem",
+  },
+  section: {
+    marginBottom: "1.5rem",
+    background: "#ffffff",
+    border: "1px solid #e2e8f0",
+    borderRadius: 14,
+    padding: "1rem 1.1rem",
+    boxShadow: "0 4px 14px rgba(15, 23, 42, 0.04)",
   },
 };

@@ -64,7 +64,8 @@ function snapshotFromDoc(d) {
 
 /** AI draft rows in `care_plans`: full text + draft status (separate from structured care plan records). */
 export async function saveAiCarePlanDraft({ organisationId, patientId, content }) {
-  const org = (organisationId ?? "").trim() || "dev-org-001";
+  const org = (organisationId ?? "").trim() || null;
+  if (!org) throw new Error("organisationId is required");
   if (!patientId?.trim()) throw new Error("patientId is required");
   const body = String(content ?? "").trim();
   if (!body) throw new Error("content is required");
@@ -114,7 +115,8 @@ export async function listCarePlansForPatient(organisationId, patientId, { limit
 
 /** List AI-saved drafts for a patient (documents with status "draft" and `content`). */
 export async function listAiCarePlanDraftsForPatient(organisationId, patientId, { limitCount = 25 } = {}) {
-  const org = (organisationId ?? "").trim() || "dev-org-001";
+  const org = (organisationId ?? "").trim() || null;
+  if (!org) return [];
   if (!patientId?.trim()) return [];
 
   const ref = collection(db, CARE_PLANS_COLLECTION);

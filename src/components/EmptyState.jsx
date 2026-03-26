@@ -18,7 +18,7 @@ export default function EmptyState() {
       }}
     >
       <h1 style={{ fontSize: "1.5rem", marginTop: 0, marginBottom: "1rem", color: "#1e293b" }}>
-        Welcome to the CQC Readiness Platform
+        Welcome to SanctumCare
       </h1>
       <p style={{ margin: 0, color: "#475569", lineHeight: 1.6 }}>
         No services configured yet.

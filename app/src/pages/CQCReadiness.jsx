@@ -88,9 +88,9 @@ export default function CQCReadiness() {
   return (
     <div style={{ padding: "2rem" }}>
       <header style={{ marginBottom: "1.5rem" }}>
-        <h1 style={{ margin: 0, marginBottom: "0.25rem" }}>CQC Readiness</h1>
+        <h1 style={{ margin: 0, marginBottom: "0.25rem" }}>SanctumCare Clinical Readiness</h1>
         <p style={{ margin: 0, fontSize: "0.9rem", color: "#555" }}>
-          Inspection readiness scores for your organisation by key CQC domains.
+          Inspection readiness scores for your organisation by key inspection domains.
         </p>
         <p style={{ margin: 0, marginTop: "0.25rem", fontSize: "0.85rem", color: "#777" }}>
           Organisation: {organisation?.name ?? organisationId ?? "—"}
@@ -109,7 +109,7 @@ export default function CQCReadiness() {
 
       {loading && (
         <section aria-busy="true">
-          <div
+            <div
             style={{
               background: "#fff",
               border: "1px solid #e0e0e0",
@@ -118,7 +118,7 @@ export default function CQCReadiness() {
               color: "#666",
             }}
           >
-            Loading CQC readiness scores…
+            Loading clinical readiness scores…
           </div>
         </section>
       )}
@@ -143,7 +143,7 @@ export default function CQCReadiness() {
 
       {!loading && !error && (
         <>
-          <section aria-label="Overall CQC readiness">
+          <section aria-label="Overall clinical readiness">
             <div
               style={{
                 minWidth: "200px",

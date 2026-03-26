@@ -5,20 +5,29 @@ import { Link } from "react-router-dom";
 import { useOrganisation } from "../context/OrganisationContext";
 import { listPatients } from "../services/patientService";
 import { getUserContext } from "../services/authService";
-import { buildEvidencePackZip } from "../services/evidencePackService";
+import { buildEvidencePackZip, generateEvidencePack } from "../services/evidencePackService";
 import { logAuditEvent } from "../services/auditService";
+import { getSubscription } from "../services/subscriptionService";
+import { hasFeature } from "../utils/featureAccess.js";
 import ActionBar from "../components/ActionBar";
+import { APP_CONFIG } from "../config/appConfig";
 
 export default function EvidencePack() {
-  const { hasFeature } = useOrganisation();
+  const { organisationId, organisation } = useOrganisation();
+  const [subscription, setSubscription] = useState(null);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(true);
+  const canAccess = hasFeature(subscription, "evidencePack");
   const [patients, setPatients] = useState([]);
   const [loadingPatients, setLoadingPatients] = useState(true);
   const [patientsError, setPatientsError] = useState(null);
 
   const [selectedPatientId, setSelectedPatientId] = useState("");
   const [generating, setGenerating] = useState(false);
+  const [packLoading, setPackLoading] = useState(false);
   const [error, setError] = useState(null);
   const [lastSummary, setLastSummary] = useState(null);
+  const [pack, setPack] = useState(null);
+  const [packGeneratedAt, setPackGeneratedAt] = useState("");
 
   const selectedPatient = useMemo(
     () => patients.find((p) => p.id === selectedPatientId) ?? null,
@@ -30,7 +39,33 @@ export default function EvidencePack() {
     : "";
 
   useEffect(() => {
-    if (!hasFeature("reports")) {
+    let mounted = true;
+    async function loadSubscription() {
+      if (!organisationId) {
+        setSubscription(null);
+        setSubscriptionLoading(false);
+        return;
+      }
+      setSubscriptionLoading(true);
+      try {
+        const sub = await getSubscription(organisationId);
+        if (!mounted) return;
+        setSubscription(sub);
+      } catch {
+        if (!mounted) return;
+        setSubscription(null);
+      } finally {
+        if (mounted) setSubscriptionLoading(false);
+      }
+    }
+    loadSubscription();
+    return () => {
+      mounted = false;
+    };
+  }, [organisationId]);
+
+  useEffect(() => {
+    if (!canAccess) {
       setLoadingPatients(false);
       return;
     }
@@ -54,7 +89,7 @@ export default function EvidencePack() {
     return () => {
       mounted = false;
     };
-  }, [hasFeature]);
+  }, [canAccess]);
 
   useEffect(() => {
     if (!selectedPatientId && patients.length > 0) {
@@ -62,15 +97,27 @@ export default function EvidencePack() {
     }
   }, [patients, selectedPatientId]);
 
-  if (!hasFeature("reports")) {
+  if (subscriptionLoading) {
     return (
-      <div style={{ padding: "2rem", maxWidth: 560, margin: "0 auto" }}>
-        <h1 style={{ marginTop: 0 }}>CQC Evidence Pack</h1>
+      <div style={{ padding: "24px", maxWidth: 560, margin: "0 auto" }}>
+        <h1 style={{ marginTop: 0 }}>{APP_CONFIG.name} Evidence Pack</h1>
+        <p style={{ color: "#64748b" }}>Loading subscription…</p>
+      </div>
+    );
+  }
+
+  if (!canAccess) {
+    return (
+      <div style={{ padding: "24px", maxWidth: 560, margin: "0 auto" }}>
+        <h1 style={{ marginTop: 0 }}>{APP_CONFIG.name} Evidence Pack</h1>
         <p style={{ color: "#64748b" }}>
           Evidence pack export is available on the Enterprise plan.{" "}
           <Link to="/billing" style={{ color: "#005eb8", fontWeight: 700 }}>
             View billing &amp; plans
           </Link>
+        </p>
+        <p style={{ color: "#64748b", fontSize: 13, marginTop: 8 }}>
+          Current plan: <strong>{subscription?.plan ?? "FREE"}</strong>
         </p>
       </div>
     );
@@ -86,7 +133,8 @@ export default function EvidencePack() {
     setGenerating(true);
     try {
       const { organisationId } = await getUserContext();
-      const org = organisationId || "dev-org-001";
+      const org = organisationId || null;
+      if (!org) throw new Error("organisationId required");
       const { blob, rootFolderName, counts } = await buildEvidencePackZip({
         organisationId: org,
         patientId: selectedPatient.id,
@@ -94,7 +142,7 @@ export default function EvidencePack() {
       });
 
       const dateStr = new Date().toISOString().slice(0, 10);
-      const filename = `CQC_Evidence_Pack_${dateStr}.zip`;
+      const filename = `SanctumCare_Evidence_Pack_${dateStr}.zip`;
 
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -119,20 +167,41 @@ export default function EvidencePack() {
     }
   }
 
-  function generateEvidencePack() {
+  function generateZipEvidencePack() {
     void handleGenerateBundle();
   }
 
+  async function handleGeneratePack() {
+    setError(null);
+    setPackLoading(true);
+    try {
+      const { organisationId } = await getUserContext();
+      if (!organisationId) throw new Error("organisationId required");
+      const data = await generateEvidencePack({ organisationId });
+      setPack(data);
+      setPackGeneratedAt(new Date().toLocaleString());
+    } catch (e) {
+      setError(e?.message ?? "Failed to generate evidence pack.");
+      setPack(null);
+      setPackGeneratedAt("");
+    } finally {
+      setPackLoading(false);
+    }
+  }
+
   return (
-    <div style={{ padding: "2rem", maxWidth: 720, margin: "0 auto" }}>
+    <div style={{ padding: "24px", maxWidth: 920, margin: "0 auto" }}>
       <style>{`
         @keyframes cqcSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
 
       <header style={{ marginBottom: "1.5rem" }}>
-        <h1 style={{ margin: 0, marginBottom: "0.35rem", fontSize: "1.65rem", fontWeight: 900, color: "#0f172a" }}>
-          CQC Evidence Pack
-        </h1>
+        <h2 style={{ margin: 0, marginBottom: 6, fontSize: "1.65rem", fontWeight: 900, color: "#0f172a" }}>
+          {APP_CONFIG.name} — Evidence Pack
+        </h2>
+        <p style={{ margin: 0, color: "#64748b", fontSize: "0.95rem", lineHeight: 1.5 }}>
+          Generated: {new Date().toLocaleDateString()}
+        </p>
         <p style={{ margin: 0, color: "#64748b", fontSize: "0.95rem", lineHeight: 1.5 }}>
           Generate a single inspection bundle (ZIP) containing clinical notes, care plans as readable text files, and
           organisation policy/evidence documents for the selected patient and organisation.
@@ -144,7 +213,12 @@ export default function EvidencePack() {
           {
             label: "⚡ Generate Evidence Pack",
             type: "generate",
-            onClick: () => generateEvidencePack(),
+            onClick: () => generateZipEvidencePack(),
+          },
+          {
+            label: packLoading ? "Generating report..." : "Generate Evidence Pack (Preview)",
+            type: "secondary",
+            onClick: () => handleGeneratePack(),
           },
         ]}
       />
@@ -260,7 +334,64 @@ export default function EvidencePack() {
             "Generate Inspection Bundle"
           )}
         </button>
+        <button
+          type="button"
+          onClick={() => window.print()}
+          style={{
+            padding: "12px 16px",
+            borderRadius: 10,
+            border: "1px solid #cbd5e1",
+            background: "#fff",
+            color: "#0f172a",
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          Export / Print
+        </button>
       </div>
+
+      {pack ? (
+        <section
+          style={{
+            marginTop: 16,
+            background: "#fff",
+            border: "1px solid #e2e8f0",
+            borderRadius: 12,
+            padding: "1rem",
+          }}
+        >
+          <p style={{ marginTop: 0, marginBottom: 8, color: "#64748b", fontSize: 13 }}>
+            Organisation: <strong>{organisation?.name ?? "Unknown"}</strong>
+            {" · "}
+            Generated at: <strong>{packGeneratedAt || "—"}</strong>
+          </p>
+          <h2 style={{ marginTop: 0 }}>Evidence Pack</h2>
+          <h3 style={{ marginBottom: 6 }}>Summary</h3>
+          <p style={{ marginTop: 0 }}>{pack.summary}</p>
+
+          <h3 style={{ marginBottom: 6 }}>Clinical Notes</h3>
+          {(pack.notes ?? []).map((n, i) => (
+            <div key={n.id ?? i} style={{ marginBottom: 6, color: "#334155" }}>
+              {n.content ?? "No content"}
+            </div>
+          ))}
+
+          <h3 style={{ marginBottom: 6, marginTop: 12 }}>Audit Logs</h3>
+          {(pack.audits ?? []).map((a, i) => (
+            <div key={a.id ?? i} style={{ marginBottom: 6, color: "#334155" }}>
+              {(a.action ?? a.eventType ?? "UNKNOWN")} by {a.userEmail ?? "Unknown user"}
+            </div>
+          ))}
+
+          <h3 style={{ marginBottom: 6, marginTop: 12 }}>Inspection Reports</h3>
+          {(pack.inspections ?? []).map((r, i) => (
+            <div key={r.id ?? i} style={{ marginBottom: 6, color: "#334155" }}>
+              Score: {r.score ?? r.overallScore ?? "—"} | Rating: {r.rating ?? r.overallRating ?? "—"}
+            </div>
+          ))}
+        </section>
+      ) : null}
 
       <section style={{ marginTop: "2rem", paddingTop: "1.25rem", borderTop: "1px solid #e2e8f0" }}>
         <h3 style={{ marginTop: 0, fontSize: "0.95rem", fontWeight: 900, color: "#334155" }}>What is included</h3>

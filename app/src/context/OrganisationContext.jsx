@@ -16,6 +16,7 @@ import { isPlatformAdmin } from "../services/platformAdminService";
 import { DEV_AUTH_BYPASS } from "../config/devAuth";
 import { hasFeature as planHasFeature, normalizePlanKey } from "../utils/featureAccess";
 import { auth, db } from "../firebase";
+import { getFeaturesForOrganisationType } from "../config/organisationTemplates";
 
 /** Normalise org / hospital / ward ids from Firestore (string, DocumentReference, or number). */
 function coerceTenantId(value) {
@@ -69,6 +70,7 @@ export function OrganisationProvider({ children }) {
         name: "Dev Organisation",
         status: "active",
         plan: "BASIC",
+        features: getFeaturesForOrganisationType("GENERAL"),
       };
       const devProfile = {
         orgId: devOrgId,

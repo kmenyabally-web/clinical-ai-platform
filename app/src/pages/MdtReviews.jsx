@@ -5,6 +5,7 @@ import { fetchClinicalNotesForPatient } from "../services/noteService";
 import { useRole } from "../context/RoleContext";
 import { useOrganisation } from "../context/OrganisationContext";
 import ActionBar from "../components/ActionBar";
+import { usePermissions } from "../hooks/usePermissions";
 
 function safeString(v) {
   return typeof v === "string" ? v : "";
@@ -13,6 +14,7 @@ function safeString(v) {
 export default function MdtReviews() {
   const { organisationId } = useOrganisation();
   const { isInspectorRole } = useRole();
+  const permissions = usePermissions();
 
   const [patients, setPatients] = useState([]);
   const [patientsLoading, setPatientsLoading] = useState(true);
@@ -108,15 +110,17 @@ export default function MdtReviews() {
     <div style={{ padding: "2rem", maxWidth: 980, margin: "0 auto", fontFamily: "sans-serif" }}>
       <h1 style={{ marginTop: 0 }}>MDT Reviews</h1>
 
-      <ActionBar
-        actions={[
-          {
-            label: "⚡ Generate MDT Review",
-            type: "generate",
-            onClick: () => generateMDTReview(),
-          },
-        ]}
-      />
+      {permissions?.canAccessMDT ? (
+        <ActionBar
+          actions={[
+            {
+              label: "⚡ Generate MDT Review",
+              type: "generate",
+              onClick: () => generateMDTReview(),
+            },
+          ]}
+        />
+      ) : null}
 
       {!organisationId ? (
         <div style={{ background: "#fef2f2", border: "1px solid #fecaca", padding: "12px 14px", borderRadius: 10, color: "#991b1b", marginBottom: 14 }}>

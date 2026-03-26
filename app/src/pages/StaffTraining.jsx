@@ -207,14 +207,14 @@ export default function StaffTraining() {
 
   if (!organisationId) {
     return (
-      <div style={{ padding: "2rem" }}>
+      <div style={{ padding: "24px", maxWidth: 1120, margin: "0 auto" }}>
         <p style={{ color: "#64748b" }}>Select an organisation to view staff training.</p>
       </div>
     );
   }
 
   return (
-    <div style={{ padding: "2rem", maxWidth: 1100, margin: "0 auto" }}>
+    <div style={{ padding: "24px", maxWidth: 1120, margin: "0 auto" }}>
       <header style={{ marginBottom: "1.5rem" }}>
         <h1 style={{ margin: 0, marginBottom: 6 }}>Staff competency tracker</h1>
         <p style={{ margin: 0, color: "#64748b", fontSize: "0.95rem" }}>

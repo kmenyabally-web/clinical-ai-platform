@@ -7,6 +7,7 @@ import { useRole } from "../context/RoleContext";
 import { generateReadinessReport } from "../services/reportService";
 import { logAuditEvent } from "../services/auditService";
 import { requireAdminRole } from "../lib/requireAdminAction";
+import { usePermissions } from "../hooks/usePermissions";
 
 const cardStyle = {
   background: "#fff",
@@ -17,7 +18,7 @@ const cardStyle = {
 };
 
 /**
- * CQC Readiness Report page. Admin/Manager can generate; Staff/Auditor can view.
+ * SanctumCare Clinical Report page. Admin/Manager can generate; Staff/Auditor can view.
  */
 export default function Reports() {
   const { organisationId, hasFeature } = useOrganisation();
@@ -25,6 +26,8 @@ export default function Reports() {
   const { user } = useAuth();
   const { can, role } = useRole();
   const canGenerate = can("audit:update");
+  const permissions = usePermissions();
+  const canGenerateReports = Boolean(canGenerate && permissions?.canGenerateReports);
 
   const [report, setReport] = useState(null);
   const [reportScope, setReportScope] = useState("service"); // "organisation" | "service"
@@ -40,6 +43,7 @@ export default function Reports() {
   async function handleGenerate() {
     if (!requireAdminRole(role)) return;
     if (!organisationId || !auditContext) return;
+    if (!canGenerateReports) return;
     setError(null);
     setLoading(true);
     try {
@@ -68,7 +72,7 @@ export default function Reports() {
     printWindow.document.write(`
       <!DOCTYPE html>
       <html>
-        <head><title>CQC Readiness Report</title>
+        <head><title>SanctumCare Clinical Report</title>
           <style>
             body { font-family: system-ui, sans-serif; padding: 1rem; max-width: 800px; margin: 0 auto; }
             h1 { font-size: 1.5rem; } h2 { font-size: 1.2rem; margin-top: 1.5rem; }
@@ -94,18 +98,18 @@ export default function Reports() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `cqc-readiness-report-${report.organisation?.id ?? "org"}-${report.generatedAt?.slice(0, 10) ?? "export"}.json`;
+    a.download = `sanctumcare-clinical-report-${report.organisation?.id ?? "org"}-${report.generatedAt?.slice(0, 10) ?? "export"}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }
 
   return (
-    <div style={{ padding: "1rem 0" }}>
-      <h1 style={{ marginTop: 0 }}>CQC Readiness Report</h1>
+    <div style={{ padding: "24px", maxWidth: 1120, margin: "0 auto" }}>
+      <h1 style={{ marginTop: 0 }}>SanctumCare Clinical Report</h1>
 
       {!hasFeature("reports") && (
-        <p style={{ color: "#64748b", marginBottom: "1rem" }}>
-          Readiness report generation is available on the Enterprise plan.{" "}
+          <p style={{ color: "#64748b", marginBottom: "1rem" }}>
+            Clinical report generation is available on the Enterprise plan.{" "}
           <Link to="/billing" style={{ color: "#1976d2", fontWeight: 600 }}>
             View billing &amp; plans
           </Link>
@@ -113,9 +117,9 @@ export default function Reports() {
       )}
 
       {error && (
-        <p role="alert" style={{ color: "#c62828", marginBottom: "1rem" }}>
+        <div role="alert" style={{ marginBottom: "1rem", padding: "0.75rem 1rem", borderRadius: 12, border: "1px solid #fecaca", background: "#fef2f2", color: "#b91c1c" }}>
           {error}
-        </p>
+        </div>
       )}
 
       {loading && (
@@ -124,16 +128,16 @@ export default function Reports() {
         </p>
       )}
 
-      {!canGenerate && (
+      {!canGenerateReports && (
         <p style={{ color: "#666", marginBottom: "1rem" }}>
           You can view reports below. Only Admins and Managers can generate new reports.
         </p>
       )}
 
-      {canGenerate && hasFeature("reports") && !report && (
+      {canGenerateReports && hasFeature("reports") && !report && (
         <div style={cardStyle}>
           <p style={{ marginTop: 0 }}>
-            Generate a structured CQC Readiness Report with organisation summary, domain scores, risk indicators, evidence coverage, and latest inspection simulation results.
+            Generate a structured SanctumCare Clinical Report with organisation summary, domain scores, risk indicators, evidence coverage, and latest inspection simulation results.
           </p>
           <div style={{ marginBottom: "1rem" }}>
             <label style={{ marginRight: 8 }}>Scope:</label>
@@ -168,7 +172,7 @@ export default function Reports() {
       {report && (
         <>
           <div style={{ marginBottom: "1rem", display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {canGenerate && hasFeature("reports") && (
+            {canGenerateReports && hasFeature("reports") && (
               <button
                 type="button"
                 onClick={handleGenerate}
