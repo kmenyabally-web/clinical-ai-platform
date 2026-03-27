@@ -49,6 +49,39 @@ async function fetchScoringData(organisationId, serviceId) {
   const evidenceList = Array.isArray(evidence) ? evidence : [];
   const actionsList = Array.isArray(actions) ? actions : [];
 
+  // STOMP medication governance (LD/autism psychotropic use)
+  let stompMonitoredCount = 0;
+  let stompCompliantCount = 0;
+  try {
+    const patientsRef = collection(db, "patients");
+    const patientsConstraints = [where("organisationId", "==", organisationId), limit(1000)];
+    if (serviceId) patientsConstraints.push(where("serviceId", "==", serviceId));
+    const patientsQ = query(patientsRef, ...patientsConstraints);
+    const patientsSnap = await getDocs(patientsQ);
+    (patientsSnap?.docs ?? []).forEach((d) => {
+      const p = d?.data?.() ?? {};
+      if (p.stompMonitoring !== true) return;
+      stompMonitoredCount += 1;
+      const meds = Array.isArray(p.medications) ? p.medications : [];
+      const hasMedications = meds.length > 0;
+      if (!hasMedications) {
+        stompCompliantCount += 1;
+        return;
+      }
+      const allHaveReasonAndReview = meds.every((m) => {
+        const reason = String(m?.reason ?? "").trim();
+        const reviewDate = String(m?.reviewDate ?? "").trim();
+        return Boolean(reason && reviewDate);
+      });
+      const hasReductionPlan = meds.every((m) => String(m?.reductionPlan ?? "").trim().length > 0);
+      if (allHaveReasonAndReview && hasReductionPlan) {
+        stompCompliantCount += 1;
+      }
+    });
+  } catch (_) {
+    // Optional metric: do not fail full compliance score if STOMP dataset/index not available.
+  }
+
   // Care plans count (by service)
   let carePlansCount = 0;
   const carePlansRef = collection(db, "carePlans");
@@ -92,6 +125,8 @@ async function fetchScoringData(organisationId, serviceId) {
     carePlansCount,
     clinicalNoteCount,
     assessmentCount,
+    stompMonitoredCount,
+    stompCompliantCount,
   };
 }
 
@@ -106,6 +141,8 @@ function computeDomainScores(data) {
     carePlansCount,
     clinicalNoteCount,
     assessmentCount,
+    stompMonitoredCount,
+    stompCompliantCount,
   } = data;
 
   const openIncidents = incidents.filter((i) => (i.status || "open") !== "closed");
@@ -133,6 +170,10 @@ function computeDomainScores(data) {
       30 + (hasCarePlans ? 25 : 0) + Math.min(25, effectiveEvidenceCount * 8) + Math.min(20, (clinicalNoteCount + assessmentCount) * 2)
     )
   );
+  const stompRatio =
+    stompMonitoredCount > 0 ? stompCompliantCount / stompMonitoredCount : 1;
+  const stompAdjustment = Math.round((stompRatio - 1) * 20); // up to -20 when non-compliant
+  const effectiveScoreWithStomp = Math.max(0, Math.min(100, effectiveScore + stompAdjustment));
 
   // —— CARING: Evidence in caring domain, incident response (closed ratio) ——
   const caringEvidenceCount = evidence.filter((e) => (e.domain || "").toLowerCase() === "caring").length;
@@ -164,7 +205,7 @@ function computeDomainScores(data) {
 
   return {
     safeScore,
-    effectiveScore,
+    effectiveScore: effectiveScoreWithStomp,
     caringScore,
     responsiveScore,
     wellLedScore,

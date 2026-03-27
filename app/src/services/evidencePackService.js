@@ -4,6 +4,7 @@ import { db } from "../firebase";
 import { fetchClinicalNotesForPatient } from "./noteService";
 import { listCarePlansForPatient } from "./carePlanManagementService";
 import { fetchDocuments } from "./documentService";
+import { getStompAlerts } from "../utils/stompAlerts";
 
 function safeFilename(s) {
   return String(s ?? "")
@@ -175,20 +176,31 @@ export async function generateEvidencePack({ organisationId }) {
   const org = String(organisationId ?? "").trim();
   if (!org) throw new Error("organisationId is required");
 
-  const [notesSnap, auditSnap, inspectionSnap] = await Promise.all([
+  const [notesSnap, auditSnap, inspectionSnap, patientsSnap] = await Promise.all([
     getDocs(query(collection(db, "notes"), where("organisationId", "==", org))),
     getDocs(query(collection(db, "audit_logs"), where("organisationId", "==", org))),
     getDocs(query(collection(db, "inspection_reports"), where("organisationId", "==", org))),
+    getDocs(query(collection(db, "patients"), where("organisationId", "==", org))),
   ]);
 
   const notes = (notesSnap?.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
   const audits = (auditSnap?.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
   const inspections = (inspectionSnap?.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
+  const stompPatients = (patientsSnap?.docs ?? [])
+    .map((d) => ({ id: d.id, ...(d.data() ?? {}) }))
+    .filter((p) => p?.stompMonitoring === true)
+    .map((p) => ({
+      patientId: p.id,
+      patientName: [p.firstName, p.lastName].filter(Boolean).join(" ").trim() || p.name || p.id,
+      medications: Array.isArray(p.medications) ? p.medications : [],
+      alerts: getStompAlerts(p),
+    }));
 
   return {
-    summary: `Total notes: ${notes.length}, Audit events: ${audits.length}, Inspection reports: ${inspections.length}`,
+    summary: `Total notes: ${notes.length}, Audit events: ${audits.length}, Inspection reports: ${inspections.length}, STOMP patients: ${stompPatients.length}`,
     notes,
     audits,
     inspections,
+    stompCompliance: stompPatients,
   };
 }

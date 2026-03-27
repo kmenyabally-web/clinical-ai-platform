@@ -20,6 +20,7 @@ export const NAV_ITEMS = [
   { path: "/mdt", label: "MDT Reviews", ariaLabel: "MDT review information", allowedRoles: undefined },
   { path: "/incidents", label: "Incidents & Safeguarding", ariaLabel: "Incidents and safeguarding", allowedRoles: undefined },
   { path: "/documents", label: "Documents", ariaLabel: "Evidence and policy documents", allowedRoles: undefined },
+  { path: "/organisation/policies", label: "Policies", ariaLabel: "Organisation policy library", allowedRoles: undefined },
   { path: "/care-plans", label: "Care Plans", ariaLabel: "Patient care plans", allowedRoles: undefined },
   { path: "/staff-training", label: "Staff Training", ariaLabel: "Staff competency and training records", allowedRoles: undefined },
   { path: "/compliance", label: "Compliance", ariaLabel: "CQC compliance scores and risk", allowedRoles: undefined },

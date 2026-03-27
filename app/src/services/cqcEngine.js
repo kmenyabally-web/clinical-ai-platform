@@ -20,8 +20,12 @@ export const runInspection = async ({ organisationId, hospitalId = null }) => {
     constraints.push(where("hospitalId", "==", String(hospitalId).trim()));
   }
 
-  const notesSnap = await getDocs(query(collection(db, "notes"), ...constraints));
+  const [notesSnap, patientsSnap] = await Promise.all([
+    getDocs(query(collection(db, "notes"), ...constraints)),
+    getDocs(query(collection(db, "patients"), ...constraints)),
+  ]);
   const notes = (notesSnap?.docs ?? []).map((d) => d.data() ?? {});
+  const patients = (patientsSnap?.docs ?? []).map((d) => d.data() ?? {});
 
   let riskScore = 0;
   let highRiskCount = 0;
@@ -48,6 +52,22 @@ export const runInspection = async ({ organisationId, hospitalId = null }) => {
     }
   });
 
+  let stompGapCount = 0;
+  patients.forEach((p) => {
+    if (p?.stompMonitoring !== true) return;
+    const meds = Array.isArray(p?.medications) ? p.medications : [];
+    meds.forEach((m) => {
+      const hasReviewDate = Boolean(m?.reviewDate);
+      const hasReductionPlan = m?.hasReductionPlan === true;
+      if (!hasReviewDate || !hasReductionPlan) {
+        stompGapCount += 1;
+      }
+    });
+  });
+  if (stompGapCount > 0) {
+    riskScore += Math.min(20, stompGapCount * 2);
+  }
+
   const score = Math.max(0, 100 - riskScore);
   let rating = "Good";
   if (score < 50) rating = "Inadequate";
@@ -57,6 +77,7 @@ export const runInspection = async ({ organisationId, hospitalId = null }) => {
   if (lowEngagementCount > 0) risks.push("Low engagement trends");
   if (highRiskCount > 0) risks.push("High-risk clinical observations in notes");
   if (lowMoodCount > 0) risks.push("Sustained low mood indicators");
+  if (stompGapCount > 0) risks.push("STOMP compliance gaps identified");
   if (risks.length === 0) risks.push("No major note-based risk trends detected");
 
   const recommendations = [];

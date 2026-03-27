@@ -27,6 +27,7 @@ export default function Sidebar() {
 
   const navFeatureRequirements = {
     "/clinical-notes": "clinicalNotes",
+    "/organisation/policies": "policies",
     "/care-plans": "medication",
     "/mdt": "mdt",
     "/behaviour": "risk",

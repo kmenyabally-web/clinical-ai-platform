@@ -10,6 +10,7 @@ import {
   getDocs,
   query,
   where,
+  updateDoc,
   serverTimestamp,
 } from "firebase/firestore";
 import { db, auth } from "../firebase";
@@ -24,6 +25,39 @@ import {
 } from "../utils/tenantContext";
 
 const PATIENTS_COLLECTION = "patients";
+
+function normalizeStompMedication(raw) {
+  const item = raw && typeof raw === "object" ? raw : {};
+  return {
+    name: String(item.name ?? "").trim(),
+    indication: String(item.indication ?? "").trim(),
+    startDate: item.startDate ?? null,
+    reviewDate: item.reviewDate ?? null,
+    hasReductionPlan: item.hasReductionPlan === true,
+    lastReviewedAt: item.lastReviewedAt ?? null,
+  };
+}
+
+function normalizeStompMedicationsArray(medications) {
+  if (!Array.isArray(medications)) return [];
+  return medications
+    .map(normalizeStompMedication)
+    .filter((m) => m.name || m.indication || m.reviewDate || m.hasReductionPlan || m.startDate || m.lastReviewedAt);
+}
+
+function validateStompMedications(medications) {
+  const list = normalizeStompMedicationsArray(medications);
+  list.forEach((m, index) => {
+    const label = `Medication ${index + 1}`;
+    if (!m.indication) {
+      throw new Error(`${label}: indication is required when medication is recorded.`);
+    }
+    if (!m.reviewDate) {
+      throw new Error(`${label}: reviewDate is required when medication is recorded.`);
+    }
+  });
+  return list;
+}
 
 function assertRequiredWriteContext({ organisationId, hospitalId, userId }) {
   if (!organisationId) throw new Error("Missing organisation");
@@ -183,6 +217,8 @@ export async function createPatient(params) {
     dob: params.dateOfBirth ?? null,
     gender: (params.gender ?? "").toString().trim(),
     nhsNumber: (params.nhsNumber ?? "").toString().trim(),
+    stompMonitoring: Boolean(params.stompMonitoring),
+    medications: normalizeStompMedicationsArray(params.medications),
     createdAt: serverTimestamp(),
   };
   const docRef = await addDocLogged(
@@ -288,7 +324,48 @@ export async function getPatientById(id) {
     wardId: typeof data.wardId === "string" ? data.wardId : "",
     hospitalName: typeof data.hospitalName === "string" ? data.hospitalName : "",
     wardName: typeof data.wardName === "string" ? data.wardName : "",
+    stompMonitoring: data.stompMonitoring === true,
+    medications: normalizeStompMedicationsArray(data.medications),
   };
+}
+
+/**
+ * Update STOMP monitoring fields on a patient.
+ * Validation: when medications exist, each medication requires indication + reviewDate.
+ *
+ * @param {string} patientId
+ * @param {{ stompMonitoring: boolean, medications: Array<{ name?: string, indication?: string, reviewDate?: unknown, hasReductionPlan?: boolean, startDate?: unknown, lastReviewedAt?: unknown }> }} payload
+ * @returns {Promise<void>}
+ */
+export async function updatePatientStomp(patientId, payload) {
+  const id = requirePatientId(patientId);
+  const { organisationId } = await getUserContext();
+  if (!organisationId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
+
+  const ref = doc(db, PATIENTS_COLLECTION, id);
+  const snap = await getDoc(ref);
+  if (!snap?.exists?.()) throw new Error("Patient not found.");
+  const current = snap.data?.() ?? {};
+  assertSameOrganisationData(current.organisationId, organisationId);
+
+  const stompMonitoring = payload?.stompMonitoring === true;
+  const medications = validateStompMedications(payload?.medications);
+  await updateDoc(ref, {
+    stompMonitoring,
+    medications,
+    updatedAt: serverTimestamp(),
+  });
+
+  await logAuditEventNonBlocking({
+    action: "PATIENT_STOMP_UPDATED",
+    entityType: "PATIENT",
+    organisationId,
+    entityId: id,
+    metadata: {
+      stompMonitoring,
+      medicationCount: medications.length,
+    },
+  });
 }
 
 /**

@@ -16,6 +16,7 @@ import { formatUkDateTime } from "../utils/dateFormat";
 import { MDT_ROLES } from "../constants/mdtRoles";
 import ActionBar from "../components/ActionBar";
 import { usePermissions } from "../hooks/usePermissions";
+import { listPolicies } from "../services/policyService";
 
 function formatDate(value) {
   return formatUkDateTime(value, "—");
@@ -43,6 +44,7 @@ export default function ClinicalNotes() {
   const [addendumSaving, setAddendumSaving] = useState({});
   const [addendumError, setAddendumError] = useState({});
   const [addendumsByNote, setAddendumsByNote] = useState({});
+  const [policyHints, setPolicyHints] = useState([]);
 
   const load = useCallback(() => {
     if (!organisationId) {
@@ -218,6 +220,12 @@ export default function ClinicalNotes() {
           ⏳ Processing…
         </p>
       )}
+
+      {policyHints.length > 0 ? (
+        <div style={{ marginBottom: "0.75rem", padding: "10px 12px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8, color: "#1e3a8a", fontSize: 13, fontWeight: 700 }}>
+          Relevant policy guidance available: {policyHints.map((p) => p.title || p.type).slice(0, 3).join(", ")}
+        </div>
+      ) : null}
 
       {loading && <p style={{ color: "#666" }}>Loading clinical notes…</p>}
 
@@ -505,6 +513,24 @@ export default function ClinicalNotes() {
                 reports: aiResult?.reports ?? null,
                 careFolder: aiResult?.careFolder ?? null,
               });
+              const text = String(content ?? "").toLowerCase();
+              const relevantTypes = new Set();
+              if (text.includes("medication")) relevantTypes.add("MEDICATION");
+              if (text.includes("refused") || text.includes("incident")) relevantTypes.add("SAFEGUARDING");
+              if (organisationId && relevantTypes.size > 0) {
+                listPolicies(organisationId)
+                  .then((all) => {
+                    const matches = (all ?? []).filter(
+                      (p) => p?.status === "ACTIVE" && relevantTypes.has(String(p?.type ?? "").toUpperCase())
+                    );
+                    setPolicyHints(matches.slice(0, 5));
+                  })
+                  .catch(() => {
+                    setPolicyHints([]);
+                  });
+              } else {
+                setPolicyHints([]);
+              }
               void logAuditEvent("NOTE_CREATED", { patientId });
               setShowCreateModal(false);
               await load();

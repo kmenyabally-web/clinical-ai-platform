@@ -3,6 +3,8 @@
 
 export const KNOWN_FEATURE_KEYS = [
   "clinicalNotes",
+  "policies",
+  "stomp",
   "mdt",
   "risk",
   "medication",
@@ -27,6 +29,8 @@ export const ORG_TEMPLATES = {
   GENERAL: {
     features: {
       clinicalNotes: true,
+      policies: true,
+      stomp: true,
       mdt: true,
       risk: true,
       medication: true,
@@ -41,6 +45,8 @@ export const ORG_TEMPLATES = {
   MENTAL_HEALTH: {
     features: {
       clinicalNotes: true,
+      policies: true,
+      stomp: true,
       mdt: true,
       risk: true,
       medication: true,
@@ -56,6 +62,8 @@ export const ORG_TEMPLATES = {
       careLogs: true,
       medication: true,
       clinicalNotes: false,
+      policies: true,
+      stomp: true,
       mdt: false,
       risk: false,
     },
@@ -65,6 +73,8 @@ export const ORG_TEMPLATES = {
   NURSING_HOME: {
     features: {
       clinicalNotes: true,
+      policies: true,
+      stomp: true,
       medication: true,
       vitals: true,
       careLogs: true,

@@ -468,3 +468,93 @@ export async function updateDocumentMetadata(organisationId, collectionName, doc
     }
   }
 }
+
+/**
+ * Create a policy document for an organisation.
+ * Stored in `policies` so it can be reused by evidence/governance workflows.
+ *
+ * @param {string} organisationId
+ * @param {{ title: string, type?: string, content?: string, version?: string, file?: File | null }} payload
+ * @returns {Promise<{ id: string }>}
+ */
+export async function createPolicy(organisationId, payload) {
+  const orgId = (organisationId ?? "").trim();
+  if (!orgId) throw new Error("organisationId required");
+  const title = String(payload?.title ?? "").trim();
+  if (!title) throw new Error("Policy title is required");
+
+  const ctx = await getUserContext();
+  const tenant = tenantFieldsFromContext({
+    organisationId: orgId,
+    hospitalId: ctx.hospitalId,
+    wardId: ctx.wardId,
+  });
+  assertTenantContext(tenant.organisationId, tenant.hospitalId);
+
+  const file = payload?.file ?? null;
+  let fileName = "";
+  let fileUrl = "";
+  if (file) {
+    if (!isSupportedFileType(file)) {
+      throw new Error("File type not supported. Use: pdf, docx, xlsx, jpg, png.");
+    }
+    const col = collection(db, POLICIES_COLLECTION);
+    const draftRef = doc(col);
+    const fileId = draftRef.id;
+    const ext = file.name.includes(".") ? file.name.slice(file.name.lastIndexOf(".")) : "";
+    const storagePath = `organisations/${orgId}/policies/${fileId}${ext}`;
+    const storageRef = ref(storage, storagePath);
+    await uploadBytesResumable(storageRef, file);
+    fileUrl = await getDownloadURL(storageRef);
+    fileName = file.name;
+  }
+
+  const docData = {
+    organisationId: orgId,
+    hospitalId: tenant.hospitalId,
+    wardId: tenant.wardId,
+    title,
+    type: String(payload?.type ?? "General").trim() || "General",
+    content: String(payload?.content ?? "").trim(),
+    version: String(payload?.version ?? "1.0").trim() || "1.0",
+    documentType: "policy",
+    domainType: "governance",
+    fileName,
+    fileUrl,
+    createdAt: serverTimestamp(),
+  };
+  const created = await addDoc(collection(db, POLICIES_COLLECTION), docData);
+  return { id: created.id };
+}
+
+/**
+ * List policies scoped to one organisation.
+ *
+ * @param {string} organisationId
+ * @returns {Promise<Array<{ id: string, organisationId: string, title: string, type: string, content: string, version: string, createdAt: unknown, fileName: string, fileUrl: string }>>}
+ */
+export async function listPolicies(organisationId) {
+  const orgId = (organisationId ?? "").trim();
+  if (!orgId) return [];
+  const q = query(
+    collection(db, POLICIES_COLLECTION),
+    where("organisationId", "==", orgId),
+    orderBy("createdAt", "desc"),
+    limit(500)
+  );
+  const snap = await getDocs(q);
+  return (snap?.docs ?? []).map((d) => {
+    const x = d?.data?.() ?? {};
+    return {
+      id: d?.id ?? "",
+      organisationId: x.organisationId ?? orgId,
+      title: x.title ?? "",
+      type: x.type ?? "",
+      content: x.content ?? "",
+      version: x.version ?? "1.0",
+      createdAt: x.createdAt ?? null,
+      fileName: x.fileName ?? "",
+      fileUrl: x.fileUrl ?? "",
+    };
+  });
+}

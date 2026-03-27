@@ -43,6 +43,7 @@ import { MANAGEMENT_ALLOWED_ROLES } from "./config/routes";
 import LandingPage from "./pages/LandingPage";
 import FeatureGate from "./components/FeatureGate";
 import FeatureSettings from "./pages/FeatureSettings";
+import Policies from "./pages/Policies";
 
 export default function App() {
   return (
@@ -108,6 +109,14 @@ export default function App() {
             }
           />
           <Route path="/documents" element={<Documents />} />
+          <Route
+            path="/organisation/policies"
+            element={
+              <FeatureGate feature="policies">
+                <Policies />
+              </FeatureGate>
+            }
+          />
           <Route path="/staff-training" element={<StaffTraining />} />
           <Route
             path="/care-plans"

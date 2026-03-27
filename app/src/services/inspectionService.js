@@ -38,6 +38,7 @@ const DEFAULT_QUESTIONS = [
   { questionText: "Is the service caring?", domainType: "caring", guidanceText: "Consider dignity and respect in delivery.", evidenceHint: "Surveys, care records.", riskWeight: 4 },
   { questionText: "Is the service responsive to people's needs?", domainType: "responsive", guidanceText: "Consider accessibility and complaints.", evidenceHint: "Complaints policy, feedback.", riskWeight: 4 },
   { questionText: "Is the service well-led?", domainType: "well-led", guidanceText: "Consider governance and leadership.", evidenceHint: "Governance framework, audits.", riskWeight: 5 },
+  { questionText: "Is STOMP medication monitoring complete (reason, review date, reduction plan)?", domainType: "effective", guidanceText: "Check psychotropic medication review records for LD/autism patients.", evidenceHint: "Medication review date, rationale, reduction plan.", riskWeight: 5 },
 ];
 
 /**
@@ -198,6 +199,35 @@ export function calculateInspectionScore(responses, questions) {
   return { overallScore, totalWeight, earnedWeight };
 }
 
+async function getStompInspectionAdjustment(organisationId, serviceId) {
+  if (!organisationId?.trim()) return 0;
+  try {
+    const constraints = [where("organisationId", "==", organisationId), limit(1000)];
+    if (serviceId) constraints.push(where("serviceId", "==", serviceId));
+    const snap = await getDocs(query(collection(db, "patients"), ...constraints));
+    let monitored = 0;
+    let compliant = 0;
+    (snap?.docs ?? []).forEach((d) => {
+      const p = d?.data?.() ?? {};
+      if (p.stompMonitoring !== true) return;
+      monitored += 1;
+      const meds = Array.isArray(p.medications) ? p.medications : [];
+      const medicationCompliant = meds.every((m) => {
+        const reason = String(m?.reason ?? "").trim();
+        const reviewDate = String(m?.reviewDate ?? "").trim();
+        const reductionPlan = String(m?.reductionPlan ?? "").trim();
+        return reason && reviewDate && reductionPlan;
+      });
+      if (medicationCompliant) compliant += 1;
+    });
+    if (monitored === 0) return 0;
+    const ratio = compliant / monitored;
+    return Math.round((ratio - 1) * 10); // 0 to -10 penalty
+  } catch (_) {
+    return 0;
+  }
+}
+
 /**
  * Complete session: calculate score, update session, create actions for "No" responses, log INSPECTION_COMPLETED.
  * @param {string} sessionId
@@ -212,12 +242,15 @@ export async function completeSession(sessionId, organisationId, questions, resp
   const session = await getSession(sessionId);
   const serviceId = session?.serviceId ?? null;
   const { overallScore } = calculateInspectionScore(responses, questions);
-  const riskLevel = getInspectionRiskLevel(overallScore);
+  const stompAdjustment = await getStompInspectionAdjustment(organisationId, serviceId);
+  const adjustedOverallScore = Math.max(0, Math.min(100, overallScore + stompAdjustment));
+  const riskLevel = getInspectionRiskLevel(adjustedOverallScore);
   const sessionRef = doc(db, SESSIONS_COLLECTION, sessionId);
   await updateDoc(sessionRef, {
     completedAt: serverTimestamp(),
-    overallScore,
+    overallScore: adjustedOverallScore,
     riskLevel,
+    stompAdjustment,
   });
 
   const questionMap = new Map(questions.map((q) => [q.id, q]));
@@ -254,7 +287,7 @@ export async function completeSession(sessionId, organisationId, questions, resp
       entityId: sessionId,
       entityName: "Inspection simulation",
       previousValue: null,
-      newValue: { overallScore, riskLevel, createdActionIds },
+      newValue: { overallScore: adjustedOverallScore, riskLevel, createdActionIds, stompAdjustment },
     });
   }
   if (riskLevel === "High risk" && auditContext) {
@@ -264,7 +297,7 @@ export async function completeSession(sessionId, organisationId, questions, resp
       {
         type: NOTIFICATION_TYPES.INSPECTION_HIGH_RISK,
         title: "Inspection simulation: high risk",
-        message: `Latest inspection score: ${overallScore}%. Address gaps to improve readiness.`,
+        message: `Latest inspection score: ${adjustedOverallScore}%. Address gaps to improve readiness.`,
         severity: "high",
         relatedEntityType: "inspection_session",
         relatedEntityId: sessionId,
@@ -273,7 +306,7 @@ export async function completeSession(sessionId, organisationId, questions, resp
       serviceId
     ).catch(() => {});
   }
-  return { overallScore, riskLevel, createdActionIds };
+  return { overallScore: adjustedOverallScore, riskLevel, createdActionIds };
 }
 
 /**

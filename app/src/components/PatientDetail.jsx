@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { getPatientById } from "../services/patientService";
+import { getPatientById, updatePatientStomp } from "../services/patientService";
 import { fetchIncidentsForPatient } from "../services/incidentService";
 import { fetchClinicalNotesForPatient } from "../services/noteService";
 import PatientClinicalIntelligenceTabs from "./PatientClinicalIntelligenceTabs";
@@ -16,6 +16,7 @@ import { generateDailySummary } from "../services/summaryService";
 import { generateCPAReport, generateTribunalReport } from "../services/reportService";
 import { generateMDTReview } from "../services/mdtService";
 import { generateManagementReport } from "../services/managementService";
+import { getStompAlerts } from "../utils/stompAlerts";
 
 export default function PatientDetail() {
   const { id } = useParams();
@@ -23,6 +24,7 @@ export default function PatientDetail() {
   const { hasFeature, organisationId, hospitalId: profileHospitalId } = useOrganisation();
   const redactSensitive = isInspectorRole();
   const showRiskUi = hasFeature("risk");
+  const showStompUi = hasFeature("stomp");
   const [isLoading, setIsLoading] = useState(true);
   const [patient, setPatient] = useState(null);
   const [error, setError] = useState(null);
@@ -49,6 +51,10 @@ export default function PatientDetail() {
   const [managementReport, setManagementReport] = useState(null);
   const [managementReportLoading, setManagementReportLoading] = useState(false);
   const [managementReportError, setManagementReportError] = useState(null);
+  const [stompForm, setStompForm] = useState({ stompMonitoring: false, medications: [] });
+  const [stompSaving, setStompSaving] = useState(false);
+  const [stompError, setStompError] = useState(null);
+  const [stompSaved, setStompSaved] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -63,7 +69,22 @@ export default function PatientDetail() {
       setError(null);
       try {
         const p = await getPatientById(id);
-        if (mounted) setPatient(p);
+        if (mounted) {
+          setPatient(p);
+          setStompForm({
+            stompMonitoring: p?.stompMonitoring === true,
+            medications: Array.isArray(p?.medications)
+              ? p.medications.map((m) => ({
+                  name: m?.name ?? "",
+                  indication: m?.indication ?? "",
+                  startDate: m?.startDate ?? "",
+                  reviewDate: m?.reviewDate ?? "",
+                  hasReductionPlan: m?.hasReductionPlan === true,
+                  lastReviewedAt: m?.lastReviewedAt ?? "",
+                }))
+              : [],
+          });
+        }
       } catch (err) {
         if (mounted) setError(err);
       } finally {
@@ -222,6 +243,61 @@ export default function PatientDetail() {
         return bMs - aMs;
       })[0];
   }, [notes]);
+
+  const stompWarnings = useMemo(() => {
+    return getStompAlerts({ medications: stompForm.medications });
+  }, [stompForm.medications]);
+
+  function updateMedicationRow(index, field, value) {
+    setStompForm((prev) => ({
+      ...prev,
+      medications: (prev.medications ?? []).map((m, i) => (i === index ? { ...m, [field]: value } : m)),
+    }));
+    setStompSaved(false);
+  }
+
+  function addMedicationRow() {
+    setStompForm((prev) => ({
+      ...prev,
+      medications: [
+        ...(prev.medications ?? []),
+        { name: "", indication: "", startDate: "", reviewDate: "", hasReductionPlan: false, lastReviewedAt: "" },
+      ],
+    }));
+    setStompSaved(false);
+  }
+
+  function removeMedicationRow(index) {
+    setStompForm((prev) => ({
+      ...prev,
+      medications: (prev.medications ?? []).filter((_, i) => i !== index),
+    }));
+    setStompSaved(false);
+  }
+
+  async function saveStompMonitoring() {
+    if (!patient?.id) return;
+    setStompSaving(true);
+    setStompError(null);
+    setStompSaved(false);
+    try {
+      await updatePatientStomp(patient.id, stompForm);
+      setPatient((prev) =>
+        prev
+          ? {
+              ...prev,
+              stompMonitoring: stompForm.stompMonitoring === true,
+              medications: stompForm.medications ?? [],
+            }
+          : prev
+      );
+      setStompSaved(true);
+    } catch (e) {
+      setStompError(e?.message ?? "Failed to save STOMP monitoring.");
+    } finally {
+      setStompSaving(false);
+    }
+  }
 
   async function handleCPA() {
     if (!requireAdminRole(userRole)) return;
@@ -432,6 +508,89 @@ export default function PatientDetail() {
           <div style={styles.value}>{patient?.emergencyContact || "—"}</div>
         </div>
       </div>
+
+      {showStompUi ? (
+      <div style={styles.stompCard}>
+        <div style={styles.stompTitleRow}>
+          <h3 style={styles.stompTitle}>STOMP Monitoring</h3>
+          <label style={styles.stompToggle}>
+            <input
+              type="checkbox"
+              checked={stompForm.stompMonitoring === true}
+              onChange={(e) => {
+                setStompForm((prev) => ({ ...prev, stompMonitoring: e.target.checked }));
+                setStompSaved(false);
+              }}
+            />
+            <span>Enabled</span>
+          </label>
+        </div>
+        <p style={styles.stompHint}>
+          Track psychotropic medications and enforce indication, review date, and reduction planning for LD/autism STOMP governance.
+        </p>
+        {(stompForm.medications ?? []).map((m, idx) => (
+          <div key={`med-${idx}`} style={styles.stompMedicationRow}>
+            <input
+              placeholder="Medication name"
+              value={m.name ?? ""}
+              onChange={(e) => updateMedicationRow(idx, "name", e.target.value)}
+              style={styles.stompInput}
+            />
+            <input
+              placeholder="Indication *"
+              value={m.indication ?? ""}
+              onChange={(e) => updateMedicationRow(idx, "indication", e.target.value)}
+              style={styles.stompInput}
+            />
+            <input
+              type="date"
+              value={m.startDate ?? ""}
+              onChange={(e) => updateMedicationRow(idx, "startDate", e.target.value)}
+              style={styles.stompInput}
+            />
+            <input
+              type="date"
+              value={m.reviewDate ?? ""}
+              onChange={(e) => updateMedicationRow(idx, "reviewDate", e.target.value)}
+              style={styles.stompInput}
+            />
+            <label style={styles.stompToggleInline}>
+              <input
+                type="checkbox"
+                checked={m.hasReductionPlan === true}
+                onChange={(e) => updateMedicationRow(idx, "hasReductionPlan", e.target.checked)}
+              />
+              <span>Reduction plan</span>
+            </label>
+            <button type="button" onClick={() => removeMedicationRow(idx)} style={styles.stompRemoveBtn}>
+              Remove
+            </button>
+          </div>
+        ))}
+        <div style={styles.stompActions}>
+          <button type="button" onClick={addMedicationRow} style={styles.stompAddBtn}>
+            Add medication
+          </button>
+          <button type="button" onClick={saveStompMonitoring} disabled={stompSaving} style={styles.stompSaveBtn}>
+            {stompSaving ? "Saving..." : "Save STOMP"}
+          </button>
+        </div>
+        {stompError ? <div style={styles.stompError}>{stompError}</div> : null}
+        {stompSaved ? <div style={styles.stompSaved}>STOMP details saved.</div> : null}
+        {stompWarnings.length > 0 ? (
+          <div role="alert" style={styles.stompWarningBox}>
+            <strong>STOMP warnings:</strong>
+            <ul style={{ margin: "8px 0 0 18px" }}>
+              {stompWarnings.map((w, i) => (
+                <li key={`sw-${i}`}>
+                  {w.severity === "high" ? "🔴" : "🟡"} {w.text}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+      ) : null}
 
       <div style={styles.clinicalLocked}>
         <div style={styles.clinicalTitle}>Clinical Records</div>
@@ -1040,6 +1199,127 @@ const styles = {
     border: "1px solid #e2e8f0",
     borderRadius: 12,
     padding: 14,
+  },
+  stompCard: {
+    marginTop: 16,
+    padding: 14,
+    borderRadius: 12,
+    border: "1px solid #e2e8f0",
+    backgroundColor: "#ffffff",
+  },
+  stompTitleRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    marginBottom: 6,
+  },
+  stompTitle: {
+    margin: 0,
+    fontSize: 16,
+    fontWeight: 900,
+    color: "#0f172a",
+  },
+  stompHint: {
+    margin: "0 0 10px 0",
+    color: "#475569",
+    fontSize: 13,
+  },
+  stompToggle: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#334155",
+  },
+  stompToggleInline: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#334155",
+    border: "1px solid #cbd5e1",
+    borderRadius: 8,
+    padding: "8px 10px",
+    backgroundColor: "#fff",
+  },
+  stompMedicationRow: {
+    display: "grid",
+    gridTemplateColumns: "1.1fr 1.2fr 0.9fr 0.9fr 0.9fr auto",
+    gap: 8,
+    marginBottom: 8,
+  },
+  stompInput: {
+    minHeight: 36,
+    border: "1px solid #cbd5e1",
+    borderRadius: 8,
+    padding: "8px 10px",
+    fontSize: 13,
+  },
+  stompActions: {
+    display: "flex",
+    gap: 8,
+    marginTop: 8,
+  },
+  stompAddBtn: {
+    border: "1px solid #cbd5e1",
+    backgroundColor: "#ffffff",
+    color: "#0f172a",
+    borderRadius: 8,
+    padding: "8px 12px",
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  stompSaveBtn: {
+    border: "none",
+    backgroundColor: "#005eb8",
+    color: "#ffffff",
+    borderRadius: 8,
+    padding: "8px 12px",
+    fontSize: 13,
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  stompRemoveBtn: {
+    border: "1px solid #fecaca",
+    backgroundColor: "#fff1f2",
+    color: "#9f1239",
+    borderRadius: 8,
+    padding: "8px 10px",
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  stompWarningBox: {
+    marginTop: 10,
+    backgroundColor: "#fffbeb",
+    border: "1px solid #fcd34d",
+    borderRadius: 10,
+    color: "#92400e",
+    padding: "10px 12px",
+    fontSize: 13,
+  },
+  stompError: {
+    marginTop: 10,
+    backgroundColor: "#fef2f2",
+    border: "1px solid #fecaca",
+    borderRadius: 10,
+    color: "#991b1b",
+    padding: "8px 10px",
+    fontSize: 13,
+  },
+  stompSaved: {
+    marginTop: 10,
+    backgroundColor: "#ecfdf5",
+    border: "1px solid #86efac",
+    borderRadius: 10,
+    color: "#166534",
+    padding: "8px 10px",
+    fontSize: 13,
+    fontWeight: 700,
   },
   incidentHeader: {
     padding: "12px 14px",

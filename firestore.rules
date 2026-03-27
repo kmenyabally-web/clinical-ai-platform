@@ -469,11 +469,15 @@ service cloud.firestore {
       allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
       allow create: if isAuthenticated()
         && docOrgId(request.resource.data) != null
+        && isAdmin()
         && sameOrganisation(docOrgId(request.resource.data));
       allow update: if isAuthenticated()
+        && isAdmin()
         && sameOrganisation(docOrgId(resource.data))
         && docOrgId(request.resource.data) == docOrgId(resource.data);
-      allow delete: if false;
+      allow delete: if isAuthenticated()
+        && isAdmin()
+        && sameOrganisation(docOrgId(resource.data));
     }
 
     match /evidence_documents/{evidenceDocId} {

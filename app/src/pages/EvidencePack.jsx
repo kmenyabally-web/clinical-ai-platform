@@ -390,6 +390,28 @@ export default function EvidencePack() {
               Score: {r.score ?? r.overallScore ?? "—"} | Rating: {r.rating ?? r.overallRating ?? "—"}
             </div>
           ))}
+
+          <h3 style={{ marginBottom: 6, marginTop: 12 }}>STOMP Compliance</h3>
+          {(pack.stompCompliance ?? []).length === 0 ? (
+            <p style={{ marginTop: 0, color: "#64748b" }}>No STOMP-monitored patients found.</p>
+          ) : (
+            (pack.stompCompliance ?? []).map((p, i) => (
+              <div key={p.patientId ?? i} style={{ marginBottom: 8, color: "#334155" }}>
+                <strong>{p.patientName ?? p.patientId}</strong> — medications: {(p.medications ?? []).length}
+                {(p.alerts ?? []).length > 0 ? (
+                  <ul style={{ margin: "6px 0 0 18px" }}>
+                    {(p.alerts ?? []).map((a, j) => (
+                      <li key={`${p.patientId}-a-${j}`}>
+                        {a.severity === "high" ? "🔴" : "🟡"} {a.text}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div style={{ color: "#166534", fontSize: 13 }}>No STOMP alerts.</div>
+                )}
+              </div>
+            ))
+          )}
         </section>
       ) : null}
 

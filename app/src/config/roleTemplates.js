@@ -8,6 +8,7 @@ export const ROLE_TEMPLATES = {
     canAccessMDT: true,
     canGenerateReports: true,
     canManageUsers: false,
+    canManagePolicies: true,
   },
 
   Nurse: {
@@ -38,6 +39,7 @@ export const ROLE_TEMPLATES = {
     canViewAllPatients: true,
     canGenerateReports: true,
     canManageUsers: true,
+    canManagePolicies: true,
     canAccessMDT: true,
   },
 
