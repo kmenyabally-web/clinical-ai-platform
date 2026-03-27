@@ -20,12 +20,14 @@ export const runInspection = async ({ organisationId, hospitalId = null }) => {
     constraints.push(where("hospitalId", "==", String(hospitalId).trim()));
   }
 
-  const [notesSnap, patientsSnap] = await Promise.all([
+  const [notesSnap, patientsSnap, tasksSnap] = await Promise.all([
     getDocs(query(collection(db, "notes"), ...constraints)),
     getDocs(query(collection(db, "patients"), ...constraints)),
+    getDocs(query(collection(db, "tasks"), where("organisationId", "==", org))),
   ]);
   const notes = (notesSnap?.docs ?? []).map((d) => d.data() ?? {});
   const patients = (patientsSnap?.docs ?? []).map((d) => d.data() ?? {});
+  const careTasks = (tasksSnap?.docs ?? []).map((d) => d.data() ?? {});
 
   let riskScore = 0;
   let highRiskCount = 0;
@@ -68,6 +70,11 @@ export const runInspection = async ({ organisationId, hospitalId = null }) => {
     riskScore += Math.min(20, stompGapCount * 2);
   }
 
+  const pendingCareTasks = careTasks.filter((t) => String(t?.status ?? "").toLowerCase() === "pending");
+  if (pendingCareTasks.length > 0) {
+    riskScore += Math.min(15, Math.ceil(pendingCareTasks.length / 5));
+  }
+
   const score = Math.max(0, 100 - riskScore);
   let rating = "Good";
   if (score < 50) rating = "Inadequate";
@@ -78,6 +85,9 @@ export const runInspection = async ({ organisationId, hospitalId = null }) => {
   if (highRiskCount > 0) risks.push("High-risk clinical observations in notes");
   if (lowMoodCount > 0) risks.push("Sustained low mood indicators");
   if (stompGapCount > 0) risks.push("STOMP compliance gaps identified");
+  if (pendingCareTasks.length > 0) {
+    risks.push(`Outstanding care tasks (${pendingCareTasks.length} pending)`);
+  }
   if (risks.length === 0) risks.push("No major note-based risk trends detected");
 
   const recommendations = [];

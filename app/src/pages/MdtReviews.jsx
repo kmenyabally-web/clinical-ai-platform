@@ -107,7 +107,7 @@ export default function MdtReviews() {
     });
 
   return (
-    <div style={{ padding: "2rem", maxWidth: 980, margin: "0 auto", fontFamily: "sans-serif" }}>
+    <div style={{ padding: "2rem", width: "100%", fontFamily: "sans-serif" }}>
       <h1 style={{ marginTop: 0 }}>MDT Reviews</h1>
 
       {permissions?.canAccessMDT ? (

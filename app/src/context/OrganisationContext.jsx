@@ -70,6 +70,8 @@ export function OrganisationProvider({ children }) {
         name: "Dev Organisation",
         status: "active",
         plan: "BASIC",
+        type: "GENERAL",
+        uiMode: "CLINICAL",
         features: getFeaturesForOrganisationType("GENERAL"),
       };
       const devProfile = {
@@ -148,6 +150,7 @@ export function OrganisationProvider({ children }) {
             wardId,
             email: typeof data?.email === "string" ? data.email.trim() : null,
             displayName: typeof data?.displayName === "string" ? data.displayName.trim() : null,
+            groupId: coerceTenantId(data?.groupId),
           }
         : null;
       if (!exists) {
@@ -424,13 +427,20 @@ export function OrganisationProvider({ children }) {
   );
 
   const hasFeature = useCallback(
-    (feature) => planHasFeature(effectivePlanKey, feature),
-    [effectivePlanKey]
+    (feature) => {
+      const orgFeatures = organisation?.features;
+      if (orgFeatures && typeof orgFeatures === "object" && orgFeatures[feature] === true) {
+        return true;
+      }
+      return planHasFeature(effectivePlanKey, feature);
+    },
+    [effectivePlanKey, organisation?.features]
   );
 
   const value = {
     profile: userProfile,
     organisationId: organisationId ?? null,
+    groupId: userProfile?.groupId ?? null,
     hospitalId: userProfile?.hospitalId ?? null,
     wardId: userProfile?.wardId ?? null,
     organisation: organisation ?? null,

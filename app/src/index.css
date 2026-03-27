@@ -69,3 +69,19 @@ button {
 button:active {
   transform: translateY(1px);
 }
+
+.card {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+
+.alert.warning {
+  background: #fff4e5;
+  padding: 10px;
+  border-left: 4px solid orange;
+  border-radius: 8px;
+  color: #9a3412;
+  font-weight: 700;
+}

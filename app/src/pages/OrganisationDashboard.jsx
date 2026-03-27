@@ -160,7 +160,7 @@ export default function OrganisationDashboard() {
 
   if (!canViewReports()) {
     return (
-      <div style={{ padding: "2rem", maxWidth: 560, margin: "0 auto", fontFamily: "sans-serif" }}>
+      <div style={{ padding: "2rem", width: "100%", fontFamily: "sans-serif" }}>
         <h1 style={{ marginTop: 0 }}>Organisation dashboard</h1>
         <p style={{ color: "#64748b" }}>Your role does not have access to organisation reports.</p>
         <Link to="/dashboard" style={{ color: "#005eb8", fontWeight: 800 }}>
@@ -179,7 +179,7 @@ export default function OrganisationDashboard() {
   }
 
   return (
-    <div style={{ padding: "2rem", maxWidth: 960, margin: "0 auto", fontFamily: "sans-serif" }}>
+    <div style={{ padding: "2rem", width: "100%", fontFamily: "sans-serif" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
         <h1 style={{ marginTop: 0 }}>Organisation dashboard</h1>
         {isPlatformAdmin ? (

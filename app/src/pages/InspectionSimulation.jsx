@@ -205,7 +205,7 @@ export default function InspectionSimulation() {
   const isLast = currentIndex === questions.length - 1;
 
   return (
-    <div style={{ padding: "24px", maxWidth: 1120, margin: "0 auto" }}>
+    <div style={{ padding: "24px", width: "100%" }}>
       <h1 style={{ marginTop: 0 }}>CQC Inspection Simulation</h1>
 
       {error && (

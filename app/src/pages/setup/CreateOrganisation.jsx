@@ -7,7 +7,12 @@ import { useOrganisation } from "../../context/OrganisationContext";
 import { useRole } from "../../context/RoleContext";
 import { createOrganisationUserAccount } from "../../services/userManagementService";
 import { APP_CONFIG } from "../../config/appConfig";
-import { ORG_TEMPLATES } from "../../config/organisationTemplates";
+import { CARE_TYPES } from "../../config/careTypes";
+import {
+  getFeaturesForOrganisationType,
+  getRolesForOrganisationType,
+  getUiModeForOrganisationType,
+} from "../../config/organisationTemplates";
 
 export default function CreateOrganisation() {
   const navigate = useNavigate();
@@ -125,9 +130,11 @@ export default function CreateOrganisation() {
             onChange={(e) => setType(e.target.value)}
             style={styles.select}
           >
-            <option value="MENTAL_HEALTH">Mental Health</option>
-            <option value="CARE_HOME">Care Home</option>
-            <option value="NURSING_HOME">Nursing Home</option>
+            {CARE_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t.replace(/_/g, " ")}
+              </option>
+            ))}
           </select>
 
           {isSuperAdmin ? (

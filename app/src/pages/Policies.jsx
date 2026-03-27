@@ -12,6 +12,8 @@ import {
   POLICY_STATUS_OPTIONS,
   updatePolicy,
 } from "../services/policyService";
+import { getCqcInsight } from "../utils/cqcInsights";
+import { getInspectionInsights } from "../engine/inspectionInsights";
 
 function toMs(ts) {
   if (!ts) return 0;
@@ -83,6 +85,15 @@ export default function Policies() {
   }, [rows, typeFilter, statusFilter]);
 
   const selected = filteredRows.find((r) => r.id === selectedId) ?? null;
+  const cqcInsight = getCqcInsight({ noPolicies: !loading && rows.length === 0 });
+  const policyInsights = getInspectionInsights({
+    patient: null,
+    notes: [],
+    policies: rows,
+    training: [],
+    incidents: [],
+  });
+  const hasSafeRisk = policyInsights.some((i) => i.domain === "SAFE");
 
   async function onCreate(e) {
     e.preventDefault();
@@ -158,13 +169,35 @@ export default function Policies() {
   if (!policiesEnabled) return null;
 
   return (
-    <div style={{ padding: 24, maxWidth: 1160, margin: "0 auto" }}>
+    <div style={{ padding: 24, width: "100%" }}>
       <h1 style={{ marginTop: 0 }}>Policies</h1>
       <p style={{ marginTop: 0, color: "#64748b" }}>
         Governance library for {organisation?.name || "organisation"}.
       </p>
+      {cqcInsight ? (
+        <div
+          role="status"
+          style={{
+            marginBottom: 12,
+            padding: "10px 12px",
+            borderRadius: 8,
+            border: `1px solid ${cqcInsight.level === "warning" ? "#fcd34d" : "#bfdbfe"}`,
+            background: cqcInsight.level === "warning" ? "#fffbeb" : "#eff6ff",
+            color: cqcInsight.level === "warning" ? "#92400e" : "#1e3a8a",
+            fontSize: 13,
+            fontWeight: 700,
+          }}
+        >
+          {cqcInsight.message}
+        </div>
+      ) : null}
+      {hasSafeRisk ? (
+        <div className="alert warning" role="alert" style={{ marginBottom: 12 }}>
+          {"\u26A0\uFE0F"} SAFE domain risks detected - review medication and incidents.
+        </div>
+      ) : null}
 
-      <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(360px, 440px) minmax(0, 1fr)", gap: 14 }}>
         <section style={card}>
           <h3 style={{ marginTop: 0 }}>Filters</h3>
           <label style={label}>
@@ -220,10 +253,10 @@ export default function Policies() {
                 <label style={label}>
                   Content
                   <textarea
-                    rows={6}
+                    rows={10}
                     value={form.content}
                     onChange={(e) => setForm((s) => ({ ...s, content: e.target.value }))}
-                    style={{ ...input, resize: "vertical" }}
+                    style={{ ...input, minHeight: 220, resize: "vertical" }}
                   />
                 </label>
                 <button type="submit" disabled={saving} style={primaryBtn}>

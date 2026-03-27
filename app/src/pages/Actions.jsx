@@ -92,7 +92,7 @@ export default function Actions() {
   }
 
   return (
-    <div style={{ maxWidth: 1120, margin: "0 auto", padding: "24px" }}>
+    <div style={{ width: "100%", padding: "24px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem", flexWrap: "wrap", gap: "1rem" }}>
         <h1 style={{ margin: 0 }}>Compliance actions</h1>
         {canCreate && (

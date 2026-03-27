@@ -220,14 +220,12 @@ function getBadgeStyle(action, metadata) {
 
 const styles = {
   pageText: {
-    maxWidth: 1100,
-    margin: "0 auto",
+    width: "100%",
     padding: "24px",
     color: "#334155",
   },
   container: {
-    maxWidth: 1100,
-    margin: "0 auto",
+    width: "100%",
     padding: "24px",
     fontFamily: "sans-serif",
   },
@@ -269,8 +267,8 @@ const styles = {
     verticalAlign: "top",
   },
   errorBox: {
-    maxWidth: 1100,
-    margin: "0 auto",
+    width: "100%",
+    margin: 0,
     marginTop: "8px",
     padding: "24px",
     fontFamily: "sans-serif",

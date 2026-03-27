@@ -2,7 +2,14 @@
  * System (tenant / SaaS) roles — used only for RBAC and Auth claims.
  * Do not use for clinical identity; use {@link ../constants/mdtRoles#MDT_ROLES} for that.
  */
-export const SYSTEM_ROLES = ["Admin", "Manager", "Staff", "Inspector"] as const;
+export const SYSTEM_ROLES = [
+  "Admin",
+  "Manager",
+  "Staff",
+  "Inspector",
+  "GROUP_ADMIN",
+  "SUPER_ADMIN",
+] as const;
 
 export type SystemRole = (typeof SYSTEM_ROLES)[number];
 

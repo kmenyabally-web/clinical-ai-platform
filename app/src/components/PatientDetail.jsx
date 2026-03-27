@@ -1,6 +1,6 @@
 /** [ENABLEMENT GATE: STAGE 5 - PATIENT DETAIL VIEW] */
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getPatientById, updatePatientStomp } from "../services/patientService";
 import { fetchIncidentsForPatient } from "../services/incidentService";
@@ -17,14 +17,19 @@ import { generateCPAReport, generateTribunalReport } from "../services/reportSer
 import { generateMDTReview } from "../services/mdtService";
 import { generateManagementReport } from "../services/managementService";
 import { getStompAlerts } from "../utils/stompAlerts";
+import { getCqcInsight } from "../utils/cqcInsights";
+import { getInspectionInsights } from "../engine/inspectionInsights";
+import PatientTasks from "./PatientTasks";
+import { getTasksByPatient } from "../services/taskService";
 
 export default function PatientDetail() {
   const { id } = useParams();
   const { isInspectorRole, role: userRole } = useRole();
-  const { hasFeature, organisationId, hospitalId: profileHospitalId } = useOrganisation();
+  const { hasFeature, organisationId, hospitalId: profileHospitalId, organisation } = useOrganisation();
   const redactSensitive = isInspectorRole();
   const showRiskUi = hasFeature("risk");
   const showStompUi = hasFeature("stomp");
+  const showTasksUi = hasFeature("tasks");
   const [isLoading, setIsLoading] = useState(true);
   const [patient, setPatient] = useState(null);
   const [error, setError] = useState(null);
@@ -55,6 +60,7 @@ export default function PatientDetail() {
   const [stompSaving, setStompSaving] = useState(false);
   const [stompError, setStompError] = useState(null);
   const [stompSaved, setStompSaved] = useState(false);
+  const [patientTasks, setPatientTasks] = useState([]);
 
   useEffect(() => {
     if (!id) return;
@@ -158,6 +164,23 @@ export default function PatientDetail() {
     };
   }, [id]);
 
+  const reloadPatientTasks = useCallback(async () => {
+    if (!id || !organisationId || !showTasksUi) {
+      setPatientTasks([]);
+      return;
+    }
+    try {
+      const list = await getTasksByPatient(id, organisationId);
+      setPatientTasks(Array.isArray(list) ? list : []);
+    } catch {
+      setPatientTasks([]);
+    }
+  }, [id, organisationId, showTasksUi]);
+
+  useEffect(() => {
+    void reloadPatientTasks();
+  }, [reloadPatientTasks]);
+
   const risk = useMemo(() => {
     if (!showRiskUi) return { level: "low", score: 0 };
     return calculateRisk(notes || []);
@@ -247,6 +270,23 @@ export default function PatientDetail() {
   const stompWarnings = useMemo(() => {
     return getStompAlerts({ medications: stompForm.medications });
   }, [stompForm.medications]);
+  const stompInspectionInsights = useMemo(
+    () =>
+      getInspectionInsights({
+        patient: { ...patient, medications: stompForm.medications },
+        notes,
+        policies: [],
+        training: [],
+        incidents,
+        tasks: patientTasks,
+        careType: organisation?.type ?? null,
+      }),
+    [patient, stompForm.medications, notes, incidents, patientTasks, organisation?.type]
+  );
+  const hasSafeRisk = stompInspectionInsights.some((i) => i.domain === "SAFE");
+  const stompInsight = getCqcInsight({
+    missingReviewDate: stompWarnings.some((w) => String(w?.text ?? "").toLowerCase().includes("review")),
+  });
 
   function updateMedicationRow(index, field, value) {
     setStompForm((prev) => ({
@@ -509,6 +549,17 @@ export default function PatientDetail() {
         </div>
       </div>
 
+      {patient?.id && organisationId && showTasksUi ? (
+        <div style={{ marginTop: 16 }}>
+          <PatientTasks
+            patientId={patient.id}
+            organisationId={organisationId}
+            tasks={patientTasks}
+            onTasksUpdated={reloadPatientTasks}
+          />
+        </div>
+      ) : null}
+
       {showStompUi ? (
       <div style={styles.stompCard}>
         <div style={styles.stompTitleRow}>
@@ -587,6 +638,28 @@ export default function PatientDetail() {
                 </li>
               ))}
             </ul>
+          </div>
+        ) : null}
+        {hasSafeRisk ? (
+          <div className="alert warning" role="alert" style={{ marginTop: 10 }}>
+            {"\u26A0\uFE0F"} SAFE domain risks detected - review medication and incidents.
+          </div>
+        ) : null}
+        {stompInsight ? (
+          <div
+            role="status"
+            style={{
+              marginTop: 10,
+              padding: "10px 12px",
+              borderRadius: 8,
+              border: "1px solid #fcd34d",
+              background: "#fffbeb",
+              color: "#92400e",
+              fontSize: 13,
+              fontWeight: 700,
+            }}
+          >
+            {stompInsight.message}
           </div>
         ) : null}
       </div>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { AlertTriangle, Activity, ShieldCheck } from "lucide-react";
 import { useOrganisation } from "../context/OrganisationContext";
@@ -10,9 +10,31 @@ import { listPatients } from "../services/patientService";
 import { fetchIncidents } from "../services/incidentService";
 import { fetchDocuments } from "../services/documentService";
 import { countCarePlansDueForReview } from "../services/carePlanManagementService";
+import { listPolicies } from "../services/policyService";
+import { listStaffTraining } from "../services/staffTrainingService";
+import { fetchClinicalNotesForOrganisation } from "../services/noteService";
 import ComplianceScoreCard from "../components/ComplianceScoreCard";
 import { isIndexError, INDEX_ERROR_MESSAGE } from "../lib/firestoreIndexError";
 import { logAuditEventNonBlocking } from "../services/auditService";
+import InspectionInsightsPanel from "../components/InspectionInsightsPanel";
+import DomainScoreCards from "../components/DomainScoreCards";
+import InspectionTrendChart from "../components/InspectionTrendChart";
+import InspectionPredictionCard from "../components/InspectionPredictionCard";
+import {
+  calculateDomainScores,
+  calculateOverallScore,
+  getInspectionInsights,
+} from "../engine/inspectionInsights";
+import {
+  explainPrediction,
+  predictInspectionRisk,
+} from "../engine/inspectionPredictor";
+import { getInspectionAlerts } from "../utils/inspectionAlerts";
+import { getTrend } from "../utils/inspectionTrend";
+import {
+  listInspectionScores,
+  saveInspectionScore,
+} from "../services/inspectionScoreService";
 import { collection, getDocs, limit, orderBy, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 
@@ -42,6 +64,16 @@ export default function Dashboard() {
   const [complianceLoading, setComplianceLoading] = useState(true);
   const [complianceError, setComplianceError] = useState(null);
   const [inspectionRiskLevel, setInspectionRiskLevel] = useState(null);
+  const [inspectionDataLoading, setInspectionDataLoading] = useState(true);
+  const [inspectionData, setInspectionData] = useState({
+    patient: null,
+    notes: [],
+    policies: [],
+    training: [],
+    incidents: [],
+  });
+  const [scoreHistory, setScoreHistory] = useState([]);
+  const [savingScore, setSavingScore] = useState(false);
 
   const currentServiceName =
     Array.isArray(services) && services.length > 0 && currentServiceId
@@ -213,6 +245,125 @@ export default function Dashboard() {
   useEffect(() => {
     let cancelled = false;
 
+    async function loadInspectionData() {
+      if (!organisationId) {
+        setInspectionData({ patient: null, notes: [], policies: [], training: [], incidents: [] });
+        setInspectionDataLoading(false);
+        return;
+      }
+      setInspectionDataLoading(true);
+      try {
+        const [patients, notes, policies, training, incidents] = await Promise.all([
+          listPatients(organisationId, { serviceId: currentServiceId ?? undefined }),
+          fetchClinicalNotesForOrganisation({ patientId: null, limitCount: 200 }),
+          listPolicies(organisationId),
+          listStaffTraining(organisationId, currentServiceId ?? null),
+          fetchIncidents(organisationId, { serviceId: currentServiceId ?? undefined }),
+        ]);
+        if (cancelled) return;
+        const patientList = Array.isArray(patients) ? patients : [];
+        const focusPatient =
+          patientList.find((p) => p?.stompMonitoring === true) ??
+          patientList[0] ??
+          null;
+        setInspectionData({
+          patient: focusPatient,
+          notes: Array.isArray(notes) ? notes : [],
+          policies: Array.isArray(policies) ? policies : [],
+          training: Array.isArray(training) ? training : [],
+          incidents: Array.isArray(incidents) ? incidents : [],
+        });
+      } catch {
+        if (cancelled) return;
+        setInspectionData({ patient: null, notes: [], policies: [], training: [], incidents: [] });
+      } finally {
+        if (!cancelled) setInspectionDataLoading(false);
+      }
+    }
+
+    loadInspectionData();
+    return () => {
+      cancelled = true;
+    };
+  }, [organisationId, currentServiceId]);
+
+  const insights = useMemo(
+    () =>
+      getInspectionInsights({
+        patient: inspectionData.patient,
+        notes: inspectionData.notes,
+        policies: inspectionData.policies,
+        training: inspectionData.training,
+        incidents: inspectionData.incidents,
+      }),
+    [inspectionData]
+  );
+  const domainScores = useMemo(() => calculateDomainScores(insights), [insights]);
+  const overallScore = useMemo(() => calculateOverallScore(domainScores), [domainScores]);
+  const inspectionAlerts = useMemo(() => getInspectionAlerts(domainScores), [domainScores]);
+  const trend = useMemo(() => getTrend(scoreHistory), [scoreHistory]);
+  const prediction = useMemo(
+    () =>
+      predictInspectionRisk({
+        domainScores,
+        insights,
+        trend,
+      }),
+    [domainScores, insights, trend]
+  );
+  const predictionReasons = useMemo(
+    () => explainPrediction({ insights }),
+    [insights]
+  );
+  const criticalAlert = inspectionAlerts.find((x) => x.level === "critical");
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!organisationId) {
+      setScoreHistory([]);
+      return;
+    }
+    listInspectionScores(organisationId, 20)
+      .then((rows) => {
+        if (cancelled) return;
+        setScoreHistory(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (!cancelled) setScoreHistory([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [organisationId]);
+
+  async function persistInspectionScore() {
+    if (!organisationId) return;
+    setSavingScore(true);
+    try {
+      await saveInspectionScore({
+        organisationId,
+        overallScore,
+        domainScores,
+      });
+      const rows = await listInspectionScores(organisationId, 20);
+      setScoreHistory(Array.isArray(rows) ? rows : []);
+    } catch {
+      // Non-blocking; UI still shows dynamic score from live data.
+    } finally {
+      setSavingScore(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!organisationId || inspectionDataLoading) return;
+    // Save on dashboard load/update to build trend history over time.
+    void persistInspectionScore();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [organisationId, inspectionDataLoading, overallScore]);
+
+  useEffect(() => {
+    let cancelled = false;
+
     async function loadCompliance() {
       if (!organisationId) {
         setComplianceScore(null);
@@ -346,6 +497,75 @@ export default function Dashboard() {
         <span style={systemSecureDotStyle} aria-hidden="true" />
         System Secure
       </div>
+      <h2 style={{ marginTop: 0, marginBottom: "0.9rem" }}>
+        CQC Readiness: {inspectionDataLoading ? "..." : `${overallScore}%`}
+      </h2>
+      <DomainScoreCards scores={domainScores} />
+      <InspectionPredictionCard risk={prediction} reasons={predictionReasons} />
+      <div style={{ marginBottom: "1rem", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <button
+          type="button"
+          onClick={() => {
+            void persistInspectionScore();
+          }}
+          disabled={savingScore || !organisationId}
+          style={{
+            border: "1px solid #cbd5e1",
+            borderRadius: 8,
+            background: "#fff",
+            color: "#0f172a",
+            padding: "8px 12px",
+            fontWeight: 700,
+            cursor: savingScore ? "default" : "pointer",
+          }}
+        >
+          {savingScore ? "Saving..." : "Save score snapshot"}
+        </button>
+      </div>
+      {criticalAlert ? (
+        <div className="alert warning" role="alert" style={{ marginBottom: "0.9rem", borderLeftColor: "#dc2626", background: "#fef2f2", color: "#991b1b" }}>
+          Immediate action required: {criticalAlert.domain} domain critical.
+        </div>
+      ) : null}
+      {prediction === "CRITICAL" ? (
+        <div
+          role="alert"
+          style={{
+            marginBottom: "0.9rem",
+            padding: "10px 12px",
+            borderRadius: 8,
+            border: "1px solid #dc2626",
+            background: "#fef2f2",
+            color: "#991b1b",
+            fontWeight: 800,
+          }}
+        >
+          {"\u26A0\uFE0F"} High likelihood of inspection failure - immediate action required.
+        </div>
+      ) : null}
+      {inspectionAlerts.map((a, idx) => (
+        <div
+          key={`${a.domain}-${a.level}-${idx}`}
+          role="alert"
+          style={{
+            marginBottom: "0.5rem",
+            padding: "10px 12px",
+            borderRadius: 8,
+            borderLeft: `4px solid ${a.level === "critical" ? "#dc2626" : "#f59e0b"}`,
+            background: a.level === "critical" ? "#fef2f2" : "#fff7ed",
+            color: a.level === "critical" ? "#991b1b" : "#9a3412",
+            fontWeight: 700,
+          }}
+        >
+          {a.message}
+        </div>
+      ))}
+      <section style={{ marginBottom: "1rem" }}>
+        <InspectionInsightsPanel insights={insights} />
+      </section>
+      <section style={{ marginBottom: "1rem" }}>
+        <InspectionTrendChart scores={scoreHistory} />
+      </section>
 
       <div style={{ marginBottom: "1rem" }}>
         <Link
@@ -656,8 +876,7 @@ const tableStyles = {
 
 const styles = {
   page: {
-    maxWidth: 1120,
-    margin: "0 auto",
+    width: "100%",
     padding: "24px",
   },
   title: {

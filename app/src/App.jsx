@@ -12,7 +12,8 @@ import Signup from "./pages/Signup";
 import Unauthorised from "./pages/Unauthorised";
 import FirstSafeScreen from "./components/FirstSafeScreen.jsx";
 import Layout from "./components/Layout";
-import Dashboard from "./pages/Dashboard";
+import DashboardHome from "./components/DashboardHome";
+import CarerTasks from "./pages/CarerTasks";
 import PatientList from "./components/PatientList";
 import PatientDetail from "./components/PatientDetail";
 import IncidentReportPage from "./components/IncidentReportPage";
@@ -41,15 +42,19 @@ import CreateOrganisation from "./pages/setup/CreateOrganisation";
 import SystemOrganisations from "./pages/SystemOrganisations";
 import { MANAGEMENT_ALLOWED_ROLES } from "./config/routes";
 import LandingPage from "./pages/LandingPage";
+import Pricing from "./pages/Pricing";
 import FeatureGate from "./components/FeatureGate";
 import FeatureSettings from "./pages/FeatureSettings";
 import Policies from "./pages/Policies";
+import CommandCentre from "./pages/CommandCentre";
+import EnterpriseRoute from "./components/EnterpriseRoute";
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<LandingPage />} />
+        <Route path="/pricing" element={<Pricing />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
 
@@ -74,7 +79,17 @@ export default function App() {
           }
         >
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/dashboard" element={<DashboardHome />} />
+          <Route path="/tasks" element={<CarerTasks />} />
+          <Route path="/enterprise" element={<EnterpriseRoute />} />
+          <Route
+            path="/command-centre"
+            element={
+              <FeatureGate feature="inspection">
+                <CommandCentre />
+              </FeatureGate>
+            }
+          />
           <Route path="/organisation-dashboard" element={<OrganisationDashboard />} />
           <Route path="/reports" element={<ClinicalAiReports />} />
           <Route path="/cqc-readiness-reports" element={<Reports />} />

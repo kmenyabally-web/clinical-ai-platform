@@ -12,6 +12,7 @@ export const MANAGEMENT_ALLOWED_ROLES = ["Admin", "Manager"];
 /** @type {{ path: string, label: string, ariaLabel?: string, allowedRoles?: string[], platformAdminOnly?: boolean }[]} */
 export const NAV_ITEMS = [
   { path: "/dashboard", label: "Dashboard", ariaLabel: "Dashboard overview", allowedRoles: undefined },
+  { path: "/command-centre", label: "🧭 Command Centre", ariaLabel: "Inspection command centre", allowedRoles: undefined },
   { path: "/billing", label: "Billing", ariaLabel: "Subscription and billing", allowedRoles: undefined },
   { path: "/organisation-dashboard", label: "Organisation", ariaLabel: "Organisation operational dashboard", allowedRoles: undefined },
   { path: "/patients", label: "Patients", ariaLabel: "Patient list", allowedRoles: undefined },

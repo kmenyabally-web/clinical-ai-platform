@@ -10,6 +10,10 @@ import {
 import ComplianceScoreCard from "../components/ComplianceScoreCard";
 import { isIndexError, INDEX_ERROR_MESSAGE } from "../lib/firestoreIndexError";
 import { formatUkDateTime } from "../utils/dateFormat";
+import { listPolicies } from "../services/policyService";
+import { fetchIncidents } from "../services/incidentService";
+import { listStaffTraining } from "../services/staffTrainingService";
+import { getCqcInsight } from "../utils/cqcInsights";
 
 const BAND_COLORS = {
   green: "#22c55e",
@@ -30,6 +34,11 @@ export default function ComplianceOverview() {
   const [loading, setLoading] = useState(true);
   const [recalculating, setRecalculating] = useState(false);
   const [error, setError] = useState(null);
+  const [insightContext, setInsightContext] = useState({
+    noPolicies: false,
+    missingIncidents: false,
+    noTraining: false,
+  });
 
   const serviceName =
     currentServiceId && Array.isArray(services)
@@ -92,6 +101,33 @@ export default function ComplianceOverview() {
     }
   }
 
+  useEffect(() => {
+    let cancelled = false;
+    async function loadInsights() {
+      if (!organisationId) return;
+      try {
+        const [policies, incidents, training] = await Promise.all([
+          listPolicies(organisationId),
+          fetchIncidents(organisationId, { serviceId: currentServiceId ?? null }),
+          listStaffTraining(organisationId, currentServiceId ?? null),
+        ]);
+        if (cancelled) return;
+        setInsightContext({
+          noPolicies: !Array.isArray(policies) || policies.length === 0,
+          missingIncidents: !Array.isArray(incidents) || incidents.length === 0,
+          noTraining: !Array.isArray(training) || training.length === 0,
+        });
+      } catch {
+        if (cancelled) return;
+        setInsightContext((prev) => ({ ...prev }));
+      }
+    }
+    void loadInsights();
+    return () => {
+      cancelled = true;
+    };
+  }, [organisationId, currentServiceId]);
+
   const riskDomains = score
     ? [
         { key: "safe", label: "Safe", value: score.safeScore },
@@ -101,9 +137,10 @@ export default function ComplianceOverview() {
         { key: "wellLed", label: "Well-Led", value: score.wellLedScore },
       ].filter((d) => d.value < 70)
     : [];
+  const cqcInsight = getCqcInsight(insightContext);
 
   return (
-    <div style={{ padding: "24px", maxWidth: 1120, margin: "0 auto" }}>
+    <div style={{ padding: "24px", width: "100%" }}>
       <header style={{ marginBottom: "1.5rem" }}>
         <h1 style={{ margin: 0, marginBottom: "0.25rem" }}>Compliance overview</h1>
         <p style={{ margin: 0, fontSize: "0.95rem", color: "#64748b" }}>
@@ -116,6 +153,23 @@ export default function ComplianceOverview() {
           </p>
         )}
       </header>
+      {cqcInsight ? (
+        <div
+          role="status"
+          style={{
+            marginBottom: "1rem",
+            padding: "10px 12px",
+            borderRadius: 8,
+            border: `1px solid ${cqcInsight.level === "warning" ? "#fcd34d" : "#bfdbfe"}`,
+            background: cqcInsight.level === "warning" ? "#fffbeb" : "#eff6ff",
+            color: cqcInsight.level === "warning" ? "#92400e" : "#1e3a8a",
+            fontSize: 13,
+            fontWeight: 700,
+          }}
+        >
+          {cqcInsight.message}
+        </div>
+      ) : null}
 
       {error && (
         <div

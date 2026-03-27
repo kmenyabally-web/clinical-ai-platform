@@ -123,7 +123,7 @@ export default function FeatureSettings() {
 
   if (!allowed) {
     return (
-      <div style={{ padding: 24, maxWidth: 680, margin: "0 auto" }}>
+      <div style={{ padding: 24, width: "100%" }}>
         <h2 style={{ marginTop: 0 }}>Access denied</h2>
         <p style={{ color: "var(--text-muted)" }}>Only organisation admins can change features.</p>
         <div style={{ marginTop: 12 }}>
@@ -136,11 +136,11 @@ export default function FeatureSettings() {
   }
 
   if (loading) {
-    return <div style={{ padding: 24, maxWidth: 680, margin: "0 auto" }}>Loading…</div>;
+    return <div style={{ padding: 24, width: "100%" }}>Loading…</div>;
   }
 
   return (
-    <div style={{ padding: 24, maxWidth: 680, margin: "0 auto" }}>
+    <div style={{ padding: 24, width: "100%" }}>
       <h2 style={{ marginTop: 0 }}>Feature Settings</h2>
 
       <p style={{ color: "var(--text-muted)", marginTop: 6, lineHeight: 1.6 }}>

@@ -180,7 +180,7 @@ export default function Incidents() {
   }
 
   return (
-    <div style={{ padding: "24px", maxWidth: 1120, margin: "0 auto" }}>
+    <div style={{ padding: "24px", width: "100%" }}>
       <div
         className="page-header"
         style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: "1.5rem" }}

@@ -177,8 +177,7 @@ export default function Patients() {
 
 const styles = {
   page: {
-    maxWidth: 1080,
-    margin: "0 auto",
+    width: "100%",
     padding: 24,
   },
   errorAlert: {

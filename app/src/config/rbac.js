@@ -6,7 +6,14 @@
 export const ROLE_PERMISSIONS = {
   /** Full access: wildcard handled in getPermissionsForRole / canAccess. */
   Admin: ["*"],
-  Manager: ["audit:create", "audit:update", "audit:view", "user:manage", "organisation:manage"],
+  Manager: [
+    "audit:create",
+    "audit:update",
+    "audit:view",
+    "user:manage",
+    "organisation:manage",
+    "group:manage",
+  ],
   QualityLead: ["audit:create", "audit:update", "audit:view"],
   Staff: ["audit:create", "audit:view", "read"],
   /** System read-only / inspection (replaces legacy Auditor). */
@@ -16,6 +23,7 @@ export const ROLE_PERMISSIONS = {
 const ROLE_ALIASES = {
   ADMIN: "Admin",
   SUPER_ADMIN: "Admin",
+  GROUP_ADMIN: "Manager",
   GLOBAL_ADMIN: "Admin",
   STAFF: "Staff",
   staff: "Staff",
@@ -105,6 +113,7 @@ export function getPermissionsForRole(role) {
       "audit:view",
       "user:manage",
       "organisation:manage",
+      "group:manage",
       "read",
     ];
   }

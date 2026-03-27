@@ -244,7 +244,7 @@ export default function Documents() {
   }
 
   return (
-    <div style={{ maxWidth: 1120, margin: "0 auto", padding: "24px" }}>
+    <div style={{ width: "100%", padding: "24px" }}>
       <div
         className="page-header"
         style={{

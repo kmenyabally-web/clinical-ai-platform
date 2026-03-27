@@ -34,6 +34,7 @@ export default function Sidebar() {
     "/compliance": "risk",
     "/evidence-pack": "evidencePack",
     "/inspection-simulator": "inspection",
+    "/command-centre": "inspection",
   };
 
   const visibleItems = useMemo(

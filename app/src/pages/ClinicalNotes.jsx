@@ -17,6 +17,8 @@ import { MDT_ROLES } from "../constants/mdtRoles";
 import ActionBar from "../components/ActionBar";
 import { usePermissions } from "../hooks/usePermissions";
 import { listPolicies } from "../services/policyService";
+import { fetchIncidents } from "../services/incidentService";
+import { getInspectionInsights } from "../engine/inspectionInsights";
 
 function formatDate(value) {
   return formatUkDateTime(value, "—");
@@ -45,6 +47,7 @@ export default function ClinicalNotes() {
   const [addendumError, setAddendumError] = useState({});
   const [addendumsByNote, setAddendumsByNote] = useState({});
   const [policyHints, setPolicyHints] = useState([]);
+  const [insightIncidents, setInsightIncidents] = useState([]);
 
   const load = useCallback(() => {
     if (!organisationId) {
@@ -99,6 +102,34 @@ export default function ClinicalNotes() {
     load();
   }, [organisationId, isManager, filterPatientId, patients, load, roleLoading]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!organisationId) {
+      setInsightIncidents([]);
+      return;
+    }
+    fetchIncidents(organisationId, { serviceId: currentServiceId ?? undefined })
+      .then((rows) => {
+        if (cancelled) return;
+        setInsightIncidents(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (!cancelled) setInsightIncidents([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [organisationId, currentServiceId]);
+
+  const noteInsights = getInspectionInsights({
+    patient: null,
+    notes,
+    policies: policyHints,
+    training: [],
+    incidents: insightIncidents,
+  });
+  const hasSafeRisk = noteInsights.some((i) => i.domain === "SAFE");
+
   const currentServiceName =
     currentServiceId && Array.isArray(services)
       ? services.find((s) => s?.id === currentServiceId)?.serviceName ||
@@ -116,7 +147,7 @@ export default function ClinicalNotes() {
 
   if (roleLoading) {
     return (
-      <div style={{ padding: 24, maxWidth: 1120, margin: "0 auto" }}>
+      <div style={{ padding: 24, width: "100%" }}>
         <p style={{ color: "#666" }}>Loading…</p>
       </div>
     );
@@ -124,7 +155,7 @@ export default function ClinicalNotes() {
 
   if (!canViewNotes()) {
     return (
-      <div style={{ padding: 24, maxWidth: 560, margin: "0 auto" }}>
+      <div style={{ padding: 24, width: "100%" }}>
         <h1 style={{ marginTop: 0 }}>Clinical Notes</h1>
         <p style={{ color: "#64748b" }}>Your role does not have access to clinical notes for this organisation.</p>
       </div>
@@ -134,7 +165,7 @@ export default function ClinicalNotes() {
   // UX-level role template gate (separate from backend RBAC).
   if (!permissions?.canWriteNotes) {
     return (
-      <div style={{ padding: 24, maxWidth: 560, margin: "0 auto" }}>
+      <div style={{ padding: 24, width: "100%" }}>
         <h1 style={{ marginTop: 0 }}>Clinical Notes</h1>
         <p style={{ color: "#64748b" }}>Your role does not have permission to use clinical note tools.</p>
       </div>
@@ -142,7 +173,7 @@ export default function ClinicalNotes() {
   }
 
   return (
-    <div style={{ padding: 24, maxWidth: 1120, margin: "0 auto" }}>
+    <div style={{ padding: 24, width: "100%" }}>
       <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
         <div>
           <h1 style={{ marginTop: 0 }}>Clinical Notes</h1>
@@ -224,6 +255,11 @@ export default function ClinicalNotes() {
       {policyHints.length > 0 ? (
         <div style={{ marginBottom: "0.75rem", padding: "10px 12px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 8, color: "#1e3a8a", fontSize: 13, fontWeight: 700 }}>
           Relevant policy guidance available: {policyHints.map((p) => p.title || p.type).slice(0, 3).join(", ")}
+        </div>
+      ) : null}
+      {hasSafeRisk ? (
+        <div className="alert warning" role="alert" style={{ marginBottom: "0.75rem" }}>
+          {"\u26A0\uFE0F"} SAFE domain risks detected - review medication and incidents.
         </div>
       ) : null}
 

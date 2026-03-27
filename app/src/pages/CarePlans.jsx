@@ -348,7 +348,7 @@ export default function CarePlans() {
   }
 
   return (
-    <div style={{ padding: "24px", maxWidth: 1080, margin: "0 auto" }}>
+    <div style={{ padding: "24px", width: "100%" }}>
       <style>{`
         @keyframes cqcSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>

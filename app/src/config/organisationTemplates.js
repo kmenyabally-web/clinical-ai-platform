@@ -1,6 +1,8 @@
 // Smart organisation templates.
 // Templates control which *optional* system modules are enabled for the tenant.
 
+import { getCareTemplate } from "./careTemplates";
+
 export const KNOWN_FEATURE_KEYS = [
   "clinicalNotes",
   "policies",
@@ -12,6 +14,7 @@ export const KNOWN_FEATURE_KEYS = [
   "careLogs",
   "inspection",
   "evidencePack",
+  "tasks",
 ];
 
 // Baseline feature state for all templates:
@@ -38,6 +41,7 @@ export const ORG_TEMPLATES = {
       careLogs: false,
       inspection: true,
       evidencePack: true,
+      tasks: true,
     },
     roles: ["Doctor", "Nurse", "Manager", "Support Worker"],
   },
@@ -66,6 +70,7 @@ export const ORG_TEMPLATES = {
       stomp: true,
       mdt: false,
       risk: false,
+      tasks: true,
     },
     roles: ["Carer", "Senior Carer", "Manager"],
   },
@@ -78,33 +83,51 @@ export const ORG_TEMPLATES = {
       medication: true,
       vitals: true,
       careLogs: true,
+      tasks: true,
     },
     roles: ["Nurse", "Care Assistant", "Manager"],
   },
 };
 
-function normalizeType(raw) {
+function normalizeLegacyOrgType(raw) {
   if (!raw) return null;
   const u = String(raw).trim().toUpperCase();
   return Object.prototype.hasOwnProperty.call(ORG_TEMPLATES, u) ? u : null;
 }
 
 export function getRolesForOrganisationType(type) {
-  const t = normalizeType(type) ?? "GENERAL";
+  const care = getCareTemplate(type);
+  if (care?.roles?.length) return care.roles;
+  const t = normalizeLegacyOrgType(type) ?? "GENERAL";
   const template = ORG_TEMPLATES[t];
   return template?.roles ?? ORG_TEMPLATES.GENERAL.roles ?? [];
 }
 
 export function getFeaturesForOrganisationType(type) {
-  const t = normalizeType(type) ?? "GENERAL";
+  const care = getCareTemplate(type);
+  if (care?.features) {
+    return {
+      ...DEFAULT_ORG_FEATURES,
+      ...care.features,
+      audit: true,
+    };
+  }
+  const t = normalizeLegacyOrgType(type) ?? "GENERAL";
   const template = ORG_TEMPLATES[t] ?? ORG_TEMPLATES.GENERAL;
   const featuresFromTemplate = template?.features && typeof template.features === "object" ? template.features : {};
 
-  // Start from baseline "all optional modules off", then apply template overrides.
   return {
     ...DEFAULT_ORG_FEATURES,
     ...featuresFromTemplate,
     audit: true,
   };
+}
+
+/** UI mode for {@link useUIMode}: CLINICAL | CARER | HYBRID */
+export function getUiModeForOrganisationType(type, storedUiMode) {
+  if (storedUiMode === "CLINICAL" || storedUiMode === "CARER" || storedUiMode === "HYBRID") {
+    return storedUiMode;
+  }
+  return getCareTemplate(type)?.uiMode ?? "CLINICAL";
 }
 

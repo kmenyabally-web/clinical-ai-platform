@@ -57,13 +57,15 @@ export function RoleProvider({ children }) {
       "STAFF";
     const role = String(rawRole).toUpperCase();
     const isSuperAdmin = role === "SUPER_ADMIN";
+    const isGroupAdmin = role === "GROUP_ADMIN";
     const isGlobalAdmin = role === "SUPER_ADMIN" || profile?.isGlobalAdmin === true;
     console.log("🔥 ROLE:", role, "GLOBAL:", isGlobalAdmin);
-    return { role, isGlobalAdmin, isSuperAdmin };
+    return { role, isGlobalAdmin, isSuperAdmin, isGroupAdmin };
   }, [userProfile?.role, userProfile?.systemRole, claimRole]);
   const role = normalizeRole(roleState.role) ?? roleState.role;
   const isGlobalAdmin = roleState.isGlobalAdmin;
   const isSuperAdmin = roleState.isSuperAdmin;
+  const isGroupAdmin = roleState.isGroupAdmin;
 
   const mdtRole = userProfile?.mdtRole ?? null;
 
@@ -75,6 +77,7 @@ export function RoleProvider({ children }) {
       role,
       isGlobalAdmin,
       isSuperAdmin,
+      isGroupAdmin,
       /** Clinical MDT label (Nurse, Psychologist, …). Not used for RBAC. */
       mdtRole,
       /** ADMIN | MANAGER | STAFF | INSPECTOR for display / analytics. */
@@ -97,7 +100,7 @@ export function RoleProvider({ children }) {
       canViewReports: () => canViewReportsFromSystemRole(role),
       isInspectorRole: () => isInspectorSystemRole(role),
     }),
-    [role, isGlobalAdmin, isSuperAdmin, mdtRole, permissions, orgLoading, enterpriseRoleCode, organisationId, user]
+    [role, isGlobalAdmin, isSuperAdmin, isGroupAdmin, mdtRole, permissions, orgLoading, enterpriseRoleCode, organisationId, user]
   );
 
   return (

@@ -164,37 +164,16 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* PRICING */}
+      {/* PRICING — summary only; details on /pricing */}
       <section style={{ maxWidth: 1100, margin: "0 auto", padding: "56px 20px" }}>
         <h3 style={{ margin: 0, fontSize: 24, fontWeight: 900 }}>Pricing</h3>
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 16, marginTop: 22 }}>
-          {[
-            { title: "Starter", price: "£49/month", accent: "light" },
-            { title: "Professional", price: "£149/month", accent: "light" },
-            { title: "Enterprise", price: "£399/month", accent: "primary" },
-          ].map((p) => (
-            <div
-              key={p.title}
-              style={{
-                background: p.accent === "primary" ? "var(--primary)" : "var(--surface)",
-                color: p.accent === "primary" ? "#fff" : "var(--text-primary)",
-                border: p.accent === "primary" ? "none" : "1px solid var(--border)",
-                borderRadius: 10,
-                padding: 18,
-              }}
-            >
-              <h4 style={{ margin: 0, fontSize: 16, fontWeight: 900 }}>{p.title}</h4>
-              <p style={{ margin: "10px 0 0 0", color: p.accent === "primary" ? "rgba(255,255,255,0.9)" : "var(--text-muted)", fontWeight: 900 }}>
-                {p.price}
-              </p>
-              {p.title === "Enterprise" ? (
-                <p style={{ margin: "10px 0 0 0", fontSize: 13, lineHeight: 1.55 }}>
-                  Evidence packs, inspection engine, full AI features
-                </p>
-              ) : null}
-            </div>
-          ))}
+        <p style={{ margin: "14px 0 0 0", maxWidth: 640, color: "var(--text-muted)", fontSize: 15, lineHeight: 1.65 }}>
+          <strong style={{ color: "var(--text-primary)", fontWeight: 800 }}>Starter</strong> is free for core notes and workflows.{" "}
+          <strong style={{ color: "var(--text-primary)", fontWeight: 800 }}>Professional</strong> adds AI, risk insight, and inspection tooling from £49/month.{" "}
+          <strong style={{ color: "var(--text-primary)", fontWeight: 800 }}>Enterprise</strong> is tailored for multi-site groups — contact sales for a quote.
+        </p>
+        <div style={{ marginTop: 20 }}>
+          <ButtonSecondary onClick={() => navigate("/pricing")}>View Full Pricing</ButtonSecondary>
         </div>
       </section>
 

@@ -99,7 +99,7 @@ export default function EvidencePack() {
 
   if (subscriptionLoading) {
     return (
-      <div style={{ padding: "24px", maxWidth: 560, margin: "0 auto" }}>
+      <div style={{ padding: "24px", width: "100%" }}>
         <h1 style={{ marginTop: 0 }}>{APP_CONFIG.name} Evidence Pack</h1>
         <p style={{ color: "#64748b" }}>Loading subscription…</p>
       </div>
@@ -108,7 +108,7 @@ export default function EvidencePack() {
 
   if (!canAccess) {
     return (
-      <div style={{ padding: "24px", maxWidth: 560, margin: "0 auto" }}>
+      <div style={{ padding: "24px", width: "100%" }}>
         <h1 style={{ marginTop: 0 }}>{APP_CONFIG.name} Evidence Pack</h1>
         <p style={{ color: "#64748b" }}>
           Evidence pack export is available on the Enterprise plan.{" "}
@@ -190,7 +190,7 @@ export default function EvidencePack() {
   }
 
   return (
-    <div style={{ padding: "24px", maxWidth: 920, margin: "0 auto" }}>
+    <div style={{ padding: "24px", width: "100%" }}>
       <style>{`
         @keyframes cqcSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
@@ -412,6 +412,42 @@ export default function EvidencePack() {
               </div>
             ))
           )}
+
+          <h3 style={{ marginBottom: 6, marginTop: 12 }}>Inspection Intelligence</h3>
+          <p style={{ marginTop: 0, color: "#334155" }}>
+            Overall score: {pack.inspectionIntelligence?.overallScore ?? "—"} | Snapshots: {pack.inspectionIntelligence?.historyCount ?? 0}
+          </p>
+          {pack.inspectionIntelligence?.domainScores ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {Object.entries(pack.inspectionIntelligence.domainScores).map(([domain, score]) => (
+                <div
+                  key={domain}
+                  style={{
+                    border: "1px solid #e2e8f0",
+                    borderRadius: 8,
+                    padding: "6px 10px",
+                    background: "#f8fafc",
+                    color: "#0f172a",
+                    fontSize: 13,
+                    fontWeight: 700,
+                  }}
+                >
+                  {domain}: {score}%
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p style={{ marginTop: 0, color: "#64748b" }}>No inspection score snapshots yet.</p>
+          )}
+          {(pack.inspectionIntelligence?.keyAlerts ?? []).length > 0 ? (
+            <ul style={{ margin: "6px 0 0 18px" }}>
+              {(pack.inspectionIntelligence?.keyAlerts ?? []).map((a, idx) => (
+                <li key={`ia-${idx}`} style={{ color: a.level === "critical" ? "#991b1b" : "#9a3412" }}>
+                  {a.level === "critical" ? "🔴" : "🟠"} {a.message}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </section>
       ) : null}
 

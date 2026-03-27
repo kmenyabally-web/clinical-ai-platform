@@ -220,7 +220,7 @@ export default function ClinicalAiReports() {
   }
 
   return (
-    <div style={{ padding: "2rem", maxWidth: 980, margin: "0 auto", fontFamily: "sans-serif" }}>
+    <div style={{ padding: "2rem", width: "100%", fontFamily: "sans-serif" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
         <h1 style={{ margin: 0 }}>AI Reports</h1>
         <Link to="/patients" style={{ color: "#005eb8", fontWeight: 800, textDecoration: "none" }}>

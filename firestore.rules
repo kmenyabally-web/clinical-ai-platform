@@ -91,6 +91,33 @@ service cloud.firestore {
         || isPlatformAdminFlag();
     }
 
+    function organisationDocGroupId(orgId) {
+      return get(/databases/$(database)/documents/organisations/$(orgId)).data.groupId;
+    }
+
+    function userGroupIdFromProfile() {
+      let u = getUserSafe();
+      return u != null && u.groupId != null ? u.groupId : null;
+    }
+
+    function sameGroupAsOrganisation(orgId) {
+      return roleUpper() == 'GROUP_ADMIN'
+        && userGroupIdFromProfile() != null
+        && orgId != null
+        && exists(/databases/$(database)/documents/organisations/$(orgId))
+        && organisationDocGroupId(orgId) == userGroupIdFromProfile();
+    }
+
+    /** Read tenant-scoped data: home org, platform admin, super admin, or same enterprise group (GROUP_ADMIN). */
+    function canAccessTenantData(orgId) {
+      return orgId != null && (
+        sameOrganisation(orgId)
+        || isSuperAdminOrGlobalAdminRole()
+        || isPlatformAdminFlag()
+        || sameGroupAsOrganisation(orgId)
+      );
+    }
+
     function inspectionSessionOrgId(sessionId) {
       return get(/databases/$(database)/documents/inspection_sessions/$(sessionId)).data.organisationId;
     }
@@ -99,8 +126,23 @@ service cloud.firestore {
     // Organisations
     // =========
     match /organisations/{orgId} {
-      allow read: if isAuthenticated() && canReadOrganisationRoot(orgId);
+      allow read: if isAuthenticated() && (
+        canReadOrganisationRoot(orgId)
+        || (roleUpper() == 'GROUP_ADMIN'
+          && userGroupIdFromProfile() != null
+          && resource.data.groupId == userGroupIdFromProfile())
+      );
       allow create, update, delete: if isAuthenticated() && isGlobalAdmin();
+    }
+
+    match /groups/{groupId} {
+      allow read: if isAuthenticated() && (
+        isSuperAdminOrGlobalAdminRole()
+        || isPlatformAdminFlag()
+        || (roleUpper() == 'GROUP_ADMIN' && userGroupIdFromProfile() == groupId)
+      );
+      allow create, update, delete: if isAuthenticated()
+        && (isSuperAdminOrGlobalAdminRole() || isPlatformAdminFlag());
     }
 
     // Stage-20 readiness rows (dashboard / compliance). Scoped by parent org id.
@@ -149,7 +191,7 @@ service cloud.firestore {
     // Patients
     // =========
     match /patients/{patientId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
 
       allow create: if isAuthenticated()
         && request.resource.data.organisationId != null
@@ -164,7 +206,7 @@ service cloud.firestore {
     // Notes (immutable)
     // =========
     match /notes/{noteId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
 
       allow create: if isAuthenticated()
         && request.resource.data.organisationId != null
@@ -178,7 +220,7 @@ service cloud.firestore {
     // Note addendums (append-only alternative to editing notes)
     // =========
     match /note_addendums/{addendumId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
 
       allow create: if isAuthenticated()
         && request.resource.data.organisationId != null
@@ -192,7 +234,7 @@ service cloud.firestore {
     // Incidents
     // =========
     match /incidents/{incidentId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
 
       allow create: if isAuthenticated()
         && request.resource.data.organisationId != null
@@ -210,7 +252,7 @@ service cloud.firestore {
     // Patient timeline
     // =========
     match /patient_timeline/{timelineId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
 
       allow create: if isAuthenticated()
         && request.resource.data.organisationId != null
@@ -222,7 +264,7 @@ service cloud.firestore {
 
     // Legacy alias used by incidentService / carePlanService (same schema as patient_timeline).
     match /patientTimeline/{timelineId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
 
       allow create: if isAuthenticated()
         && request.resource.data.organisationId != null
@@ -237,7 +279,7 @@ service cloud.firestore {
     // (Needed for onboarding + tenant setup flows.)
     // =========
     match /services/{serviceId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
       allow create, update: if isAuthenticated()
         && isAdmin()
         && sameOrganisation(request.resource.data.organisationId);
@@ -245,7 +287,7 @@ service cloud.firestore {
     }
 
     match /hospitals/{hospitalId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
       allow create, update: if isAuthenticated()
         && isAdmin()
         && sameOrganisation(request.resource.data.organisationId);
@@ -253,7 +295,7 @@ service cloud.firestore {
     }
 
     match /wards/{wardId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
       allow create, update: if isAuthenticated()
         && isAdmin()
         && sameOrganisation(request.resource.data.organisationId);
@@ -293,7 +335,7 @@ service cloud.firestore {
     // Inspection reports (if/when stored)
     // =========
     match /inspection_reports/{reportId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
       allow create: if isAuthenticated()
         && request.resource.data.organisationId != null
         && sameOrganisation(request.resource.data.organisationId);
@@ -391,7 +433,7 @@ service cloud.firestore {
     // Care plans (structured + AI drafts) and version history
     // =========
     match /care_plans/{carePlanId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
       allow create: if isAuthenticated()
         && request.resource.data.organisationId != null
         && sameOrganisation(request.resource.data.organisationId);
@@ -401,7 +443,7 @@ service cloud.firestore {
     }
 
     match /care_plan_versions/{versionId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
       allow create: if isAuthenticated()
         && request.resource.data.organisationId != null
         && sameOrganisation(request.resource.data.organisationId);
@@ -411,7 +453,7 @@ service cloud.firestore {
     }
 
     match /carePlans/{carePlanId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
       allow create: if isAuthenticated()
         && request.resource.data.organisationId != null
         && sameOrganisation(request.resource.data.organisationId);
@@ -424,7 +466,7 @@ service cloud.firestore {
     // Compliance engine + governance (all queries filter by organisationId in app code)
     // =========
     match /compliance_scores/{scoreId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
       allow create, update: if isAuthenticated()
         && request.resource.data.organisationId != null
         && sameOrganisation(request.resource.data.organisationId);
@@ -432,7 +474,7 @@ service cloud.firestore {
     }
 
     match /compliance_domains/{domainId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
       allow create: if isAuthenticated()
         && request.resource.data.organisationId != null
         && sameOrganisation(request.resource.data.organisationId)
@@ -444,7 +486,7 @@ service cloud.firestore {
     }
 
     match /compliance_actions/{actionId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
       allow create: if isAuthenticated()
         && request.resource.data.organisationId != null
         && sameOrganisation(request.resource.data.organisationId);
@@ -455,7 +497,7 @@ service cloud.firestore {
     }
 
     match /compliance_stats/{statsId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
       allow create, update: if isAuthenticated()
         && request.resource.data.organisationId != null
         && sameOrganisation(request.resource.data.organisationId);
@@ -492,7 +534,7 @@ service cloud.firestore {
     }
 
     match /document_stats/{statId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
       allow create, update: if isAuthenticated()
         && request.resource.data.organisationId != null
         && sameOrganisation(request.resource.data.organisationId);
@@ -503,7 +545,7 @@ service cloud.firestore {
     // Notifications (in-app)
     // =========
     match /notifications/{notificationId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
       allow create: if isAuthenticated()
         && request.resource.data.organisationId != null
         && sameOrganisation(request.resource.data.organisationId);
@@ -517,7 +559,7 @@ service cloud.firestore {
     // CQC scores + inspection simulations (dashboard)
     // =========
     match /cqcScores/{rowId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
       allow create, update: if isAuthenticated()
         && request.resource.data.organisationId != null
         && sameOrganisation(request.resource.data.organisationId);
@@ -525,11 +567,59 @@ service cloud.firestore {
     }
 
     match /inspection_simulations/{simId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
       allow create: if isAuthenticated()
         && request.resource.data.organisationId != null
         && sameOrganisation(request.resource.data.organisationId);
       allow update, delete: if false;
+    }
+
+    match /inspection_scores/{scoreId} {
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
+      allow create: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId);
+      allow update, delete: if false;
+    }
+
+    // Care tasks (per patient, tenant-scoped)
+    match /tasks/{taskId} {
+      allow read: if isAuthenticated()
+        && sameOrganisation(resource.data.organisationId);
+
+      allow create: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && request.resource.data.patientId != null
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.description is string
+        && request.resource.data.status == "pending"
+        && request.resource.data.shift in ["morning", "afternoon", "night"]
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.dueAt is timestamp
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.completedAt == null
+        && request.resource.data.completedBy == null
+        && (request.resource.data.assignedTo == null || request.resource.data.assignedTo is string)
+        && sameOrganisation(request.resource.data.organisationId);
+
+      allow update: if isAuthenticated()
+        && sameOrganisation(resource.data.organisationId)
+        && resource.data.status == "pending"
+        && request.resource.data.organisationId == resource.data.organisationId
+        && request.resource.data.patientId == resource.data.patientId
+        && request.resource.data.title == resource.data.title
+        && request.resource.data.description == resource.data.description
+        && request.resource.data.shift == resource.data.shift
+        && request.resource.data.dueAt == resource.data.dueAt
+        && request.resource.data.assignedTo == resource.data.assignedTo
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.status == "completed"
+        && request.resource.data.completedAt is timestamp
+        && request.resource.data.completedBy == request.auth.uid;
+
+      allow delete: if false;
     }
 
     // =========
@@ -549,7 +639,7 @@ service cloud.firestore {
     }
 
     match /inspection_sessions/{sessionId} {
-      allow read: if isAuthenticated() && sameOrganisation(resource.data.organisationId);
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
       allow create: if isAuthenticated()
         && request.resource.data.organisationId != null
         && sameOrganisation(request.resource.data.organisationId);

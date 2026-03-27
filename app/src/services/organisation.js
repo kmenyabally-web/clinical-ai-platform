@@ -11,10 +11,11 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { normalizePlanKey } from "../utils/featureAccess";
+import { getCareTemplate } from "../config/careTemplates";
 import {
-  DEFAULT_ORG_FEATURES,
   getFeaturesForOrganisationType,
   getRolesForOrganisationType,
+  getUiModeForOrganisationType,
 } from "../config/organisationTemplates";
 
 /**
@@ -60,8 +61,9 @@ export async function getOrganisation(organisationId) {
   }
   const data = orgSnap.data?.() ?? {};
   const rawPlan = data.plan ?? data.subscriptionPlan ?? null;
+  const orgType = data.type ?? data.organisationType ?? data.orgType ?? null;
   const featuresFromDoc = data.features && typeof data.features === "object" ? data.features : null;
-  const baseFromType = getFeaturesForOrganisationType(data.type ?? data.organisationType ?? data.orgType ?? null);
+  const baseFromType = getFeaturesForOrganisationType(orgType);
   const effectiveFeatures = {
     ...baseFromType,
     ...(featuresFromDoc ? featuresFromDoc : {}),
@@ -70,14 +72,17 @@ export async function getOrganisation(organisationId) {
   const organisation = {
     id: orgSnap.id ?? organisationId,
     name: data.name ?? "",
+    groupId: typeof data.groupId === "string" && data.groupId.trim() ? data.groupId.trim() : null,
     plan: rawPlan != null && String(rawPlan).trim() !== "" ? normalizePlanKey(rawPlan) : undefined,
     providerId: data.providerId ?? data.cqcProviderId ?? null,
     serviceType: data.serviceType ?? null,
     status: data.status ?? null,
+    type: orgType,
+    uiMode: getUiModeForOrganisationType(orgType, data.uiMode),
     openActionCount: typeof data.openActionCount === "number" ? data.openActionCount : 0,
     highRiskActionCount: typeof data.highRiskActionCount === "number" ? data.highRiskActionCount : 0,
     features: effectiveFeatures,
-    roles: Array.isArray(data.roles) ? data.roles : getRolesForOrganisationType(data.type ?? data.organisationType ?? data.orgType ?? null),
+    roles: Array.isArray(data.roles) ? data.roles : getRolesForOrganisationType(orgType),
   };
   return organisation;
 }
@@ -101,6 +106,8 @@ export async function createOrganisation(organisationId, data) {
     audit: true,
   };
   const effectiveRoles = Array.isArray(data.roles) ? data.roles : getRolesForOrganisationType(typeField);
+  const care = getCareTemplate(typeField);
+  const uiMode = data.uiMode ?? care?.uiMode ?? "CLINICAL";
   await setDoc(orgRef, {
     name: data.name.trim(),
     plan,
@@ -108,6 +115,7 @@ export async function createOrganisation(organisationId, data) {
     features: effectiveFeatures,
     roles: effectiveRoles,
     ...(typeField ? { type: typeField } : null),
+    uiMode,
     createdAt: serverTimestamp(),
   });
 }

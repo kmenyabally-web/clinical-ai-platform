@@ -4,7 +4,7 @@
  */
 export type PlanKey = "BASIC" | "PRO" | "ENTERPRISE";
 
-export type FeatureId = "notes" | "ai" | "risk" | "reports" | "audit";
+export type FeatureId = "notes" | "ai" | "risk" | "reports" | "audit" | "tasks";
 
 export const PLANS = {
   BASIC: {
@@ -15,11 +15,11 @@ export const PLANS = {
   PRO: {
     name: "Pro",
     price: 49,
-    features: ["notes", "ai", "risk"] as const,
+    features: ["notes", "ai", "risk", "tasks"] as const,
   },
   ENTERPRISE: {
     name: "Enterprise",
     price: 199,
-    features: ["notes", "ai", "risk", "reports", "audit"] as const,
+    features: ["notes", "ai", "risk", "reports", "audit", "tasks"] as const,
   },
 } as const;

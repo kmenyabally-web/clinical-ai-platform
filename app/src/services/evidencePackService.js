@@ -5,6 +5,7 @@ import { fetchClinicalNotesForPatient } from "./noteService";
 import { listCarePlansForPatient } from "./carePlanManagementService";
 import { fetchDocuments } from "./documentService";
 import { getStompAlerts } from "../utils/stompAlerts";
+import { getInspectionAlerts } from "../utils/inspectionAlerts";
 
 function safeFilename(s) {
   return String(s ?? "")
@@ -176,16 +177,26 @@ export async function generateEvidencePack({ organisationId }) {
   const org = String(organisationId ?? "").trim();
   if (!org) throw new Error("organisationId is required");
 
-  const [notesSnap, auditSnap, inspectionSnap, patientsSnap] = await Promise.all([
+  const [notesSnap, auditSnap, inspectionSnap, patientsSnap, inspectionScoreSnap] = await Promise.all([
     getDocs(query(collection(db, "notes"), where("organisationId", "==", org))),
     getDocs(query(collection(db, "audit_logs"), where("organisationId", "==", org))),
     getDocs(query(collection(db, "inspection_reports"), where("organisationId", "==", org))),
     getDocs(query(collection(db, "patients"), where("organisationId", "==", org))),
+    getDocs(query(collection(db, "inspection_scores"), where("organisationId", "==", org))),
   ]);
 
   const notes = (notesSnap?.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
   const audits = (auditSnap?.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
   const inspections = (inspectionSnap?.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
+  const inspectionScores = (inspectionScoreSnap?.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
+  inspectionScores.sort((a, b) => {
+    const ta = typeof a?.createdAt?.toMillis === "function" ? a.createdAt.toMillis() : 0;
+    const tb = typeof b?.createdAt?.toMillis === "function" ? b.createdAt.toMillis() : 0;
+    return tb - ta;
+  });
+  const latestScore = inspectionScores[0] ?? null;
+  const latestDomainScores = latestScore?.domainScores ?? null;
+  const keyAlerts = latestDomainScores ? getInspectionAlerts(latestDomainScores) : [];
   const stompPatients = (patientsSnap?.docs ?? [])
     .map((d) => ({ id: d.id, ...(d.data() ?? {}) }))
     .filter((p) => p?.stompMonitoring === true)
@@ -202,5 +213,11 @@ export async function generateEvidencePack({ organisationId }) {
     audits,
     inspections,
     stompCompliance: stompPatients,
+    inspectionIntelligence: {
+      overallScore: latestScore?.overallScore ?? null,
+      domainScores: latestDomainScores,
+      keyAlerts,
+      historyCount: inspectionScores.length,
+    },
   };
 }

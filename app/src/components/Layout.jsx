@@ -2,13 +2,17 @@ import Sidebar from "./Sidebar";
 import Header from "./Header";
 import { useOrganisation } from "../context/OrganisationContext";
 import { useAuth } from "../context/AuthContext";
+import { useRole } from "../context/RoleContext";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import SystemStatus from "./SystemStatus";
 import { APP_CONFIG } from "../config/appConfig";
 
 export default function Layout() {
   const { user } = useAuth();
-  const { organisationId, hospitalId, isPlatformAdmin, loading, userProfile } = useOrganisation();
+  const { organisationId, hospitalId, isPlatformAdmin, loading, userProfile, groupId } = useOrganisation();
+  const { isSuperAdmin, isGroupAdmin } = useRole();
+  const showEnterpriseLink =
+    organisationId && (isSuperAdmin || (isGroupAdmin && groupId));
   const location = useLocation();
   const navigate = useNavigate();
   const missingOrganisation = !loading && user && !organisationId;
@@ -78,6 +82,19 @@ export default function Layout() {
                 }}
               >
                 ⚙️ Feature Settings
+              </Link>
+            ) : null}
+            {showEnterpriseLink ? (
+              <Link
+                to="/enterprise"
+                style={{
+                  ...layoutStyles.link,
+                  padding: "8px 10px",
+                  fontSize: 12,
+                  fontWeight: 900,
+                }}
+              >
+                🏢 Enterprise View
               </Link>
             ) : null}
           </div>
@@ -183,11 +200,11 @@ const layoutStyles = {
     flexDirection: "column",
   },
   content: {
-    padding: "24px",
+    padding: "24px 28px",
     overflowY: "auto",
-    maxWidth: 1100,
+    maxWidth: "none",
     width: "100%",
-    margin: "0 auto",
+    margin: 0,
   },
   subNav: {
     display: "flex",
