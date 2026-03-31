@@ -6,6 +6,7 @@
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   query,
   where,
@@ -13,12 +14,16 @@ import {
   limit,
   serverTimestamp,
   setDoc,
+  updateDoc,
 } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { getUserContext } from "./authService";
 import { isPlatformAdmin } from "./platformAdminService";
+import { getCurrentUserProfile } from "./organisation";
 import { assertTenantContext, TENANT_UNSCOPED_WARD } from "../utils/tenantContext";
 import { logAuditEvent } from "./auditService";
+import { assertManagementWrite } from "./managementPermissions";
+import { logManagementAudit } from "./managementAuditLog";
 
 const HOSPITALS_COLLECTION = "hospitals";
 const WARDS_COLLECTION = "wards";
@@ -48,14 +53,16 @@ export async function listHospitals(organisationId) {
 }
 
 function mapHospitalDocs(docs) {
-  return docs.map((d) => {
-    const x = d?.data?.() ?? {};
-    return {
-      id: d?.id ?? "",
-      name: typeof x.name === "string" ? x.name : "",
-      organisationId: x.organisationId ?? "",
-    };
-  });
+  return docs
+    .filter((d) => (d?.data?.()?.isDeleted !== true))
+    .map((d) => {
+      const x = d?.data?.() ?? {};
+      return {
+        id: d?.id ?? "",
+        name: typeof x.name === "string" ? x.name : "",
+        organisationId: x.organisationId ?? "",
+      };
+    });
 }
 
 /**
@@ -88,15 +95,17 @@ export async function listWards(organisationId, hospitalId) {
 }
 
 function mapWardDocs(docs) {
-  return docs.map((d) => {
-    const x = d?.data?.() ?? {};
-    return {
-      id: d?.id ?? "",
-      name: typeof x.name === "string" ? x.name : "",
-      hospitalId: x.hospitalId ?? "",
-      organisationId: x.organisationId ?? "",
-    };
-  });
+  return docs
+    .filter((d) => (d?.data?.()?.isDeleted !== true))
+    .map((d) => {
+      const x = d?.data?.() ?? {};
+      return {
+        id: d?.id ?? "",
+        name: typeof x.name === "string" ? x.name : "",
+        hospitalId: x.hospitalId ?? "",
+        organisationId: x.organisationId ?? "",
+      };
+    });
 }
 
 /**
@@ -115,6 +124,9 @@ export async function createHospital(organisationId, data) {
     organisationId,
     hospitalId: ref.id,
     wardId: TENANT_UNSCOPED_WARD,
+    isDeleted: false,
+    deletedAt: null,
+    deletedBy: null,
     createdAt: serverTimestamp(),
   });
   void logAuditEvent({
@@ -148,6 +160,9 @@ export async function createWard(organisationId, hospitalId, data) {
     hospitalId,
     organisationId,
     wardId: ref.id,
+    isDeleted: false,
+    deletedAt: null,
+    deletedBy: null,
     createdAt: serverTimestamp(),
   });
   void logAuditEvent({
@@ -164,10 +179,144 @@ export async function createWard(organisationId, hospitalId, data) {
   return { id: ref.id };
 }
 
+/**
+ * @param {string} organisationId
+ * @param {string} hospitalId
+ * @param {{ name: string }} data
+ */
+export async function updateHospital(organisationId, hospitalId, data) {
+  if (!organisationId?.trim() || !hospitalId?.trim()) throw new Error("organisationId and hospitalId required");
+  if (!data?.name?.trim()) throw new Error("Hospital name required");
+  await assertManagementWrite();
+  await assertSameOrganisation(organisationId);
+  const ref = doc(db, HOSPITALS_COLLECTION, hospitalId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("Hospital not found.");
+  const cur = snap.data() ?? {};
+  if (cur.organisationId !== organisationId) throw new Error("403 Forbidden: organisation scope mismatch");
+  if (cur.isDeleted === true) throw new Error("Hospital has been deleted.");
+  const uid = auth.currentUser?.uid ?? null;
+  await updateDoc(ref, {
+    name: data.name.trim(),
+    updatedAt: serverTimestamp(),
+    ...(uid ? { updatedBy: uid } : {}),
+  });
+  void logManagementAudit({
+    action: "ORG_ADMIN_UPDATE",
+    entityType: "hospital",
+    entityId: hospitalId,
+    organisationId,
+  });
+}
+
+/**
+ * @param {string} organisationId
+ * @param {string} hospitalId
+ */
+export async function softDeleteHospital(organisationId, hospitalId) {
+  if (!organisationId?.trim() || !hospitalId?.trim()) throw new Error("organisationId and hospitalId required");
+  await assertManagementWrite();
+  await assertSameOrganisation(organisationId);
+  const ref = doc(db, HOSPITALS_COLLECTION, hospitalId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("Hospital not found.");
+  const cur = snap.data() ?? {};
+  if (cur.organisationId !== organisationId) throw new Error("403 Forbidden: organisation scope mismatch");
+  const uid = auth.currentUser?.uid ?? null;
+  if (!uid) throw new Error("Not authenticated.");
+  await updateDoc(ref, {
+    isDeleted: true,
+    deletedAt: serverTimestamp(),
+    deletedBy: uid,
+    updatedAt: serverTimestamp(),
+    updatedBy: uid,
+  });
+  void logManagementAudit({
+    action: "ORG_ADMIN_DELETE",
+    entityType: "hospital",
+    entityId: hospitalId,
+    organisationId,
+  });
+}
+
+/**
+ * @param {string} organisationId
+ * @param {string} hospitalId
+ * @param {string} wardId
+ * @param {{ name: string }} data
+ */
+export async function updateWard(organisationId, hospitalId, wardId, data) {
+  if (!organisationId?.trim() || !hospitalId?.trim() || !wardId?.trim()) {
+    throw new Error("organisationId, hospitalId, and wardId required");
+  }
+  if (!data?.name?.trim()) throw new Error("Ward name required");
+  await assertManagementWrite();
+  await assertSameOrganisation(organisationId);
+  const ref = doc(db, WARDS_COLLECTION, wardId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("Ward not found.");
+  const cur = snap.data() ?? {};
+  if (cur.organisationId !== organisationId || cur.hospitalId !== hospitalId) {
+    throw new Error("403 Forbidden: scope mismatch");
+  }
+  if (cur.isDeleted === true) throw new Error("Ward has been deleted.");
+  const uid = auth.currentUser?.uid ?? null;
+  await updateDoc(ref, {
+    name: data.name.trim(),
+    updatedAt: serverTimestamp(),
+    ...(uid ? { updatedBy: uid } : {}),
+  });
+  void logManagementAudit({
+    action: "ORG_ADMIN_UPDATE",
+    entityType: "ward",
+    entityId: wardId,
+    organisationId,
+  });
+}
+
+/**
+ * @param {string} organisationId
+ * @param {string} hospitalId
+ * @param {string} wardId
+ */
+export async function softDeleteWard(organisationId, hospitalId, wardId) {
+  if (!organisationId?.trim() || !hospitalId?.trim() || !wardId?.trim()) {
+    throw new Error("organisationId, hospitalId, and wardId required");
+  }
+  await assertManagementWrite();
+  await assertSameOrganisation(organisationId);
+  const ref = doc(db, WARDS_COLLECTION, wardId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("Ward not found.");
+  const cur = snap.data() ?? {};
+  if (cur.organisationId !== organisationId || cur.hospitalId !== hospitalId) {
+    throw new Error("403 Forbidden: scope mismatch");
+  }
+  const uid = auth.currentUser?.uid ?? null;
+  if (!uid) throw new Error("Not authenticated.");
+  await updateDoc(ref, {
+    isDeleted: true,
+    deletedAt: serverTimestamp(),
+    deletedBy: uid,
+    updatedAt: serverTimestamp(),
+    updatedBy: uid,
+  });
+  void logManagementAudit({
+    action: "ORG_ADMIN_DELETE",
+    entityType: "ward",
+    entityId: wardId,
+    organisationId,
+  });
+}
+
 async function assertSameOrganisation(organisationId) {
   const user = auth.currentUser;
   if (!user) throw new Error("Not authenticated");
   if (await isPlatformAdmin(user.uid)) return;
+  const profile = await getCurrentUserProfile(user.uid);
+  const roleUpper = String(profile?.role || profile?.systemRole || "").toUpperCase();
+  if (roleUpper === "SUPER_ADMIN" || roleUpper === "GLOBAL_ADMIN") return;
+  if (profile?.isGlobalAdmin === true) return;
   const { organisationId: ctxOrg } = await getUserContext();
   if (ctxOrg !== organisationId) {
     throw new Error("403 Forbidden: organisation scope mismatch");

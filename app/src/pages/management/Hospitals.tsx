@@ -2,12 +2,21 @@ import { useCallback, useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useOrganisation } from "../../context/OrganisationContext";
 import { listOrganisationsForManagement } from "../../services/organisation";
-import { createHospital, listAllHospitals, listHospitals } from "../../services/structureService";
+import {
+  createHospital,
+  listAllHospitals,
+  listHospitals,
+  softDeleteHospital,
+  updateHospital,
+} from "../../services/structureService";
 import { managementStyles as s } from "./managementStyles";
 import ActionBar from "../../components/ActionBar";
+import { useRole } from "../../context/RoleContext";
+import { isOrganisationAdminRole } from "../../utils/organisationAdmin";
 
 export default function Hospitals() {
   const { organisationId, isPlatformAdmin } = useOrganisation();
+  const { role } = useRole();
   const [orgs, setOrgs] = useState<Array<{ id: string; name: string }>>([]);
   const [orgFilter, setOrgFilter] = useState("");
   const [rows, setRows] = useState<Array<{ id: string; name: string; organisationId: string }>>([]);
@@ -17,6 +26,11 @@ export default function Hospitals() {
   const [name, setName] = useState("");
   const [modalOrgId, setModalOrgId] = useState("");
   const [saving, setSaving] = useState(false);
+  const [editRow, setEditRow] = useState<{ id: string; name: string; organisationId: string } | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [deleteSavingId, setDeleteSavingId] = useState<string | null>(null);
+
+  const canMutate = isOrganisationAdminRole(role) || Boolean(isPlatformAdmin);
 
   const effectiveOrgFilter = isPlatformAdmin ? orgFilter : organisationId ?? "";
 
@@ -164,6 +178,7 @@ export default function Hospitals() {
             <tr>
               <th style={s.th}>Name</th>
               <th style={s.th}>Organisation ID</th>
+              {canMutate ? <th style={s.th}>Actions</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -173,11 +188,108 @@ export default function Hospitals() {
                 <td style={s.td}>
                   <code style={{ fontSize: 12 }}>{r.organisationId}</code>
                 </td>
+                {canMutate ? (
+                  <td style={s.td}>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        style={{ ...s.btnGhost, fontSize: 12, padding: "4px 10px" }}
+                        onClick={() => setEditRow({ id: r.id, name: r.name, organisationId: r.organisationId })}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        disabled={deleteSavingId === r.id}
+                        style={{
+                          fontSize: 12,
+                          padding: "4px 10px",
+                          borderRadius: 6,
+                          border: "1px solid #fecaca",
+                          background: "#fff1f2",
+                          color: "#991b1b",
+                          fontWeight: 700,
+                          cursor: deleteSavingId === r.id ? "wait" : "pointer",
+                        }}
+                        onClick={async () => {
+                          if (!globalThis.confirm("Are you sure you want to delete this item?")) return;
+                          setDeleteSavingId(r.id);
+                          setError(null);
+                          try {
+                            await softDeleteHospital(r.organisationId, r.id);
+                            await loadHospitals();
+                          } catch (err) {
+                            setError(err instanceof Error ? err.message : "Delete failed.");
+                          } finally {
+                            setDeleteSavingId(null);
+                          }
+                        }}
+                      >
+                        {deleteSavingId === r.id ? "…" : "Delete"}
+                      </button>
+                    </div>
+                  </td>
+                ) : null}
               </tr>
             ))}
           </tbody>
         </table>
       )}
+
+      {editRow ? (
+        <div style={s.modalBackdrop} role="presentation">
+          <div style={s.modalCard} role="dialog" aria-modal="true" aria-labelledby="edit-hosp-title">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h2 id="edit-hosp-title" style={{ margin: 0, fontSize: "1.1rem" }}>
+                Edit hospital
+              </h2>
+              <button
+                type="button"
+                onClick={() => setEditRow(null)}
+                style={{ border: "none", background: "none", cursor: "pointer", fontSize: "1.25rem" }}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!editRow.name.trim()) return;
+                setEditSaving(true);
+                setError(null);
+                try {
+                  await updateHospital(editRow.organisationId, editRow.id, { name: editRow.name.trim() });
+                  setEditRow(null);
+                  await loadHospitals();
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Update failed.");
+                } finally {
+                  setEditSaving(false);
+                }
+              }}
+            >
+              <label style={s.label}>
+                Name
+                <input
+                  required
+                  value={editRow.name}
+                  onChange={(e) => setEditRow((prev) => (prev ? { ...prev, name: e.target.value } : prev))}
+                  style={s.input}
+                />
+              </label>
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button type="submit" disabled={editSaving} style={s.btnPrimary}>
+                  {editSaving ? "Saving…" : "Save changes"}
+                </button>
+                <button type="button" style={s.btnGhost} onClick={() => setEditRow(null)}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
 
       {modalOpen ? (
         <div style={s.modalBackdrop} role="presentation">

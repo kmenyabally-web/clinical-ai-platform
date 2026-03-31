@@ -211,7 +211,7 @@ export default function Dashboard() {
       try {
         const [patients, incidents, { documents }, carePlansDue] = await Promise.all([
           listPatients(organisationId, { serviceId: currentServiceId ?? undefined }),
-          fetchIncidents(organisationId, { serviceId: currentServiceId ?? undefined }),
+          fetchIncidents(organisationId, {}),
           fetchDocuments(organisationId, { limitCount: 500, serviceId: currentServiceId ?? undefined }),
           countCarePlansDueForReview(organisationId, { serviceId: currentServiceId ?? undefined, withinDays: 7 }),
         ]);
@@ -258,7 +258,7 @@ export default function Dashboard() {
           fetchClinicalNotesForOrganisation({ patientId: null, limitCount: 200 }),
           listPolicies(organisationId),
           listStaffTraining(organisationId, currentServiceId ?? null),
-          fetchIncidents(organisationId, { serviceId: currentServiceId ?? undefined }),
+          fetchIncidents(organisationId, {}),
         ]);
         if (cancelled) return;
         const patientList = Array.isArray(patients) ? patients : [];

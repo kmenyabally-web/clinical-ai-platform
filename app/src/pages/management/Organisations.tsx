@@ -8,8 +8,10 @@ import { useRole } from "../../context/RoleContext";
 import {
   createOrganisation,
   listOrganisationsForManagement,
+  softDeleteOrganisation,
   updateOrganisation,
 } from "../../services/organisation";
+import { isOrganisationAdminRole } from "../../utils/organisationAdmin";
 import { createSubscription, BILLING_CYCLES } from "../../services/billingService";
 import { useAuth } from "../../context/AuthContext";
 import { managementStyles as s } from "./managementStyles";
@@ -33,6 +35,11 @@ export default function Organisations() {
   const [name, setName] = useState("");
   const [plan, setPlan] = useState<PlanKey>("BASIC");
   const [saving, setSaving] = useState(false);
+  const [editRow, setEditRow] = useState<{ id: string; name: string; plan?: string } | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [deleteSavingId, setDeleteSavingId] = useState<string | null>(null);
+
+  const canMutateStructure = isOrganisationAdminRole(role) || Boolean(isPlatformAdmin);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -286,6 +293,7 @@ export default function Organisations() {
               <th style={s.th}>Name</th>
               <th style={s.th}>Plan</th>
               <th style={s.th}>ID</th>
+              {canMutateStructure ? <th style={s.th}>Actions</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -296,11 +304,54 @@ export default function Organisations() {
                 <td style={s.td}>
                   <code style={{ fontSize: 12 }}>{r.id}</code>
                 </td>
+                {canMutateStructure ? (
+                  <td style={s.td}>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        style={{ ...s.btnGhost, fontSize: 12, padding: "4px 10px" }}
+                        onClick={() => setEditRow({ id: r.id, name: r.name || "", plan: r.plan ?? "BASIC" })}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        disabled={deleteSavingId === r.id}
+                        style={{
+                          fontSize: 12,
+                          padding: "4px 10px",
+                          borderRadius: 6,
+                          border: "1px solid #fecaca",
+                          background: "#fff1f2",
+                          color: "#991b1b",
+                          fontWeight: 700,
+                          cursor: deleteSavingId === r.id ? "wait" : "pointer",
+                        }}
+                        onClick={async () => {
+                          if (!globalThis.confirm("Are you sure you want to delete this item?")) return;
+                          setDeleteSavingId(r.id);
+                          setError(null);
+                          try {
+                            await softDeleteOrganisation(r.id);
+                            await load();
+                            if (!isPlatformAdmin) await reload();
+                          } catch (err) {
+                            setError(err instanceof Error ? err.message : "Delete failed.");
+                          } finally {
+                            setDeleteSavingId(null);
+                          }
+                        }}
+                      >
+                        {deleteSavingId === r.id ? "…" : "Delete"}
+                      </button>
+                    </div>
+                  </td>
+                ) : null}
               </tr>
             ))}
             {rows.length === 0 ? (
               <tr>
-                <td style={s.td} colSpan={3}>
+                <td style={s.td} colSpan={canMutateStructure ? 4 : 3}>
                   No organisations yet. Create one to start onboarding clients.
                 </td>
               </tr>
@@ -309,7 +360,7 @@ export default function Organisations() {
         </table>
       )}
 
-      {!isPlatformAdmin && organisationId && organisation && can("organisation:manage") ? (
+      {!isPlatformAdmin && organisationId && organisation && isOrganisationAdminRole(role) ? (
         <EditOrgName
           organisationId={organisationId}
           initialName={organisation.name ?? ""}
@@ -318,6 +369,81 @@ export default function Organisations() {
             load();
           }}
         />
+      ) : null}
+
+      {editRow ? (
+        <div style={s.modalBackdrop} role="presentation">
+          <div style={s.modalCard} role="dialog" aria-modal="true" aria-labelledby="edit-org-title">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h2 id="edit-org-title" style={{ margin: 0, fontSize: "1.1rem" }}>
+                Edit organisation
+              </h2>
+              <button
+                type="button"
+                onClick={() => setEditRow(null)}
+                style={{ border: "none", background: "none", cursor: "pointer", fontSize: "1.25rem" }}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!editRow.name.trim()) return;
+                setEditSaving(true);
+                setError(null);
+                try {
+                  await updateOrganisation(editRow.id, {
+                    name: editRow.name.trim(),
+                    plan: editRow.plan as PlanKey,
+                  });
+                  setEditRow(null);
+                  await load();
+                  await reload();
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Update failed.");
+                } finally {
+                  setEditSaving(false);
+                }
+              }}
+            >
+              <label style={s.label}>
+                Name
+                <input
+                  required
+                  value={editRow.name}
+                  onChange={(e) => setEditRow((prev) => (prev ? { ...prev, name: e.target.value } : prev))}
+                  style={s.input}
+                />
+              </label>
+              <label style={s.label}>
+                Plan
+                <select
+                  value={editRow.plan ?? "BASIC"}
+                  onChange={(e) =>
+                    setEditRow((prev) => (prev ? { ...prev, plan: e.target.value } : prev))
+                  }
+                  style={s.select}
+                >
+                  {PLAN_OPTIONS.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button type="submit" disabled={editSaving} style={s.btnPrimary}>
+                  {editSaving ? "Saving…" : "Save changes"}
+                </button>
+                <button type="button" style={s.btnGhost} onClick={() => setEditRow(null)}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       ) : null}
 
       {platformModalOpen ? (

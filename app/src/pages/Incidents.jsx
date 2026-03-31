@@ -1,11 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useOrganisation } from "../context/OrganisationContext";
-import { useService } from "../context/ServiceContext";
 import { useAuth } from "../context/AuthContext";
 import { useRole } from "../context/RoleContext";
 import IncidentForm from "../components/IncidentForm";
-import { fetchIncidents, createIncidentLegacy, INCIDENT_SEVERITY } from "../services/incidentService";
+import {
+  fetchIncidents,
+  createIncidentLegacy,
+  closeIncident,
+  updateIncident,
+  INCIDENT_SEVERITY,
+} from "../services/incidentService";
+import { showToast } from "../utils/toast";
+import { listHospitals, listWards } from "../services/structureService";
 import { getPatientById } from "../services/patientService";
 import { generateCandourLetter } from "../services/aiService";
 import { isIndexError, INDEX_ERROR_MESSAGE } from "../lib/firestoreIndexError";
@@ -24,7 +31,6 @@ function formatDate(value) {
 
 export default function Incidents() {
   const { organisationId } = useOrganisation();
-  const { currentServiceId, services } = useService();
   const { user } = useAuth();
   const { role } = useRole();
 
@@ -35,14 +41,66 @@ export default function Incidents() {
 
   const [filterSeverity, setFilterSeverity] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
-  const [filterServiceId, setFilterServiceId] = useState("");
+  const [filterHospitalId, setFilterHospitalId] = useState("");
+  const [filterWardId, setFilterWardId] = useState("");
+  const [hospitals, setHospitals] = useState([]);
+  const [wards, setWards] = useState([]);
+  const [structureLoading, setStructureLoading] = useState(false);
 
   const [candourModalOpen, setCandourModalOpen] = useState(false);
   const [candourLetterText, setCandourLetterText] = useState("");
   const [candourLoadingId, setCandourLoadingId] = useState(null);
   const [candourError, setCandourError] = useState(null);
 
-  const effectiveServiceId = filterServiceId || currentServiceId || null;
+  const [editIncident, setEditIncident] = useState(null);
+  const [editDraft, setEditDraft] = useState({
+    description: "",
+    severity: "medium",
+    actionTaken: "",
+    linkedSafeguardingIds: "",
+  });
+  const [incidentMutating, setIncidentMutating] = useState(false);
+  const [closingId, setClosingId] = useState(null);
+
+  useEffect(() => {
+    if (!organisationId) {
+      setHospitals([]);
+      return;
+    }
+    let cancelled = false;
+    setStructureLoading(true);
+    listHospitals(organisationId)
+      .then((list) => {
+        if (!cancelled) setHospitals(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (!cancelled) setHospitals([]);
+      })
+      .finally(() => {
+        if (!cancelled) setStructureLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [organisationId]);
+
+  useEffect(() => {
+    if (!organisationId || !filterHospitalId) {
+      setWards([]);
+      return;
+    }
+    let cancelled = false;
+    listWards(organisationId, filterHospitalId)
+      .then((list) => {
+        if (!cancelled) setWards(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (!cancelled) setWards([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [organisationId, filterHospitalId]);
 
   const loadIncidents = useCallback(() => {
     if (!organisationId) {
@@ -53,31 +111,59 @@ export default function Incidents() {
     setLoading(true);
     setError(null);
     fetchIncidents(organisationId, {
-      serviceId: effectiveServiceId ?? undefined,
+      hospitalId: filterHospitalId || undefined,
+      wardId: filterWardId || undefined,
       severity: filterSeverity || undefined,
       status: filterStatus || undefined,
     })
-      .then((list) => setIncidents(Array.isArray(list) ? list : []))
+      .then((list) => {
+        const rows = Array.isArray(list) ? list : [];
+        console.log("Loaded incidents:", rows);
+        setIncidents(rows);
+      })
       .catch((err) => {
         console.error("Firestore query failed:", err);
         setError(isIndexError(err) ? INDEX_ERROR_MESSAGE : (err?.message ?? "Failed to load incidents."));
         setIncidents([]);
       })
       .finally(() => setLoading(false));
-  }, [organisationId, effectiveServiceId, filterSeverity, filterStatus]);
+  }, [organisationId, filterHospitalId, filterWardId, filterSeverity, filterStatus]);
 
   useEffect(() => {
     loadIncidents();
   }, [loadIncidents]);
 
   async function handleCreateIncident(payload) {
-    if (!organisationId || !effectiveServiceId || !user?.uid) return;
+    if (!organisationId) {
+      const msg = "Organisation not loaded. Refresh the page or check your account.";
+      setError(msg);
+      // eslint-disable-next-line no-alert
+      alert(msg);
+      throw new Error(msg);
+    }
+    if (!user?.uid) {
+      const msg = "You must be signed in to report an incident.";
+      setError(msg);
+      // eslint-disable-next-line no-alert
+      alert(msg);
+      throw new Error(msg);
+    }
+
+    const savePayload = {
+      type: payload.type,
+      severity: payload.severity,
+      description: payload.description,
+      organisationId,
+      patientId: payload.patientId,
+      createdBy: user.uid,
+    };
+    console.log("Saving incident:", savePayload);
+
     setCreating(true);
     setError(null);
     try {
       await createIncidentLegacy({
         organisationId,
-        serviceId: effectiveServiceId,
         patientId: payload.patientId,
         type: payload.type,
         severity: payload.severity,
@@ -87,16 +173,18 @@ export default function Incidents() {
         linkedEvidence: [],
         status: "open",
       });
-      loadIncidents();
+      await loadIncidents();
     } catch (err) {
-      console.error("Failed to create incident", err);
+      console.error("INCIDENT SAVE ERROR:", err);
+      // eslint-disable-next-line no-alert
+      alert(`Failed to save incident: ${err?.message ?? "Unknown error"}`);
       setError(isIndexError(err) ? INDEX_ERROR_MESSAGE : (err?.message ?? "Failed to create incident."));
+      throw err;
     } finally {
       setCreating(false);
     }
   }
 
-  const safeServices = Array.isArray(services) ? services : [];
   const reportSectionRef = useRef(null);
 
   function openIncidentReportSection() {
@@ -168,6 +256,59 @@ export default function Incidents() {
     setCandourModalOpen(false);
     setCandourLetterText("");
     setCandourError(null);
+  }
+
+  function openEditIncident(incident) {
+    if (!incident?.id) return;
+    setEditIncident(incident);
+    setEditDraft({
+      description: incident.description ?? "",
+      severity: (incident.severity ?? "medium").toString().toLowerCase(),
+      actionTaken: incident.actionTaken ?? incident.actionsTaken ?? "",
+      linkedSafeguardingIds: (incident.linkedSafeguardingIds ?? []).join(", "),
+    });
+  }
+
+  async function saveEditIncident() {
+    if (!editIncident?.id) return;
+    setIncidentMutating(true);
+    try {
+      const ids = editDraft.linkedSafeguardingIds
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      await updateIncident(editIncident.id, {
+        description: editDraft.description,
+        severity: editDraft.severity,
+        actionTaken: editDraft.actionTaken,
+        linkedSafeguardingIds: ids,
+      });
+      showToast("Incident updated", "success");
+      setEditIncident(null);
+      loadIncidents();
+    } catch (e) {
+      console.error(e);
+      showToast(e?.message ?? "Something went wrong");
+    } finally {
+      setIncidentMutating(false);
+    }
+  }
+
+  async function handleCloseIncidentRow(id) {
+    if (!id) return;
+    // eslint-disable-next-line no-alert
+    if (!globalThis.confirm("Close this incident? It will no longer be editable.")) return;
+    setClosingId(id);
+    try {
+      await closeIncident(id);
+      showToast("Incident closed", "success");
+      loadIncidents();
+    } catch (e) {
+      console.error(e);
+      showToast(e?.message ?? "Something went wrong");
+    } finally {
+      setClosingId(null);
+    }
   }
 
   async function copyCandourLetter() {
@@ -250,16 +391,36 @@ export default function Incidents() {
           </div>
 
           <div>
-            <label style={{ display: "block", marginBottom: 4, fontSize: "0.85rem" }}>Service</label>
+            <label style={{ display: "block", marginBottom: 4, fontSize: "0.85rem" }}>Hospital</label>
             <select
-              value={filterServiceId}
-              onChange={(e) => setFilterServiceId(e.target.value)}
-              style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #cbd5e1", fontSize: "0.85rem" }}
+              value={filterHospitalId}
+              onChange={(e) => {
+                setFilterHospitalId(e.target.value);
+                setFilterWardId("");
+              }}
+              disabled={structureLoading}
+              style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #cbd5e1", fontSize: "0.85rem", minWidth: 160 }}
             >
-              <option value="">Current service</option>
-              {safeServices.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.serviceName || s.id}
+              <option value="">All hospitals</option>
+              {hospitals.map((h) => (
+                <option key={h.id} value={h.id}>
+                  {h.name || h.id}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{ display: "block", marginBottom: 4, fontSize: "0.85rem" }}>Ward</label>
+            <select
+              value={filterWardId}
+              onChange={(e) => setFilterWardId(e.target.value)}
+              disabled={!filterHospitalId}
+              style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #cbd5e1", fontSize: "0.85rem", minWidth: 160 }}
+            >
+              <option value="">{filterHospitalId ? "All wards" : "Select hospital first"}</option>
+              {wards.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name || w.id}
                 </option>
               ))}
             </select>
@@ -288,6 +449,7 @@ export default function Incidents() {
           onSubmit={handleCreateIncident}
           loading={creating}
           legacy
+          organisationId={organisationId}
           onDraftCandour={handleDraftCandourFromForm}
           draftCandourLoading={candourLoadingId === "preview-form"}
         />
@@ -356,11 +518,15 @@ export default function Incidents() {
                 <tr style={{ background: "#f8fafc" }}>
                   <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Date / time</th>
                   <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Patient</th>
+                  <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Hospital</th>
+                  <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Ward</th>
                   <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Type</th>
                   <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Severity</th>
                   <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Status</th>
                   <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Reported by</th>
                   <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Description</th>
+                  <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Actions</th>
+                  <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Safeguarding links</th>
                   <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Duty of Candour</th>
                   <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Timeline</th>
                 </tr>
@@ -372,6 +538,12 @@ export default function Incidents() {
                       {formatDate(incident.reportedAt)}
                     </td>
                     <td style={{ padding: "0.5rem 0.75rem" }}>{incident.patientId}</td>
+                    <td style={{ padding: "0.5rem 0.75rem", fontSize: "0.8rem", color: "#475569" }}>
+                      {hospitals.find((h) => h.id === incident.hospitalId)?.name || incident.hospitalId || "—"}
+                    </td>
+                    <td style={{ padding: "0.5rem 0.75rem", fontSize: "0.8rem", color: "#475569" }}>
+                      {incident.wardId || "—"}
+                    </td>
                     <td style={{ padding: "0.5rem 0.75rem", textTransform: "capitalize" }}>
                       {incident.type?.replace(/_/g, " ") || "—"}
                     </td>
@@ -383,7 +555,51 @@ export default function Incidents() {
                     </td>
                     <td style={{ padding: "0.5rem 0.75rem" }}>{incident.reportedBy || "—"}</td>
                     <td style={{ padding: "0.5rem 0.75rem" }}>
-                      {incident.description || "No description"}
+                      {incident.description || "No description provided"}
+                    </td>
+                    <td style={{ padding: "0.5rem 0.75rem", verticalAlign: "top" }}>
+                      {(incident.status || "open").toString().toLowerCase() !== "closed" ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+                          <button
+                            type="button"
+                            onClick={() => openEditIncident(incident)}
+                            style={{
+                              padding: "6px 10px",
+                              borderRadius: 6,
+                              border: "1px solid #cbd5e1",
+                              background: "#fff",
+                              fontSize: "0.8rem",
+                              fontWeight: 600,
+                              cursor: "pointer",
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            disabled={closingId === incident.id}
+                            onClick={() => handleCloseIncidentRow(incident.id)}
+                            style={{
+                              padding: "6px 10px",
+                              borderRadius: 6,
+                              border: "1px solid #fecaca",
+                              background: "#fff1f2",
+                              fontSize: "0.8rem",
+                              fontWeight: 600,
+                              cursor: closingId === incident.id ? "wait" : "pointer",
+                            }}
+                          >
+                            {closingId === incident.id ? "Closing…" : "Close"}
+                          </button>
+                        </div>
+                      ) : (
+                        <span style={{ color: "#94a3b8", fontSize: "0.8rem" }}>—</span>
+                      )}
+                    </td>
+                    <td style={{ padding: "0.5rem 0.75rem", fontSize: "0.8rem", color: "#475569" }}>
+                      {(incident.linkedSafeguardingIds ?? []).length > 0
+                        ? (incident.linkedSafeguardingIds ?? []).join(", ")
+                        : "—"}
                     </td>
                     <td style={{ padding: "0.5rem 0.75rem", verticalAlign: "top" }}>
                       {isDutyOfCandourSeverity(incident.severity) ? (
@@ -425,6 +641,88 @@ export default function Incidents() {
           </div>
         )}
       </section>
+
+      {editIncident && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: "1rem",
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 12,
+              maxWidth: 520,
+              width: "100%",
+              padding: "1.25rem",
+              boxShadow: "0 20px 40px rgba(0,0,0,0.15)",
+            }}
+          >
+            <h2 style={{ margin: "0 0 0.75rem 0", fontSize: "1.05rem" }}>Edit incident (open only)</h2>
+            <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: 4 }}>Description</label>
+            <textarea
+              value={editDraft.description}
+              onChange={(e) => setEditDraft((d) => ({ ...d, description: e.target.value }))}
+              rows={4}
+              style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1", marginBottom: 10, boxSizing: "border-box" }}
+            />
+            <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: 4 }}>Severity</label>
+            <select
+              value={editDraft.severity}
+              onChange={(e) => setEditDraft((d) => ({ ...d, severity: e.target.value }))}
+              style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1", marginBottom: 10 }}
+            >
+              {INCIDENT_SEVERITY.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+            <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: 4 }}>Action taken</label>
+            <textarea
+              value={editDraft.actionTaken}
+              onChange={(e) => setEditDraft((d) => ({ ...d, actionTaken: e.target.value }))}
+              rows={3}
+              style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1", marginBottom: 10, boxSizing: "border-box" }}
+            />
+            <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: 4 }}>
+              Safeguarding alert IDs (comma-separated)
+            </label>
+            <input
+              value={editDraft.linkedSafeguardingIds}
+              onChange={(e) => setEditDraft((d) => ({ ...d, linkedSafeguardingIds: e.target.value }))}
+              style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1", marginBottom: 12, boxSizing: "border-box" }}
+            />
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => setEditIncident(null)}
+                disabled={incidentMutating}
+                style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid #cbd5e1", background: "#f8fafc", fontWeight: 600 }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveEditIncident}
+                disabled={incidentMutating}
+                style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: "#005eb8", color: "#fff", fontWeight: 600 }}
+              >
+                {incidentMutating ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {candourModalOpen && (
         <div

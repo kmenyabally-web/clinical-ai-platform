@@ -33,3 +33,37 @@ export function calculateRisk(notes: ClinicalNote[]): RiskAssessment {
 
   return { score, level };
 }
+
+/** Minimal shape for structured behaviour log rows (Firestore `behaviours`). */
+export type BehaviourLogLike = {
+  severity?: string;
+  behaviourType?: string;
+  stompRelated?: boolean;
+  medicationRefused?: boolean;
+};
+
+/**
+ * Risk from structured behaviour events (used with clinical note risk for dashboards).
+ */
+export function calculateBehaviourRiskFromLogs(logs: BehaviourLogLike[]): RiskAssessment {
+  let score = 0;
+
+  (logs ?? []).forEach((log) => {
+    const sev = String(log?.severity ?? "").toLowerCase();
+    if (sev === "high") score += 25;
+    else if (sev === "medium") score += 15;
+    else if (sev === "low") score += 5;
+
+    if (log?.stompRelated === true) score += 10;
+    if (log?.medicationRefused === true) score += 15;
+
+    const t = String(log?.behaviourType ?? "");
+    if (/self-harm|aggression/i.test(t)) score += 12;
+  });
+
+  let level: RiskLevel = "low";
+  if (score > 60) level = "high";
+  else if (score > 30) level = "medium";
+
+  return { score: Math.min(score, 100), level };
+}

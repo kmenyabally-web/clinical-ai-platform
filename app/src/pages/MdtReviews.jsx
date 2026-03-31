@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { listPatients } from "../services/patientService";
 import { fetchClinicalNotesForPatient } from "../services/noteService";
 import { useRole } from "../context/RoleContext";
 import { useOrganisation } from "../context/OrganisationContext";
 import ActionBar from "../components/ActionBar";
 import { usePermissions } from "../hooks/usePermissions";
+import { usePatients } from "../hooks/usePatients";
 
 function safeString(v) {
   return typeof v === "string" ? v : "";
@@ -16,44 +16,22 @@ export default function MdtReviews() {
   const { isInspectorRole } = useRole();
   const permissions = usePermissions();
 
-  const [patients, setPatients] = useState([]);
-  const [patientsLoading, setPatientsLoading] = useState(true);
-  const [patientsError, setPatientsError] = useState(null);
+  const { data: patients = [], loading: patientsLoading, error: patientsError } = usePatients();
 
   const [selectedPatientId, setSelectedPatientId] = useState("");
   const [notes, setNotes] = useState([]);
   const [notesLoading, setNotesLoading] = useState(false);
   const [notesError, setNotesError] = useState(null);
 
-  useEffect(() => {
-    let mounted = true;
-    async function loadPatients() {
-      setPatientsLoading(true);
-      setPatientsError(null);
-      try {
-        const list = await listPatients();
-        if (!mounted) return;
-        setPatients(Array.isArray(list) ? list : []);
-      } catch (e) {
-        if (!mounted) return;
-        setPatientsError(e?.message ?? "Failed to load patients.");
-        setPatients([]);
-      } finally {
-        if (!mounted) return;
-        setPatientsLoading(false);
-      }
-    }
-    loadPatients();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
   const options = useMemo(
     () =>
       (patients ?? []).map((p) => ({
         id: safeString(p?.id),
-        label: `${safeString(p?.firstName)} ${safeString(p?.lastName)}`.trim() || p?.id || "Patient",
+        label:
+          `${safeString(p?.firstName)} ${safeString(p?.lastName)}`.trim() ||
+          safeString(p?.name) ||
+          p?.id ||
+          "Patient",
       })),
     [patients]
   );
@@ -80,8 +58,7 @@ export default function MdtReviews() {
         setNotesError(e?.message ?? "Failed to load MDT reviews.");
         setNotes([]);
       } finally {
-        if (!mounted) return;
-        setNotesLoading(false);
+        if (mounted) setNotesLoading(false);
       }
     }
     loadNotes();
@@ -124,7 +101,7 @@ export default function MdtReviews() {
 
       {!organisationId ? (
         <div style={{ background: "#fef2f2", border: "1px solid #fecaca", padding: "12px 14px", borderRadius: 10, color: "#991b1b", marginBottom: 14 }}>
-          Organisation context missing. Select a patient after governance is configured.
+          Loading organisation...
         </div>
       ) : null}
 
@@ -150,7 +127,7 @@ export default function MdtReviews() {
                 </option>
               ))
             ) : (
-              <option value="">No patients</option>
+              <option value="">No patients found for this organisation</option>
             )}
           </select>
         </label>
@@ -158,6 +135,12 @@ export default function MdtReviews() {
           Open patient list
         </Link>
       </div>
+
+      {!patientsLoading && options.length === 0 && organisationId ? (
+        <div style={{ color: "#64748b", marginBottom: 16, fontSize: "0.95rem" }}>
+          No patients found for this organisation
+        </div>
+      ) : null}
 
       {notesError ? (
         <div style={{ background: "#fef2f2", border: "1px solid #fecaca", padding: "12px 14px", borderRadius: 10, color: "#991b1b", marginBottom: 14 }}>

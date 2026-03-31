@@ -10,12 +10,13 @@ import {
   getDocs,
   query,
   where,
+  limit,
   updateDoc,
   serverTimestamp,
 } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { getUserContext } from "./authService";
-import { logAuditEventNonBlocking, logAction, logAudit, logAuditEvent } from "./auditService";
+import { logAuditEventNonBlocking, logAction, logAudit, logAuditEvent, logEntityAudit } from "./auditService";
 import { addDocLogged } from "../utils/firestoreWrite";
 import { safeModeFields } from "../utils/safeMode";
 import {
@@ -23,8 +24,12 @@ import {
   requirePatientId,
   assertSameOrganisationData,
 } from "../utils/tenantContext";
+import { isDocumentActive } from "../utils/auditSchema";
+import { assertManagementWrite } from "./managementPermissions";
+import { logManagementAudit } from "./managementAuditLog";
 
 const PATIENTS_COLLECTION = "patients";
+const MAX_ORG_WIDE_PATIENTS = 500;
 
 function normalizeStompMedication(raw) {
   const item = raw && typeof raw === "object" ? raw : {};
@@ -76,24 +81,43 @@ export async function listPatientMetadata(filters = {}) {
 
   if (!organisationId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
 
-  const hospitalId = filters.hospitalId != null ? String(filters.hospitalId).trim() : (ctxHospitalId != null ? String(ctxHospitalId).trim() : "");
-  const wardId = filters.wardId != null ? String(filters.wardId).trim() : (ctxWardId != null ? String(ctxWardId).trim() : "");
+  const allInOrganisation =
+    filters.allInOrganisation === true ||
+    filters.scope === "organisation" ||
+    filters.organisationWide === true;
+
   const serviceId = filters.serviceId != null ? String(filters.serviceId).trim() : "";
 
-  if (!hospitalId) {
-    throw new Error("hospitalId is required for multi-tenant patient queries.");
+  let snapshot;
+  if (allInOrganisation) {
+    const q = query(
+      collection(db, PATIENTS_COLLECTION),
+      where("organisationId", "==", organisationId),
+      limit(MAX_ORG_WIDE_PATIENTS)
+    );
+    snapshot = await getDocs(q);
+  } else {
+    const hospitalId =
+      filters.hospitalId != null
+        ? String(filters.hospitalId).trim()
+        : ctxHospitalId != null
+          ? String(ctxHospitalId).trim()
+          : "";
+    const wardId =
+      filters.wardId != null ? String(filters.wardId).trim() : ctxWardId != null ? String(ctxWardId).trim() : "";
+
+    if (!hospitalId) {
+      throw new Error("hospitalId is required for multi-tenant patient queries.");
+    }
+
+    const constraints = [where("organisationId", "==", organisationId), where("hospitalId", "==", hospitalId)];
+    if (wardId) constraints.push(where("wardId", "==", wardId));
+
+    const q = query(collection(db, PATIENTS_COLLECTION), ...constraints);
+    snapshot = await getDocs(q);
   }
 
-  const constraints = [where("organisationId", "==", organisationId), where("hospitalId", "==", hospitalId)];
-  if (wardId) constraints.push(where("wardId", "==", wardId));
-
-  const q = query(
-    collection(db, PATIENTS_COLLECTION),
-    ...constraints
-  );
-
-  const snapshot = await getDocs(q);
-  const docs = snapshot?.docs ?? [];
+  const docs = (snapshot?.docs ?? []).filter((d) => isDocumentActive(d.data() ?? {}));
 
   let results = docs.map((d) => {
     const data = d?.data?.() ?? {};
@@ -154,6 +178,36 @@ export function listPatients(arg1, arg2) {
     return listPatientMetadata(arg1);
   }
   return listPatientMetadata({});
+}
+
+/**
+ * All patients for the signed-in tenant — single Firestore filter on `organisationId` only
+ * (no ward/service/hospital narrowing in the query).
+ *
+ * @param {string} organisationId - Must match {@link getUserContext} organisationId.
+ */
+export async function getPatientsByOrganisation(organisationId) {
+  const org = (organisationId ?? "").toString().trim();
+  if (!org) return [];
+  const { organisationId: ctxOrg } = await getUserContext();
+  if (!ctxOrg || ctxOrg !== org) {
+    throw new Error(GENERIC_USER_ERROR_MESSAGE);
+  }
+  const q = query(collection(db, PATIENTS_COLLECTION), where("organisationId", "==", org));
+  const snap = await getDocs(q);
+  const rows = snap.docs
+    .filter((d) => isDocumentActive(d.data() ?? {}))
+    .map((d) => {
+      const data = d.data() ?? {};
+      return { ...data, id: d.id };
+    });
+  await logAuditEventNonBlocking({
+    action: "METADATA_READ_LIST",
+    entityType: "PATIENT",
+    organisationId: org,
+    count: rows.length,
+  });
+  return rows;
 }
 
 /**
@@ -220,6 +274,11 @@ export async function createPatient(params) {
     stompMonitoring: Boolean(params.stompMonitoring),
     medications: normalizeStompMedicationsArray(params.medications),
     createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    isDeleted: false,
+    deletedAt: null,
+    deletedBy: null,
+    ...(auth.currentUser?.uid ? { createdBy: auth.currentUser.uid, updatedBy: auth.currentUser.uid } : {}),
   };
   const docRef = await addDocLogged(
     collection(db, PATIENTS_COLLECTION),
@@ -232,6 +291,12 @@ export async function createPatient(params) {
     entityType: "PATIENT",
     organisationId,
     entityId: docRef.id,
+  });
+  void logEntityAudit({
+    action: "CREATE_PATIENT",
+    entityType: "patient",
+    entityId: docRef.id,
+    metadata: { organisationId },
   });
 
   void logAction("PATIENT_CREATE", auth.currentUser?.uid ?? null);
@@ -265,7 +330,7 @@ export async function createPatient(params) {
 export async function getPatientById(id) {
   const patientId = requirePatientId(id);
 
-  const { organisationId, hospitalId: ctxHospitalId, wardId: ctxWardId } = await getUserContext();
+  const { organisationId } = await getUserContext();
   if (!organisationId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
 
   const ref = doc(db, PATIENTS_COLLECTION, patientId);
@@ -279,19 +344,17 @@ export async function getPatientById(id) {
 
   const data = snap.data() || {};
 
+  if (data.isDeleted === true) {
+    const err = new Error("Patient not found.");
+    err.status = 404;
+    throw err;
+  }
+
   if (data.organisationId) assertSameOrganisationData(data.organisationId, organisationId);
 
-  if (ctxHospitalId && typeof data.hospitalId === "string" && data.hospitalId.trim() && data.hospitalId.trim() !== ctxHospitalId) {
-    const err = new Error("403 Forbidden: hospital scope mismatch");
-    err.status = 403;
-    throw err;
-  }
-
-  if (ctxWardId && typeof data.wardId === "string" && data.wardId.trim() && data.wardId.trim() !== ctxWardId) {
-    const err = new Error("403 Forbidden: ward scope mismatch");
-    err.status = 403;
-    throw err;
-  }
+  // Firestore rules already enforce tenant access on patient reads. Do not require profile
+  // hospital/ward to match the patient record — profile may be UNASSIGNED or a different site
+  // while the user legitimately works under StructureContext / patient-assigned scope.
 
   await logAuditEventNonBlocking({
     action: "PATIENT_RECORD_OPEN",
@@ -354,6 +417,7 @@ export async function updatePatientStomp(patientId, payload) {
     stompMonitoring,
     medications,
     updatedAt: serverTimestamp(),
+    ...(auth.currentUser?.uid ? { updatedBy: auth.currentUser.uid } : {}),
   });
 
   await logAuditEventNonBlocking({
@@ -365,6 +429,87 @@ export async function updatePatientStomp(patientId, payload) {
       stompMonitoring,
       medicationCount: medications.length,
     },
+  });
+}
+
+/**
+ * Update patient demographics (Admin / Manager).
+ * @param {string} patientId
+ * @param {Record<string, unknown>} updates
+ */
+export async function updatePatientDemographics(patientId, updates) {
+  const id = requirePatientId(patientId);
+  await assertManagementWrite();
+  const { organisationId } = await getUserContext();
+  if (!organisationId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
+  const ref = doc(db, PATIENTS_COLLECTION, id);
+  const snap = await getDoc(ref);
+  if (!snap?.exists?.()) throw new Error("Patient not found.");
+  const cur = snap.data() ?? {};
+  assertSameOrganisationData(cur.organisationId, organisationId);
+  if (cur.isDeleted === true) throw new Error("Patient has been deleted.");
+  const uid = auth.currentUser?.uid ?? null;
+  if (!uid) throw new Error("Not authenticated.");
+
+  const patch = {};
+  if (updates && typeof updates === "object") {
+    if (updates.firstName != null) patch.firstName = String(updates.firstName).trim();
+    if (updates.lastName != null) patch.lastName = String(updates.lastName).trim();
+    if (updates.hospitalId != null) patch.hospitalId = String(updates.hospitalId).trim();
+    if (updates.wardId != null) patch.wardId = String(updates.wardId).trim();
+    if (updates.hospitalName != null) patch.hospitalName = String(updates.hospitalName).trim();
+    if (updates.wardName != null) patch.wardName = String(updates.wardName).trim();
+    if (Object.prototype.hasOwnProperty.call(updates, "dateOfBirth")) {
+      patch.dateOfBirth = updates.dateOfBirth ?? null;
+      patch.dob = updates.dateOfBirth ?? null;
+    }
+  }
+  const first = patch.firstName !== undefined ? patch.firstName : cur.firstName ?? "";
+  const last = patch.lastName !== undefined ? patch.lastName : cur.lastName ?? "";
+  patch.name = `${first} ${last}`.trim() || (typeof cur.name === "string" ? cur.name : "") || "Unnamed patient";
+
+  await updateDoc(ref, {
+    ...patch,
+    updatedAt: serverTimestamp(),
+    updatedBy: uid,
+  });
+  void logManagementAudit({
+    action: "ORG_ADMIN_UPDATE",
+    entityType: "patient",
+    entityId: id,
+    organisationId,
+  });
+}
+
+/**
+ * Soft-delete a patient record (hidden from active lists).
+ * @param {string} patientId
+ */
+export async function softDeletePatient(patientId) {
+  const id = requirePatientId(patientId);
+  await assertManagementWrite();
+  const { organisationId } = await getUserContext();
+  if (!organisationId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
+  const ref = doc(db, PATIENTS_COLLECTION, id);
+  const snap = await getDoc(ref);
+  if (!snap?.exists?.()) throw new Error("Patient not found.");
+  const cur = snap.data() ?? {};
+  assertSameOrganisationData(cur.organisationId, organisationId);
+  if (cur.isDeleted === true) throw new Error("Patient has already been deleted.");
+  const uid = auth.currentUser?.uid ?? null;
+  if (!uid) throw new Error("Not authenticated.");
+  await updateDoc(ref, {
+    isDeleted: true,
+    deletedAt: serverTimestamp(),
+    deletedBy: uid,
+    updatedAt: serverTimestamp(),
+    updatedBy: uid,
+  });
+  void logManagementAudit({
+    action: "ORG_ADMIN_DELETE",
+    entityType: "patient",
+    entityId: id,
+    organisationId,
   });
 }
 

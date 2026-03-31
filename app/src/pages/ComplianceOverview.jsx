@@ -108,7 +108,7 @@ export default function ComplianceOverview() {
       try {
         const [policies, incidents, training] = await Promise.all([
           listPolicies(organisationId),
-          fetchIncidents(organisationId, { serviceId: currentServiceId ?? null }),
+          fetchIncidents(organisationId, {}),
           listStaffTraining(organisationId, currentServiceId ?? null),
         ]);
         if (cancelled) return;

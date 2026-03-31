@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { INCIDENT_TYPES, INCIDENT_SEVERITY } from "../services/incidentService";
-import { listPatients } from "../services/patientService";
+import { getPatientsByOrganisation, listPatients } from "../services/patientService";
 
 const inputStyle = {
   width: "100%",
@@ -36,6 +36,7 @@ export default function IncidentForm({
   initialPatientId = "",
   onDraftCandour,
   draftCandourLoading = false,
+  organisationId = null,
 }) {
   const [patientId, setPatientId] = useState(initialPatientId || "");
 
@@ -58,26 +59,35 @@ export default function IncidentForm({
   const [patientsLoading, setPatientsLoading] = useState(false);
 
   useEffect(() => {
-    if (legacy) return;
     let mounted = true;
-    setPatientsLoading(true);
-    listPatients()
-      .then((list) => {
-        if (!mounted) return;
-        setPatientOptions(Array.isArray(list) ? list : []);
-      })
-      .catch(() => {
-        if (!mounted) return;
-        setPatientOptions([]);
-      })
-      .finally(() => {
-        if (!mounted) return;
-        setPatientsLoading(false);
-      });
+    queueMicrotask(() => {
+      if (!mounted) return;
+      setPatientsLoading(true);
+      const load =
+        organisationId?.trim()
+          ? getPatientsByOrganisation(organisationId.trim())
+          : legacy === true
+            ? listPatients({ allInOrganisation: true })
+            : listPatients();
+      load
+        .then((list) => {
+          if (!mounted) return;
+          const rows = Array.isArray(list) ? list : [];
+          console.log("Loaded patients:", rows);
+          setPatientOptions(rows);
+        })
+        .catch(() => {
+          if (!mounted) return;
+          setPatientOptions([]);
+        })
+        .finally(() => {
+          if (mounted) setPatientsLoading(false);
+        });
+    });
     return () => {
       mounted = false;
     };
-  }, [legacy]);
+  }, [legacy, organisationId]);
 
   function handleDraftCandourClick(e) {
     e.preventDefault();
@@ -92,33 +102,43 @@ export default function IncidentForm({
     });
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
     if (!patientId.trim()) return;
 
     if (legacy) {
       if (!type || !severity || !description.trim()) return;
-      onSubmit({
-        patientId: patientId.trim(),
-        type,
-        severity,
-        description: description.trim(),
-        actionsTaken: actionsTaken.trim(),
-      });
+      try {
+        await onSubmit({
+          patientId: patientId.trim(),
+          type,
+          severity,
+          description: description.trim(),
+          actionsTaken: actionsTaken.trim(),
+        });
+      } catch {
+        return;
+      }
       setDescription("");
       setActionsTaken("");
+      setType("safeguarding");
+      setSeverity("medium");
       return;
     }
 
     if (!title.trim() || !dateTime || !location.trim() || !severity || !description.trim()) return;
-    onSubmit({
-      patientId: patientId.trim(),
-      title: title.trim(),
-      dateTime,
-      location: location.trim(),
-      severity,
-      description: description.trim(),
-    });
+    try {
+      await onSubmit({
+        patientId: patientId.trim(),
+        title: title.trim(),
+        dateTime,
+        location: location.trim(),
+        severity,
+        description: description.trim(),
+      });
+    } catch {
+      return;
+    }
     setTitle("");
     setLocation("");
     setDescription("");
@@ -130,33 +150,26 @@ export default function IncidentForm({
         <label htmlFor="incident-patient" style={{ display: "block", marginBottom: 4, fontWeight: 600 }}>
           Patient *
         </label>
-        {legacy ? (
-          <input
-            id="incident-patient"
-            type="text"
-            required
-            value={patientId}
-            onChange={(e) => setPatientId(e.target.value)}
-            style={inputStyle}
-            placeholder="e.g. patient_123"
-          />
-        ) : (
-          <select
-            id="incident-patient"
-            required
-            value={patientId}
-            onChange={(e) => setPatientId(e.target.value)}
-            style={inputStyle}
-            disabled={patientsLoading}
-          >
-            <option value="">{patientsLoading ? "Loading patients…" : "Select a patient"}</option>
-            {patientOptions.map((p) => (
-              <option key={p.id} value={p.id}>
-                {(p.firstName || "").trim()} {(p.lastName || "").trim()}
-              </option>
-            ))}
-          </select>
-        )}
+        <select
+          id="incident-patient"
+          required
+          value={patientId}
+          onChange={(e) => setPatientId(e.target.value)}
+          style={inputStyle}
+          disabled={patientsLoading}
+        >
+          <option value="">{patientsLoading ? "Loading patients…" : "Select a patient"}</option>
+          {patientOptions.map((p) => (
+            <option key={p.id} value={p.id}>
+              {(p.name ?? `${(p.firstName || "").trim()} ${(p.lastName || "").trim()}`).trim() || p.id}
+            </option>
+          ))}
+        </select>
+        {!patientsLoading && patientOptions.length === 0 ? (
+          <p style={{ margin: "8px 0 0 0", fontSize: "0.85rem", color: "#64748b" }}>
+            No patients found — please add patient in Patients section
+          </p>
+        ) : null}
       </div>
 
       {!legacy ? (

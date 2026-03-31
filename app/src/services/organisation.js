@@ -9,7 +9,11 @@ import {
   limit,
   serverTimestamp,
 } from "firebase/firestore";
-import { db } from "../firebase";
+import { db, auth } from "../firebase";
+import { assertManagementWrite } from "./managementPermissions";
+import { logManagementAudit } from "./managementAuditLog";
+import { isPlatformAdmin } from "./platformAdminService";
+import { getUserContext } from "./authService";
 import { normalizePlanKey } from "../utils/featureAccess";
 import { getCareTemplate } from "../config/careTemplates";
 import {
@@ -35,6 +39,8 @@ export async function getCurrentUserProfile(uid) {
   return {
     orgId: data.orgId ?? data.organisationId ?? null,
     role: data.role ?? null,
+    systemRole: typeof data.systemRole === "string" ? data.systemRole : null,
+    isGlobalAdmin: data.isGlobalAdmin === true,
     mdtRole: typeof data.mdtRole === "string" && data.mdtRole.trim() ? data.mdtRole.trim() : null,
     status: data.status ?? null,
     hospitalId: typeof data.hospitalId === "string" ? data.hospitalId : null,
@@ -60,6 +66,7 @@ export async function getOrganisation(organisationId) {
     return null;
   }
   const data = orgSnap.data?.() ?? {};
+  if (data.isDeleted === true) return null;
   const rawPlan = data.plan ?? data.subscriptionPlan ?? null;
   const orgType = data.type ?? data.organisationType ?? data.orgType ?? null;
   const featuresFromDoc = data.features && typeof data.features === "object" ? data.features : null;
@@ -116,6 +123,9 @@ export async function createOrganisation(organisationId, data) {
     roles: effectiveRoles,
     ...(typeField ? { type: typeField } : null),
     uiMode,
+    isDeleted: false,
+    deletedAt: null,
+    deletedBy: null,
     createdAt: serverTimestamp(),
   });
 }
@@ -126,14 +136,67 @@ export async function createOrganisation(organisationId, data) {
  */
 export async function updateOrganisation(organisationId, data) {
   if (!organisationId?.trim()) throw new Error("organisationId required");
+  await assertManagementWrite();
+  const ctx = await getUserContext();
+  const authUid = auth.currentUser?.uid;
+  if (authUid && !(await isPlatformAdmin(authUid)) && ctx.organisationId !== organisationId) {
+    throw new Error("403 Forbidden: organisation scope mismatch");
+  }
   const orgRef = doc(db, "organisations", organisationId);
+  const snap = await getDoc(orgRef);
+  if (!snap.exists()) throw new Error("Organisation not found.");
+  const cur = snap.data?.() ?? {};
+  if (cur.isDeleted === true) throw new Error("Organisation has been deleted.");
   const payload = {};
   if (data?.name?.trim()) payload.name = data.name.trim();
   if (data?.plan != null && String(data.plan).trim() !== "") {
     payload.plan = normalizePlanKey(data.plan);
   }
   if (Object.keys(payload).length === 0) return;
-  await updateDoc(orgRef, { ...payload, updatedAt: serverTimestamp() });
+  const uid = authUid ?? null;
+  await updateDoc(orgRef, {
+    ...payload,
+    updatedAt: serverTimestamp(),
+    ...(uid ? { updatedBy: uid } : {}),
+  });
+  void logManagementAudit({
+    action: "ORG_ADMIN_UPDATE",
+    entityType: "organisation",
+    entityId: organisationId,
+    organisationId,
+  });
+}
+
+/**
+ * Soft-delete an organisation (hidden from lists; tenant links may still reference id).
+ */
+export async function softDeleteOrganisation(organisationId) {
+  const id = (organisationId ?? "").toString().trim();
+  if (!id) throw new Error("organisationId required");
+  await assertManagementWrite();
+  const ctx = await getUserContext();
+  const authUid = auth.currentUser?.uid;
+  if (authUid && !(await isPlatformAdmin(authUid)) && ctx.organisationId !== id) {
+    throw new Error("403 Forbidden: organisation scope mismatch");
+  }
+  const orgRef = doc(db, "organisations", id);
+  const snap = await getDoc(orgRef);
+  if (!snap.exists()) throw new Error("Organisation not found.");
+  const uid = auth.currentUser?.uid ?? null;
+  if (!uid) throw new Error("Not authenticated.");
+  await updateDoc(orgRef, {
+    isDeleted: true,
+    deletedAt: serverTimestamp(),
+    deletedBy: uid,
+    updatedAt: serverTimestamp(),
+    updatedBy: uid,
+  });
+  void logManagementAudit({
+    action: "ORG_ADMIN_DELETE",
+    entityType: "organisation",
+    entityId: id,
+    organisationId: id,
+  });
 }
 
 /**
@@ -145,19 +208,22 @@ export async function updateOrganisation(organisationId, data) {
 export async function listOrganisationsForManagement(isPlatformAdmin, organisationId) {
   if (isPlatformAdmin) {
     const snap = await getDocs(query(collection(db, "organisations"), limit(500)));
-    return (snap?.docs ?? []).map((d) => {
-      const x = d?.data?.() ?? {};
-      const rawPlan = x.plan ?? x.subscriptionPlan ?? null;
-      return {
-        id: d?.id ?? "",
-        name: typeof x.name === "string" ? x.name : "",
-        plan:
-          rawPlan != null && String(rawPlan).trim() !== ""
-            ? normalizePlanKey(rawPlan)
-            : undefined,
-        status: x.status ?? null,
-      };
-    });
+    return (snap?.docs ?? [])
+      .map((d) => {
+        const x = d?.data?.() ?? {};
+        const rawPlan = x.plan ?? x.subscriptionPlan ?? null;
+        return {
+          id: d?.id ?? "",
+          name: typeof x.name === "string" ? x.name : "",
+          plan:
+            rawPlan != null && String(rawPlan).trim() !== ""
+              ? normalizePlanKey(rawPlan)
+              : undefined,
+          status: x.status ?? null,
+          isDeleted: x.isDeleted === true,
+        };
+      })
+      .filter((row) => row.isDeleted !== true);
   }
   if (!organisationId?.trim()) return [];
   const o = await getOrganisation(organisationId);

@@ -68,6 +68,12 @@ service cloud.firestore {
       return roleUpper() in ['ADMIN', 'MANAGER', 'SUPER_ADMIN', 'GLOBAL_ADMIN'];
     }
 
+    /** Tenant Organisation Admin (or legacy Admin) — structure / directory writes; excludes Manager/Staff. */
+    function isOrgAdminRole() {
+      let r = getRole();
+      return r == 'Organisation Admin' || roleUpper() == 'ADMIN';
+    }
+
     function isGlobalAdmin() {
       let u = getUserSafe();
       return u != null
@@ -132,7 +138,11 @@ service cloud.firestore {
           && userGroupIdFromProfile() != null
           && resource.data.groupId == userGroupIdFromProfile())
       );
-      allow create, update, delete: if isAuthenticated() && isGlobalAdmin();
+      allow create, delete: if isAuthenticated() && isGlobalAdmin();
+      allow update: if isAuthenticated() && (
+        isGlobalAdmin()
+        || (sameOrganisation(orgId) && isOrgAdminRole())
+      );
     }
 
     match /groups/{groupId} {
@@ -165,9 +175,9 @@ service cloud.firestore {
         && docOrgId(request.resource.data) != null
         && getOrgId() == docOrgId(request.resource.data);
 
-      // Admins can create users in their organisation.
+      // Organisation Admins can create users in their organisation.
       allow create: if isAuthenticated()
-        && isAdmin()
+        && isOrgAdminRole()
         && sameOrganisation(docOrgId(request.resource.data));
 
       // Users can only update their own doc; organisation cannot be changed.
@@ -176,14 +186,14 @@ service cloud.firestore {
         && sameOrganisation(docOrgId(resource.data))
         && docOrgId(request.resource.data) == docOrgId(resource.data);
 
-      // Admins can manage user docs within their organisation.
+      // Organisation Admins can manage user docs within their organisation.
       allow update: if isAuthenticated()
-        && isAdmin()
+        && isOrgAdminRole()
         && sameOrganisation(docOrgId(resource.data))
         && docOrgId(request.resource.data) == docOrgId(resource.data);
 
       allow delete: if isAuthenticated()
-        && isAdmin()
+        && isOrgAdminRole()
         && sameOrganisation(docOrgId(resource.data));
     }
 
@@ -203,7 +213,7 @@ service cloud.firestore {
     }
 
     // =========
-    // Notes (immutable)
+    // Notes (immutable; delete only for admins — governance / duplicate cleanup)
     // =========
     match /notes/{noteId} {
       allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
@@ -213,7 +223,11 @@ service cloud.firestore {
         && sameOrganisation(request.resource.data.organisationId);
 
       allow update: if false;
-      allow delete: if false;
+
+      allow delete: if isAuthenticated()
+        && resource.data.organisationId != null
+        && canAccessTenantData(resource.data.organisationId)
+        && (isAdmin() || (roleUpper() == 'GROUP_ADMIN' && sameGroupAsOrganisation(resource.data.organisationId)));
     }
 
     // =========
@@ -281,7 +295,7 @@ service cloud.firestore {
     match /services/{serviceId} {
       allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
       allow create, update: if isAuthenticated()
-        && isAdmin()
+        && isOrgAdminRole()
         && sameOrganisation(request.resource.data.organisationId);
       allow delete: if false;
     }
@@ -289,7 +303,7 @@ service cloud.firestore {
     match /hospitals/{hospitalId} {
       allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
       allow create, update: if isAuthenticated()
-        && isAdmin()
+        && isOrgAdminRole()
         && sameOrganisation(request.resource.data.organisationId);
       allow delete: if false;
     }
@@ -297,7 +311,7 @@ service cloud.firestore {
     match /wards/{wardId} {
       allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
       allow create, update: if isAuthenticated()
-        && isAdmin()
+        && isOrgAdminRole()
         && sameOrganisation(request.resource.data.organisationId);
       allow delete: if false;
     }

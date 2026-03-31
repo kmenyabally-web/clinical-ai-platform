@@ -231,7 +231,7 @@ export default function CommandCentre() {
           notePromise,
           listPolicies(effectiveOrgId),
           listStaffTraining(effectiveOrgId, currentServiceId ?? null),
-          fetchIncidents(effectiveOrgId, { serviceId: currentServiceId ?? undefined }),
+          fetchIncidents(effectiveOrgId, {}),
           listInspectionScores(effectiveOrgId, 50),
         ]);
         if (cancelled) return;

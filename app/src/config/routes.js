@@ -6,8 +6,8 @@
 /** Roles that can access readiness sections (Governance, Safeguarding, etc.). Viewer sees Overview only. */
 export const READINESS_SECTION_ROLES = ["Manager", "QualityLead"];
 
-/** Admin / Manager access to tenant management screens. */
-export const MANAGEMENT_ALLOWED_ROLES = ["Admin", "Manager"];
+/** Organisation Admin (and legacy Admin) — tenant management; Managers use operational tools elsewhere. */
+export const MANAGEMENT_ALLOWED_ROLES = ["Admin", "Organisation Admin"];
 
 /** @type {{ path: string, label: string, ariaLabel?: string, allowedRoles?: string[], platformAdminOnly?: boolean }[]} */
 export const NAV_ITEMS = [

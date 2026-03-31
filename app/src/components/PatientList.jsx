@@ -2,16 +2,17 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { listPatients, createPatient } from "../services/patientService";
+import { listPatients, createPatient, updatePatientDemographics, softDeletePatient } from "../services/patientService";
 import { listWards } from "../services/structureService";
 import { logAuditEventNonBlocking } from "../services/auditService";
 import { useOrganisation } from "../context/OrganisationContext";
+import { isOrganisationAdminRole } from "../utils/organisationAdmin";
 import { useStructure } from "../context/StructureContext";
 import { useRole } from "../context/RoleContext";
-import { requireAdminRole } from "../lib/requireAdminAction";
 
 export default function PatientList() {
-  const { organisationId, organisation } = useOrganisation();
+  const { organisationId, organisation, isPlatformAdmin } = useOrganisation();
+  const organisationName = organisation?.name ?? "";
   const {
     hospitals,
     wards,
@@ -31,9 +32,14 @@ export default function PatientList() {
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState(null);
+  const [editPatient, setEditPatient] = useState(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
 
-  const mayAddPatient =
-    Boolean(organisationId) && role && !["Auditor", "Inspector"].includes(role);
+  const canManagePatients = isOrganisationAdminRole(role) || Boolean(isPlatformAdmin);
+
+  const mayAddPatient = Boolean(organisationId) && canManagePatients;
 
   const load = useCallback(async () => {
     if (!organisationId) {
@@ -229,9 +235,40 @@ export default function PatientList() {
         </table>
       )}
 
+      {editPatient && organisationId && canManagePatients ? (
+        <EditPatientModal
+          organisationId={organisationId}
+          organisationName={organisationName}
+          patient={editPatient}
+          hospitals={hospitals}
+          wards={wards}
+          onClose={() => {
+            setEditPatient(null);
+            setEditError(null);
+          }}
+          onSubmit={async (payload) => {
+            if (!canManagePatients) return;
+            setEditSaving(true);
+            setEditError(null);
+            try {
+              await updatePatientDemographics(editPatient.id, payload);
+              setEditPatient(null);
+              await load();
+            } catch (err) {
+              setEditError(err?.message ?? "Failed to update patient.");
+            } finally {
+              setEditSaving(false);
+            }
+          }}
+          loading={editSaving}
+          error={editError}
+        />
+      ) : null}
+
       {showCreate && organisationId && mayAddPatient ? (
         <CreatePatientModal
           organisationId={organisationId}
+          organisationName={organisationName}
           hospitals={hospitals}
           wards={wards}
           defaultHospitalId={currentHospitalId}
@@ -241,7 +278,7 @@ export default function PatientList() {
             setCreateError(null);
           }}
           onSubmit={async (payload) => {
-            if (!requireAdminRole(role)) return;
+            if (!canManagePatients) return;
             setCreating(true);
             setCreateError(null);
             try {
@@ -280,6 +317,11 @@ function CreatePatientModal({
   const [hospitalId, setHospitalId] = useState(defaultHospitalId || "");
   const [wardId, setWardId] = useState(defaultWardId || "");
   const [wardOptions, setWardOptions] = useState(wards);
+
+  React.useEffect(() => {
+    setHospitalId(defaultHospitalId || "");
+    setWardId(defaultWardId || "");
+  }, [defaultHospitalId, defaultWardId]);
 
   React.useEffect(() => {
     setWardOptions(wards);
@@ -384,8 +426,14 @@ function CreatePatientModal({
           </label>
           <label style={styles.lbl}>
             Ward *
-            <select required value={wardId} onChange={(e) => setWardId(e.target.value)} style={styles.select}>
-              <option value="">Select ward</option>
+            <select
+              required
+              value={wardId}
+              onChange={(e) => setWardId(e.target.value)}
+              disabled={!hospitalId?.trim()}
+              style={styles.select}
+            >
+              <option value="">{hospitalId?.trim() ? "Select ward" : "Select hospital first"}</option>
               {wardOptions.map((w) => (
                 <option key={w.id} value={w.id}>
                   {w.name}
@@ -408,6 +456,148 @@ function CreatePatientModal({
           <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
             <button type="submit" disabled={loading || hospitals.length === 0} style={styles.primaryBtn}>
               {loading ? "Saving…" : "Create"}
+            </button>
+            <button type="button" onClick={onClose} style={styles.secondaryBtn}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function EditPatientModal({
+  organisationId,
+  organisationName,
+  patient,
+  hospitals,
+  wards,
+  onClose,
+  onSubmit,
+  loading,
+  error,
+}) {
+  const [firstName, setFirstName] = useState(patient?.firstName ?? "");
+  const [lastName, setLastName] = useState(patient?.lastName ?? "");
+  const [dob, setDob] = useState(() => formatDob(patient?.dob));
+  const [hospitalId, setHospitalId] = useState(patient?.hospitalId ?? "");
+  const [wardId, setWardId] = useState(patient?.wardId ?? "");
+  const [wardOptions, setWardOptions] = useState(wards);
+
+  React.useEffect(() => {
+    setFirstName(patient?.firstName ?? "");
+    setLastName(patient?.lastName ?? "");
+    setDob(formatDob(patient?.dob));
+    setHospitalId(patient?.hospitalId ?? "");
+    setWardId(patient?.wardId ?? "");
+  }, [patient]);
+
+  React.useEffect(() => {
+    setWardOptions(wards);
+  }, [wards]);
+
+  React.useEffect(() => {
+    if (!organisationId || !hospitalId?.trim()) {
+      setWardOptions([]);
+      return;
+    }
+    let cancelled = false;
+    listWards(organisationId, hospitalId)
+      .then((list) => {
+        if (!cancelled) setWardOptions(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (!cancelled) setWardOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [organisationId, hospitalId]);
+
+  const hospitalName = hospitals.find((h) => h.id === hospitalId)?.name ?? patient?.hospitalName ?? "";
+  const wardName = wardOptions.find((w) => w.id === wardId)?.name ?? patient?.wardName ?? "";
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!hospitalId?.trim() || !wardId?.trim()) return;
+    onSubmit({
+      firstName,
+      lastName,
+      hospitalId,
+      wardId,
+      hospitalName,
+      wardName,
+      dateOfBirth: dob || null,
+    });
+  };
+
+  return (
+    <div style={styles.modalBackdrop}>
+      <div style={styles.modalCard}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h2 style={{ margin: 0, fontSize: "1.1rem" }}>Edit patient</h2>
+          <button type="button" onClick={onClose} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "1.25rem" }} aria-label="Close">
+            ×
+          </button>
+        </div>
+        {error ? (
+          <p role="alert" style={{ color: "#b91c1c", fontSize: "0.9rem" }}>
+            {error}
+          </p>
+        ) : null}
+        <form onSubmit={handleSubmit}>
+          <label style={styles.lbl}>
+            Organisation
+            <input value={organisationName || organisationId} readOnly style={{ ...styles.input, background: "#f8fafc" }} />
+          </label>
+          <label style={styles.lbl}>
+            Hospital
+            <select
+              required
+              value={hospitalId}
+              onChange={(e) => {
+                setHospitalId(e.target.value);
+                setWardId("");
+              }}
+              style={styles.select}
+            >
+              <option value="">Select hospital</option>
+              {hospitals.map((h) => (
+                <option key={h.id} value={h.id}>
+                  {h.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={styles.lbl}>
+            Ward
+            <select required value={wardId} onChange={(e) => setWardId(e.target.value)} style={styles.select}
+              disabled={!hospitalId?.trim()}
+            >
+              <option value="">{hospitalId?.trim() ? "Select ward" : "Select hospital first"}</option>
+              {wardOptions.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={styles.lbl}>
+            First name
+            <input value={firstName} onChange={(e) => setFirstName(e.target.value)} style={styles.input} />
+          </label>
+          <label style={styles.lbl}>
+            Last name
+            <input value={lastName} onChange={(e) => setLastName(e.target.value)} style={styles.input} />
+          </label>
+          <label style={styles.lbl}>
+            Date of birth
+            <input type="date" value={dob} onChange={(e) => setDob(e.target.value)} style={styles.input} />
+          </label>
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <button type="submit" disabled={loading || hospitals.length === 0} style={styles.primaryBtn}>
+              {loading ? "Saving…" : "Save changes"}
             </button>
             <button type="button" onClick={onClose} style={styles.secondaryBtn}>
               Cancel

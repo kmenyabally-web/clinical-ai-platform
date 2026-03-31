@@ -12,6 +12,12 @@ const AUDIT_LOGS_COLLECTION = "auditLogs";
 /** Lightweight action log collection (pre-flight observability). */
 const AUDIT_ACTIONS_COLLECTION = "audit_logs";
 
+function isAlreadyExistsError(err) {
+  const code = typeof err?.code === "string" ? err.code.toLowerCase() : "";
+  const message = typeof err?.message === "string" ? err.message.toLowerCase() : "";
+  return code.includes("already-exists") || message.includes("document already exists");
+}
+
 function normalizeAuditPayload(input = {}) {
   return {
     action: input.action ?? input.eventType ?? "UNKNOWN",
@@ -32,6 +38,40 @@ function normalizeAuditPayload(input = {}) {
  * Supports rich actor + tenant context payloads.
  * @param {object} payload
  */
+/**
+ * Compliance entity audit (collection `audit_logs`) — use for UPDATE/DELETE/APPROVE with entity scope.
+ * @param {{ action: string, entityType?: string | null, entityId?: string | null, metadata?: Record<string, unknown> }} p
+ */
+export async function logEntityAudit(p) {
+  const action = (p?.action ?? "").toString().trim();
+  if (!action) return;
+  let organisationId = null;
+  try {
+    const ctx = await getUserContext();
+    organisationId = ctx?.organisationId ?? null;
+  } catch {
+    /* non-fatal */
+  }
+  try {
+    const uid = auth.currentUser?.uid ?? null;
+    await addDoc(collection(db, AUDIT_ACTIONS_COLLECTION), {
+      action,
+      entityType: p?.entityType ?? null,
+      entityId: p?.entityId ?? null,
+      organisationId: p?.organisationId ?? organisationId,
+      performedBy: p?.performedBy ?? uid,
+      userId: uid,
+      role: p?.role ?? null,
+      timestamp: serverTimestamp(),
+      metadata: p?.metadata && typeof p.metadata === "object" ? p.metadata : {},
+    });
+  } catch (err) {
+    if (!isAlreadyExistsError(err)) {
+      console.error("[audit] logEntityAudit failed:", err);
+    }
+  }
+}
+
 export async function writeAuditEvent(payload) {
   const row = normalizeAuditPayload(payload);
   try {
@@ -55,7 +95,9 @@ export async function writeAuditEvent(payload) {
       timestamp: serverTimestamp(),
     });
   } catch (err) {
-    console.error("Audit log failed:", err);
+    if (!isAlreadyExistsError(err)) {
+      console.error("Audit log failed:", err);
+    }
   }
 }
 
@@ -83,7 +125,9 @@ export async function logAudit(action, metadata = {}) {
       timestamp: serverTimestamp(),
     });
   } catch (err) {
-    console.warn("Audit log failed:", err);
+    if (!isAlreadyExistsError(err)) {
+      console.warn("Audit log failed:", err);
+    }
   }
 }
 
@@ -110,7 +154,9 @@ export async function logAction(action, userId, organisationId = null) {
       timestamp: serverTimestamp(),
     });
   } catch (e) {
-    console.warn("[audit] logAction failed:", e);
+    if (!isAlreadyExistsError(e)) {
+      console.warn("[audit] logAction failed:", e);
+    }
   }
 }
 
@@ -219,4 +265,5 @@ export default {
   logAudit,
   logAuditEventNonBlocking,
   logAppInitStub,
+  logEntityAudit,
 };

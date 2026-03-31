@@ -7,7 +7,7 @@ import {
   useRef,
   useMemo,
 } from "react";
-import { doc, getDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, limit, query, where } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { useAuth } from "./AuthContext";
 import { getOrganisation } from "../services/organisation";
@@ -321,10 +321,41 @@ export function OrganisationProvider({ children }) {
         return;
       }
       setUserProfile(resolvedProfile);
-      setOrganisationId(resolvedProfile.orgId);
-      const orgRef = doc(db, "organisations", resolvedProfile.orgId);
+      let orgIdToLoad = resolvedProfile.orgId;
+      if (orgIdToLoad) orgIdToLoad = String(orgIdToLoad).trim();
+
+      // If `organisationId` was accidentally stored as the organisation *name* (legacy data),
+      // try to resolve the correct document id from organisations.name.
+      const orgRef = doc(db, "organisations", orgIdToLoad);
       const orgSnap = await getDoc(orgRef);
-      if (!orgSnap.exists()) {
+      if (!orgSnap.exists() && typeof orgIdToLoad === "string" && orgIdToLoad.trim()) {
+        try {
+          const byNameQ = query(
+            collection(db, "organisations"),
+            where("name", "==", orgIdToLoad.trim()),
+            limit(1)
+          );
+          const byNameSnap = await getDocs(byNameQ);
+          const matched = byNameSnap?.docs?.[0];
+          if (matched?.id) {
+            orgIdToLoad = matched.id;
+            resolvedProfile = {
+              ...(resolvedProfile ?? {}),
+              orgId: orgIdToLoad,
+              organisationId: orgIdToLoad,
+            };
+            setUserProfile(resolvedProfile);
+            setOrganisationId(orgIdToLoad);
+          }
+        } catch (e) {
+          // ignore and continue with existing fallback below
+        }
+      }
+
+      // Re-check after potential name->id resolution.
+      const orgRef2 = doc(db, "organisations", orgIdToLoad);
+      const orgSnap2 = await getDoc(orgRef2);
+      if (!orgSnap2.exists()) {
         console.warn("⚠️ Org ID exists but no document found");
         const platformAdmin = await isPlatformAdmin(uid);
         setOrganisation(null);
@@ -343,7 +374,9 @@ export function OrganisationProvider({ children }) {
         lastLoadedUidRef.current = uid;
         return;
       }
-      const org = await getOrganisation(resolvedProfile.orgId);
+
+      setOrganisationId(orgIdToLoad);
+      const org = await getOrganisation(orgIdToLoad);
       if (!org) {
         const platformAdmin = await isPlatformAdmin(uid);
         setOrganisation(null);
@@ -365,7 +398,7 @@ export function OrganisationProvider({ children }) {
       let sub = null;
       if (org.status !== "suspended") {
         try {
-          sub = await getSubscription(resolvedProfile.orgId);
+          sub = await getSubscription(orgIdToLoad);
         } catch {
           sub = null;
         }
@@ -392,6 +425,12 @@ export function OrganisationProvider({ children }) {
       setLoading(false);
     }
   }, []);
+
+  // TEMP: helps diagnose cross-module tenant scoping bugs.
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log("ACTIVE ORG ID:", organisationId);
+  }, [organisationId]);
 
   // Load tenant profile from the same auth source Firebase uses (avoids races with React context).
   useEffect(() => {
@@ -440,6 +479,7 @@ export function OrganisationProvider({ children }) {
   const value = {
     profile: userProfile,
     organisationId: organisationId ?? null,
+    organisationName: organisation?.name ?? "",
     groupId: userProfile?.groupId ?? null,
     hospitalId: userProfile?.hospitalId ?? null,
     wardId: userProfile?.wardId ?? null,

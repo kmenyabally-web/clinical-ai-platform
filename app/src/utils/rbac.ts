@@ -54,6 +54,12 @@ export function canEditClinicalNotesAccess(
   return false;
 }
 
+/** Delete clinical notes — admins / managers only (not Staff), regardless of MDT. */
+export function canDeleteClinicalNotesAccess(systemRole: string | null | undefined): boolean {
+  const s = (systemRole ?? "").trim();
+  return ["Admin", "Manager", "SUPER_ADMIN", "GLOBAL_ADMIN", "GROUP_ADMIN"].includes(s);
+}
+
 /** Reports / readiness — system RBAC only. */
 export function canViewReportsFromSystemRole(systemRole: string | null | undefined): boolean {
   const code = mapSystemRoleToEnterpriseCode(systemRole);

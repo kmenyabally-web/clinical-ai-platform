@@ -4,6 +4,7 @@
  */
 export const SYSTEM_ROLES = [
   "Admin",
+  "Organisation Admin",
   "Manager",
   "Staff",
   "Inspector",

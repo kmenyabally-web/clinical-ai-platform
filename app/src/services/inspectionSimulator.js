@@ -137,7 +137,7 @@ export async function runInspectionSimulation(organisationId, serviceId) {
   }
 
   const [incidents, actions] = await Promise.all([
-    fetchIncidents(organisationId, { serviceId: serviceId ?? null }),
+    fetchIncidents(organisationId, {}),
     fetchComplianceActions(organisationId, { serviceId: serviceId ?? null, limitCount: 200 }),
   ]);
 

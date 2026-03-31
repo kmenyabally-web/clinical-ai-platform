@@ -16,6 +16,7 @@ import { addTimelineEntry } from "./patientTimelineService";
 import { recalculateComplianceScoreAsync } from "./complianceEngine";
 import { auth } from "../firebase";
 import { getUserContext } from "./authService";
+import { getCurrentUserProfile } from "./organisation";
 import { getPatientById } from "./patientService";
 import { logAuditEventNonBlocking } from "./auditService";
 import {
@@ -23,6 +24,7 @@ import {
   tenantFieldsFromContext,
   assertSameOrganisationData,
   GENERIC_USER_ERROR_MESSAGE,
+  normalizeHospitalScopeId,
 } from "../utils/tenantContext";
 
 const INCIDENTS_COLLECTION = "incidents";
@@ -32,6 +34,22 @@ function assertRequiredWriteContext({ organisationId, hospitalId, userId }) {
   if (!organisationId) throw new Error("Missing organisation");
   if (!hospitalId) throw new Error("Missing hospital");
   if (!userId) throw new Error("Missing user");
+}
+
+/** Sort key for incident rows (reportedAt preferred; legacy may use createdAt). */
+function incidentTimeMillisFromData(x) {
+  const v = x?.reportedAt ?? x?.createdAt ?? null;
+  if (!v) return 0;
+  if (typeof v === "object" && v !== null && typeof v.toMillis === "function") {
+    try {
+      return v.toMillis();
+    } catch {
+      return 0;
+    }
+  }
+  if (v instanceof Date) return v.getTime();
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? 0 : d.getTime();
 }
 
 export const INCIDENT_TYPES = [
@@ -48,11 +66,10 @@ export const INCIDENT_SEVERITY = ["low", "medium", "high", "critical"];
 
 /**
  * Legacy: Create an incident and a linked patientTimeline event.
- * Ensures organisationId, serviceId, reportedBy and reportedAt are always set.
+ * Scoped by organisation + patient hospital/ward (no service requirement).
  *
  * @param {Object} params
  * @param {string} params.organisationId
- * @param {string} params.serviceId
  * @param {string} params.patientId
  * @param {string} params.type
  * @param {string} params.severity
@@ -65,7 +82,6 @@ export const INCIDENT_SEVERITY = ["low", "medium", "high", "critical"];
  */
 export async function createIncidentLegacy({
   organisationId,
-  serviceId,
   patientId,
   type,
   severity,
@@ -76,7 +92,6 @@ export async function createIncidentLegacy({
   status = "open",
 }) {
   if (!organisationId?.trim()) throw new Error(GENERIC_USER_ERROR_MESSAGE);
-  if (!serviceId?.trim()) throw new Error("serviceId is required");
   if (!patientId?.trim()) throw new Error(GENERIC_USER_ERROR_MESSAGE);
   if (!type?.trim()) throw new Error("type is required");
   if (!severity?.trim()) throw new Error("severity is required");
@@ -102,7 +117,6 @@ export async function createIncidentLegacy({
     organisationId,
     hospitalId,
     wardId,
-    serviceId,
     type,
     severity,
     description: description.trim(),
@@ -110,7 +124,10 @@ export async function createIncidentLegacy({
     reportedAt: now,
     status,
     actionsTaken: actionsTaken?.trim() || "",
+    actionTaken: actionsTaken?.trim() || "",
+    linkedSafeguardingIds: [],
     linkedEvidence: Array.isArray(linkedEvidence) ? linkedEvidence : [],
+    ...(auth.currentUser?.uid ? { createdBy: auth.currentUser.uid } : {}),
   };
 
   const incidentSnap = await addDoc(incidentsRef, incidentDoc);
@@ -133,7 +150,6 @@ export async function createIncidentLegacy({
     organisationId,
     hospitalId,
     wardId,
-    serviceId,
     type: type === "safeguarding" ? "safeguarding" : "incident",
     title: type === "safeguarding" ? "Safeguarding concern" : "Incident report",
     description: description.trim(),
@@ -156,7 +172,7 @@ export async function createIncidentLegacy({
     patientId,
     hospitalId,
     wardId,
-    serviceId,
+    serviceId: null,
     eventType,
     eventTitle,
     eventDescription: description.trim(),
@@ -166,7 +182,7 @@ export async function createIncidentLegacy({
     metadata: { severity, status, incidentType: type },
   }).catch((err) => console.error("Timeline entry failed:", err));
 
-  recalculateComplianceScoreAsync(organisationId, serviceId);
+  recalculateComplianceScoreAsync(organisationId, null);
 
   return { id: incidentId };
 }
@@ -345,54 +361,79 @@ export async function fetchIncidentsForPatient(patientId, { limitCount = 20 } = 
 
 /**
  * Fetch incidents for an organisation with optional filters.
+ * Scoped by organisationId; optional hospital/ward filters apply client-side after fetch.
  *
  * @param {string} organisationId
- * @param {{ serviceId?: string | null, severity?: string | null, status?: string | null }} [filters]
+ * @param {{ hospitalId?: string | null, wardId?: string | null, severity?: string | null, status?: string | null }} [filters]
  * @returns {Promise<Array<any>>}
  */
 export async function fetchIncidents(organisationId, filters = {}) {
   if (!organisationId?.trim()) return [];
 
-  const { serviceId, severity, status } = filters;
-  const { hospitalId: ctxHospitalId } = await getUserContext().catch(() => ({}));
+  const { hospitalId: filterHospitalId, wardId: filterWardId, severity, status } = filters;
+  const ctx = await getUserContext().catch(() => ({}));
+  const ctxHospitalId = ctx?.hospitalId ?? null;
+  const roleUpper = (ctx?.role ?? "").toString().trim().toUpperCase();
+  const profile =
+    auth.currentUser?.uid != null ? await getCurrentUserProfile(auth.currentUser.uid) : null;
+  const skipOrgWideHospitalScope =
+    roleUpper === "SUPER_ADMIN" ||
+    roleUpper === "GLOBAL_ADMIN" ||
+    roleUpper === "GROUP_ADMIN" ||
+    profile?.isGlobalAdmin === true;
+
   const ref = collection(db, INCIDENTS_COLLECTION);
 
-  const constraints = [
-    where("organisationId", "==", organisationId),
-    orderBy("reportedAt", "desc"),
-  ];
+  const buildConstraints = (includeOrderBy) => {
+    const c = [where("organisationId", "==", organisationId)];
+    if (severity) c.push(where("severity", "==", severity));
+    if (status) c.push(where("status", "==", status));
+    if (includeOrderBy) c.push(orderBy("reportedAt", "desc"));
+    c.push(limit(500));
+    return c;
+  };
 
-  if (serviceId) constraints.push(where("serviceId", "==", serviceId));
-  if (severity) constraints.push(where("severity", "==", severity));
-  if (status) constraints.push(where("status", "==", status));
-
-  const q = query(ref, ...constraints);
-  const snapshot = await getDocs(q);
+  let snapshot;
+  try {
+    snapshot = await getDocs(query(ref, ...buildConstraints(true)));
+  } catch (err) {
+    console.warn("Primary incidents query failed; using fallback without orderBy", err);
+    snapshot = await getDocs(query(ref, ...buildConstraints(false)));
+  }
   const docs = snapshot?.docs ?? [];
 
-  const mapped = docs.map((d) => {
+  let mapped = docs.map((d) => {
     const x = d?.data?.() ?? {};
     return {
       id: d?.id ?? "",
       incidentId: x.incidentId ?? d?.id ?? "",
       patientId: x.patientId ?? "",
       organisationId: x.organisationId ?? organisationId,
-      serviceId: x.serviceId ?? null,
+      hospitalId: typeof x.hospitalId === "string" ? x.hospitalId : "",
+      wardId: typeof x.wardId === "string" ? x.wardId : "",
       type: x.type ?? "",
       severity: x.severity ?? "",
       description: x.description ?? "",
       reportedBy: x.reportedBy ?? "",
-      reportedAt: x.reportedAt ?? null,
+      reportedAt: x.reportedAt ?? x.createdAt ?? null,
       status: x.status ?? "open",
       actionsTaken: x.actionsTaken ?? "",
+      actionTaken: typeof x.actionTaken === "string" ? x.actionTaken : x.actionsTaken ?? "",
+      incidentType: x.incidentType ?? x.type ?? "",
+      linkedSafeguardingIds: Array.isArray(x.linkedSafeguardingIds) ? x.linkedSafeguardingIds : [],
       linkedEvidence: Array.isArray(x.linkedEvidence) ? x.linkedEvidence : [],
     };
   });
+  mapped.sort((a, b) => incidentTimeMillisFromData(b) - incidentTimeMillisFromData(a));
   mapped.forEach((row) => assertSameOrganisationData(row.organisationId, organisationId));
 
-  // Hospital boundary enforcement for organisation-scoped incident listings.
-  // Incidents themselves are scoped by organisationId only; we filter by the patient's hospitalId.
-  if (ctxHospitalId) {
+  const fh = filterHospitalId ? String(filterHospitalId).trim() : "";
+  const fw = filterWardId ? String(filterWardId).trim() : "";
+  if (fh) mapped = mapped.filter((r) => (r.hospitalId ?? "") === fh);
+  if (fw) mapped = mapped.filter((r) => (r.wardId ?? "") === fw);
+
+  const scopedHospital = normalizeHospitalScopeId(ctxHospitalId);
+  if (scopedHospital && !skipOrgWideHospitalScope) {
     const uniquePatientIds = Array.from(
       new Set(mapped.map((r) => (r.patientId ?? "").toString().trim()).filter(Boolean))
     );
@@ -411,9 +452,120 @@ export async function fetchIncidents(organisationId, filters = {}) {
       })
     );
 
-    return mapped.filter((r) => hospitalByPatientId.get(String(r.patientId ?? "").trim()) === ctxHospitalId);
+    return mapped.filter((r) => hospitalByPatientId.get(String(r.patientId ?? "").trim()) === scopedHospital);
   }
 
   return mapped;
+}
+
+/**
+ * Update an open incident (description, severity, type, actions) before closure.
+ */
+export async function updateIncident(incidentId, updates = {}) {
+  const id = (incidentId ?? "").toString().trim();
+  if (!id) throw new Error("incidentId is required.");
+
+  const ctx = await getUserContext();
+  const orgId = (ctx?.organisationId ?? "").toString().trim();
+  const uid = auth.currentUser?.uid ?? null;
+  if (!orgId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
+  if (!uid) throw new Error("You must be signed in.");
+
+  const ref = doc(db, INCIDENTS_COLLECTION, id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("Incident not found.");
+  const cur = snap.data() ?? {};
+  if ((cur.organisationId ?? "").toString().trim() !== orgId) {
+    throw new Error("Organisation scope mismatch.");
+  }
+  const st = (cur.status ?? "open").toString().trim().toLowerCase();
+  if (st === "closed") throw new Error("Closed incidents cannot be edited.");
+
+  const patch = {};
+  if (typeof updates.description === "string") patch.description = updates.description.trim();
+  if (typeof updates.severity === "string") patch.severity = updates.severity.trim().toLowerCase();
+  if (typeof updates.type === "string") patch.type = updates.type.trim();
+  if (typeof updates.incidentType === "string") patch.incidentType = updates.incidentType.trim();
+  if (typeof updates.actionTaken === "string") patch.actionTaken = updates.actionTaken.trim();
+  if (typeof updates.actionsTaken === "string") patch.actionsTaken = updates.actionsTaken.trim();
+  if (Array.isArray(updates.linkedSafeguardingIds)) {
+    patch.linkedSafeguardingIds = updates.linkedSafeguardingIds.map((x) => String(x).trim()).filter(Boolean);
+  }
+  if (typeof updates.title === "string") patch.title = updates.title.trim();
+
+  patch.updatedAt = serverTimestamp();
+  patch.updatedBy = uid;
+
+  await updateDoc(ref, patch);
+
+  await logAuditEventNonBlocking({
+    action: "INCIDENT_UPDATED",
+    incidentId: id,
+    organisationId: orgId,
+    patientId: cur.patientId ?? null,
+    metadata: { fields: Object.keys(patch) },
+  }).catch(() => {});
+
+  await addDoc(collection(db, "audit_logs"), {
+    action: "UPDATE_INCIDENT",
+    entityType: "incident",
+    entityId: id,
+    organisationId: orgId,
+    performedBy: uid,
+    timestamp: serverTimestamp(),
+    metadata: { keys: Object.keys(patch) },
+  }).catch(() => {});
+
+  return { ok: true };
+}
+
+/**
+ * Close an incident (status: closed).
+ */
+export async function closeIncident(incidentId, { closureNote = "" } = {}) {
+  const id = (incidentId ?? "").toString().trim();
+  if (!id) throw new Error("incidentId is required.");
+
+  const ctx = await getUserContext();
+  const orgId = (ctx?.organisationId ?? "").toString().trim();
+  const uid = auth.currentUser?.uid ?? null;
+  if (!orgId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
+  if (!uid) throw new Error("You must be signed in.");
+
+  const ref = doc(db, INCIDENTS_COLLECTION, id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("Incident not found.");
+  const cur = snap.data() ?? {};
+  if ((cur.organisationId ?? "").toString().trim() !== orgId) {
+    throw new Error("Organisation scope mismatch.");
+  }
+
+  await updateDoc(ref, {
+    status: "closed",
+    closedAt: serverTimestamp(),
+    closedBy: uid,
+    ...(closureNote?.trim() ? { closureNote: closureNote.trim() } : {}),
+    updatedAt: serverTimestamp(),
+    updatedBy: uid,
+  });
+
+  await logAuditEventNonBlocking({
+    action: "INCIDENT_CLOSED",
+    incidentId: id,
+    organisationId: orgId,
+    patientId: cur.patientId ?? null,
+  }).catch(() => {});
+
+  await addDoc(collection(db, "audit_logs"), {
+    action: "CLOSE_INCIDENT",
+    entityType: "incident",
+    entityId: id,
+    organisationId: orgId,
+    performedBy: uid,
+    timestamp: serverTimestamp(),
+    metadata: {},
+  }).catch(() => {});
+
+  return { ok: true };
 }
 

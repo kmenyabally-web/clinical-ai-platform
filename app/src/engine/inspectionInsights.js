@@ -1,3 +1,5 @@
+import { analyzeSafeguardingIntelligence } from "../utils/safeguardingIntelligence";
+
 function toDate(value) {
   if (!value) return null;
   if (typeof value?.toDate === "function") {
@@ -18,6 +20,64 @@ function hasMedicationReviewDate(patient) {
   return meds.some((m) => Boolean(toDate(m?.reviewDate)));
 }
 
+function appendSafeguardingInspectionInsight(insights, behaviours, incidents) {
+  const { safeguardingRisk, recommendedAction } = analyzeSafeguardingIntelligence({
+    behaviours: behaviours ?? [],
+    incidents: incidents ?? [],
+  });
+  if (safeguardingRisk === "LOW") return;
+  insights.push({
+    domain: "SAFE",
+    level: safeguardingRisk === "HIGH" ? "high" : "medium",
+    message: "SAFE domain impacted due to safeguarding signals",
+    action: recommendedAction,
+  });
+}
+
+function appendBehaviourStructuredInsights(insights, behaviours) {
+  if (!Array.isArray(behaviours) || behaviours.length === 0) return;
+
+  const high = behaviours.filter((b) => String(b?.severity ?? "").toLowerCase() === "high");
+  if (high.length >= 2) {
+    insights.push({
+      domain: "SAFE",
+      level: "high",
+      message: `${high.length} high-severity behaviour events on record`,
+      action: "Review care plan, triggers, and multi-disciplinary follow-up",
+    });
+  } else if (high.length === 1) {
+    insights.push({
+      domain: "SAFE",
+      level: "medium",
+      message: "High-severity behaviour event recorded",
+      action: "Review triggers and interventions",
+    });
+  }
+  if (behaviours.some((b) => b?.medicationRefused === true)) {
+    insights.push({
+      domain: "SAFE",
+      level: "medium",
+      message: "Medication refusal recorded in structured behaviour log",
+      action: "Review medicines administration and STOMP governance",
+    });
+  }
+  if (behaviours.some((b) => b?.stompRelated === true)) {
+    insights.push({
+      domain: "EFFECTIVE",
+      level: "medium",
+      message: "STOMP-related behaviour event recorded",
+      action: "Ensure psychotropic review and least-restraint practice is evidenced",
+    });
+  }
+}
+
+/** Insights derived only from structured behaviour logs (for behaviour capture UI). */
+export function getBehaviourLogInsights(behaviours = []) {
+  const insights = [];
+  appendBehaviourStructuredInsights(insights, behaviours);
+  return insights;
+}
+
 export function getInspectionInsights({
   patient,
   notes,
@@ -27,6 +87,8 @@ export function getInspectionInsights({
   tasks = [],
   careType = null,
   mdtReviews,
+  /** Structured behaviour log rows (collection `behaviours`). */
+  behaviours = [],
 }) {
   const insights = [];
   const ct = String(careType ?? "").toUpperCase();
@@ -86,6 +148,9 @@ export function getInspectionInsights({
       action: "Ensure incident logging is active",
     });
   }
+
+  appendBehaviourStructuredInsights(insights, behaviours);
+  appendSafeguardingInspectionInsight(insights, behaviours, incidents);
 
   // EFFECTIVE DOMAIN
   if (!Array.isArray(training) || training.length === 0) {

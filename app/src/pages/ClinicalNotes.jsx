@@ -2,14 +2,28 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../firebase";
 import { useOrganisation } from "../context/OrganisationContext";
 import { useService } from "../context/ServiceContext";
 import { useAuth } from "../context/AuthContext";
-import { listPatients } from "../services/patientService";
+import { getPatientsByOrganisation } from "../services/patientService";
 import { isIndexError, INDEX_ERROR_MESSAGE } from "../lib/firestoreIndexError";
 import { useRole } from "../context/RoleContext";
 import { analyseClinicalNote } from "../services/aiService";
-import { addAddendum, addClinicalNote, fetchAddendumsForNote, fetchClinicalNotesForOrganisation } from "../services/noteService";
+import {
+  addAddendum,
+  addClinicalNote,
+  approveClinicalNote,
+  deleteClinicalNote,
+  fetchAddendumsForNote,
+  fetchClinicalNotesForOrganisation,
+  finalizeClinicalNote,
+  mapFirestoreClinicalNote,
+  NOTES_COLLECTION,
+  softDeleteClinicalNoteAsAuthor,
+  updateDraftClinicalNoteContent,
+} from "../services/noteService";
 import { logAuditEvent } from "../services/auditService";
 import ClinicalNoteForm from "../components/ClinicalNoteForm";
 import { formatUkDateTime } from "../utils/dateFormat";
@@ -19,16 +33,98 @@ import { usePermissions } from "../hooks/usePermissions";
 import { listPolicies } from "../services/policyService";
 import { fetchIncidents } from "../services/incidentService";
 import { getInspectionInsights } from "../engine/inspectionInsights";
+import { canApproveNote } from "../utils/clinicalNoteApproval";
+import { showToast } from "../utils/toast";
 
 function formatDate(value) {
   return formatUkDateTime(value, "—");
+}
+
+/** Defensive dedupe if merge + UI state ever produce the same id twice. */
+function dedupeNotesById(list) {
+  if (!Array.isArray(list)) return [];
+  const m = new Map();
+  for (const n of list) {
+    if (n?.id && !m.has(n.id)) m.set(n.id, n);
+  }
+  return Array.from(m.values());
+}
+
+function noteStatusLabel(status) {
+  const s = (status ?? "draft").toString().trim().toLowerCase();
+  if (s === "approved") return "approved";
+  if (s === "final") return "final";
+  return "draft";
+}
+
+function NoteStatusBadge({ status }) {
+  const label = noteStatusLabel(status);
+  if (label === "approved") {
+    return (
+      <span
+        style={{
+          marginLeft: 8,
+          fontSize: "0.75rem",
+          fontWeight: 800,
+          color: "#166534",
+          backgroundColor: "#dcfce7",
+          border: "1px solid #86efac",
+          padding: "3px 10px",
+          borderRadius: 999,
+        }}
+      >
+        Approved
+      </span>
+    );
+  }
+  if (label === "final") {
+    return (
+      <span
+        style={{
+          marginLeft: 8,
+          fontSize: "0.75rem",
+          fontWeight: 800,
+          color: "#1e40af",
+          backgroundColor: "#dbeafe",
+          border: "1px solid #93c5fd",
+          padding: "3px 10px",
+          borderRadius: 999,
+        }}
+      >
+        Final
+      </span>
+    );
+  }
+  return (
+    <span
+      style={{
+        marginLeft: 8,
+        fontSize: "0.75rem",
+        fontWeight: 800,
+        color: "#475569",
+        backgroundColor: "#f1f5f9",
+        border: "1px solid #cbd5e1",
+        padding: "3px 10px",
+        borderRadius: 999,
+      }}
+    >
+      Draft
+    </span>
+  );
+}
+
+/** Prefer profile MDT when it matches the canonical list; otherwise first standard role. */
+function defaultDisciplineFromProfile(mdt) {
+  const p = (mdt ?? "").toString().trim();
+  if (p && MDT_ROLES.includes(p)) return p;
+  return MDT_ROLES[0] ?? "Nurse";
 }
 
 export default function ClinicalNotes() {
   const { organisationId, organisation, hasFeature, userProfile } = useOrganisation();
   const { currentServiceId, services } = useService();
   const { user } = useAuth();
-  const { role, canViewNotes, canEditNotes, loading: roleLoading } = useRole();
+  const { role, canViewNotes, canEditNotes, canDeleteNotes, loading: roleLoading } = useRole();
   const permissions = usePermissions();
   const isManager = (role ?? "").toString().toLowerCase() === "manager";
 
@@ -48,6 +144,14 @@ export default function ClinicalNotes() {
   const [addendumsByNote, setAddendumsByNote] = useState({});
   const [policyHints, setPolicyHints] = useState([]);
   const [insightIncidents, setInsightIncidents] = useState([]);
+  const [deletingNoteId, setDeletingNoteId] = useState(null);
+  const [approvingNoteId, setApprovingNoteId] = useState(null);
+  const [finalizingNoteId, setFinalizingNoteId] = useState(null);
+  const [noteDeleteError, setNoteDeleteError] = useState(null);
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [editNoteDrafts, setEditNoteDrafts] = useState({});
+  const [savingEditNoteId, setSavingEditNoteId] = useState(null);
+  const [noteEditError, setNoteEditError] = useState(null);
 
   const load = useCallback(() => {
     if (!organisationId) {
@@ -72,7 +176,7 @@ export default function ClinicalNotes() {
       patientId: isManager ? filterPatientId : null,
       limitCount: 300,
     })
-      .then((list) => setNotes(Array.isArray(list) ? list : []))
+      .then((list) => setNotes(dedupeNotesById(Array.isArray(list) ? list : [])))
       .catch((err) => {
         console.error("Firestore query failed:", err);
         setError(isIndexError(err) ? INDEX_ERROR_MESSAGE : (err?.message ?? "Failed to load clinical notes."));
@@ -85,9 +189,10 @@ export default function ClinicalNotes() {
     if (!organisationId) return;
 
     setPatientsLoading(true);
-    listPatients()
+    getPatientsByOrganisation(organisationId)
       .then((list) => {
-        setPatients(Array.isArray(list) ? list : []);
+        const rows = Array.isArray(list) ? list : [];
+        setPatients(rows);
       })
       .catch(() => setPatients([]))
       .finally(() => setPatientsLoading(false));
@@ -108,7 +213,7 @@ export default function ClinicalNotes() {
       setInsightIncidents([]);
       return;
     }
-    fetchIncidents(organisationId, { serviceId: currentServiceId ?? undefined })
+    fetchIncidents(organisationId, {})
       .then((rows) => {
         if (cancelled) return;
         setInsightIncidents(Array.isArray(rows) ? rows : []);
@@ -119,7 +224,7 @@ export default function ClinicalNotes() {
     return () => {
       cancelled = true;
     };
-  }, [organisationId, currentServiceId]);
+  }, [organisationId]);
 
   const noteInsights = getInspectionInsights({
     patient: null,
@@ -138,6 +243,25 @@ export default function ClinicalNotes() {
       : "All services";
 
   const createdBy = user?.email || user?.displayName || "Unknown";
+
+  function noteRecordForApproval(n) {
+    return {
+      role: n.role ?? n.discipline,
+      discipline: n.discipline,
+      status: n.status,
+      createdBy: n.createdBy ?? n.authorId,
+      authorId: n.authorId,
+      isDeleted: n.isDeleted,
+    };
+  }
+
+  /** Draft-only; author must match creator (legacy notes may only have authorId). */
+  function canEditOwnDraftNote(n) {
+    const uid = user?.uid ?? "";
+    if (!uid || n.status !== "draft" || n.isDeleted) return false;
+    const owner = n.createdBy ?? n.authorId;
+    return owner === uid;
+  }
 
   function generatePatientSummary() {
     if (import.meta.env.DEV) {
@@ -229,7 +353,9 @@ export default function ClinicalNotes() {
               style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1" }}
             >
               {patientsLoading && <option value="">{`Loading patients…`}</option>}
-              {!patientsLoading && patients.length === 0 && <option value="">No patients available</option>}
+              {!patientsLoading && patients.length === 0 && (
+                <option value="">No patients in this organisation</option>
+              )}
               {patients.map((p) => (
                 <option key={p.id} value={p.id}>
                   {(p.name ?? `${p.firstName ?? ""} ${p.lastName ?? ""}`)?.trim() || p.id} ({p.id})
@@ -243,6 +369,14 @@ export default function ClinicalNotes() {
       {error && (
         <div role="alert" style={{ marginBottom: "1rem", padding: "1rem", background: "#fef2f2", borderRadius: 8, color: "#b91c1c" }}>
           {error}
+        </div>
+      )}
+      {noteDeleteError && (
+        <div role="alert" style={{ marginBottom: "1rem", padding: "1rem", background: "#fef2f2", borderRadius: 8, color: "#b91c1c" }}>
+          {noteDeleteError}{" "}
+          <button type="button" onClick={() => setNoteDeleteError(null)} style={{ textDecoration: "underline", background: "none", border: "none", cursor: "pointer", color: "inherit" }}>
+            Dismiss
+          </button>
         </div>
       )}
 
@@ -311,7 +445,23 @@ export default function ClinicalNotes() {
                 <span style={{ marginLeft: 8, color: "#64748b", fontSize: "0.875rem" }}>
                   {formatDate(n.createdAt)} · by {n.authorEmail || "—"}
                 </span>
+                <NoteStatusBadge status={n.status} />
               </div>
+              {(noteStatusLabel(n.status) === "final" || noteStatusLabel(n.status) === "approved") && (
+                <p style={{ margin: "6px 0 0 0", fontSize: "0.8125rem", color: "#92400e", fontWeight: 600 }}>
+                  This record cannot be edited. Add addendum instead.
+                </p>
+              )}
+              {n.status === "approved" && (n.approvedByRole || n.approvedAt) ? (
+                <p style={{ margin: "6px 0 0 0", fontSize: "0.8125rem", color: "#166534" }}>
+                  Approved by {n.approvedByRole || "—"} at {formatDate(n.approvedAt)}
+                </p>
+              ) : null}
+              {n.updatedAt && (n.updatedByEmail || n.updatedBy) ? (
+                <p style={{ margin: "6px 0 0 0", fontSize: "0.8125rem", color: "#475569" }}>
+                  Last updated by {n.updatedByEmail || n.updatedBy || "—"} at {formatDate(n.updatedAt)}
+                </p>
+              ) : null}
               {n.structured?.summary || n.structured?.risk || n.mood ? (
                 <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
                   {n.mood ? (
@@ -365,90 +515,391 @@ export default function ClinicalNotes() {
                   {n.structured.summary}
                 </p>
               )}
-              {n.content && (
+              {editingNoteId === n.id ? (
+                <div style={{ marginTop: 8 }}>
+                  <textarea
+                    rows={6}
+                    value={editNoteDrafts[n.id] ?? ""}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setEditNoteDrafts((prev) => ({ ...prev, [n.id]: value }));
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #94a3b8",
+                      boxSizing: "border-box",
+                      fontSize: "0.9rem",
+                      color: "#334155",
+                      fontFamily: "inherit",
+                    }}
+                  />
+                  <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <button
+                      type="button"
+                      disabled={savingEditNoteId === n.id}
+                      onClick={async () => {
+                        const text = (editNoteDrafts[n.id] ?? "").trim();
+                        if (!text) return;
+                        setNoteEditError(null);
+                        setSavingEditNoteId(n.id);
+                        try {
+                          await updateDraftClinicalNoteContent(n.id, text);
+                          const email = user?.email ?? user?.displayName ?? "";
+                          setNotes((prev) =>
+                            prev.map((x) =>
+                              x.id === n.id
+                                ? {
+                                    ...x,
+                                    content: text,
+                                    updatedAt: new Date(),
+                                    updatedBy: user?.uid,
+                                    updatedByEmail: email || x.updatedByEmail,
+                                  }
+                                : x
+                            )
+                          );
+                          setEditingNoteId(null);
+                          setEditNoteDrafts((prev) => {
+                            const next = { ...prev };
+                            delete next[n.id];
+                            return next;
+                          });
+                        } catch (e) {
+                          const msg = e?.message ?? "Could not save note.";
+                          setNoteEditError(msg);
+                          showToast(msg);
+                          console.error(e);
+                        } finally {
+                          setSavingEditNoteId(null);
+                        }
+                      }}
+                      style={{
+                        padding: "6px 14px",
+                        borderRadius: 8,
+                        border: "1px solid #2563eb",
+                        background: "#2563eb",
+                        color: "#fff",
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: savingEditNoteId === n.id ? "wait" : "pointer",
+                      }}
+                    >
+                      {savingEditNoteId === n.id ? "Saving…" : "Save changes"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={savingEditNoteId === n.id}
+                      onClick={() => {
+                        setEditingNoteId(null);
+                        setEditNoteDrafts((prev) => {
+                          const next = { ...prev };
+                          delete next[n.id];
+                          return next;
+                        });
+                        setNoteEditError(null);
+                      }}
+                      style={{
+                        padding: "6px 14px",
+                        borderRadius: 8,
+                        border: "1px solid #cbd5e1",
+                        background: "#fff",
+                        color: "#334155",
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : n.content ? (
                 <p style={{ margin: "8px 0 0 0", color: "#334155", fontSize: "0.9rem", whiteSpace: "pre-wrap" }}>
                   {n.content}
                 </p>
-              )}
+              ) : null}
+              {noteEditError && editingNoteId === n.id ? (
+                <p style={{ margin: "6px 0 0 0", fontSize: 12, fontWeight: 700, color: "#991b1b" }}>{noteEditError}</p>
+              ) : null}
               <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!addendumsByNote[n.id]) {
-                      try {
-                        const rows = await fetchAddendumsForNote(n.id);
-                        setAddendumsByNote((prev) => ({ ...prev, [n.id]: rows }));
-                      } catch {
-                        setAddendumsByNote((prev) => ({ ...prev, [n.id]: [] }));
-                      }
-                    }
-                  }}
-                  style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #cbd5e1", background: "#fff", color: "#334155", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
-                >
-                  Show addendums
-                </button>
-              </div>
-              <div style={{ marginTop: 8 }}>
-                <textarea
-                  rows={2}
-                  value={addendumDrafts[n.id] ?? ""}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setAddendumDrafts((prev) => ({ ...prev, [n.id]: value }));
-                  }}
-                  placeholder="Add addendum (record remains immutable)"
-                  style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1", boxSizing: "border-box" }}
-                />
-                <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                {canEditNotes() && permissions?.canWriteNotes && canEditOwnDraftNote(n) && editingNoteId !== n.id ? (
                   <button
                     type="button"
-                    disabled={Boolean(addendumSaving[n.id])}
+                    onClick={() => {
+                      setNoteEditError(null);
+                      if (noteStatusLabel(n.status) !== "draft") {
+                        // eslint-disable-next-line no-alert
+                        globalThis.alert("This record cannot be edited. Add addendum instead.");
+                        return;
+                      }
+                      setEditingNoteId(n.id);
+                      setEditNoteDrafts((prev) => ({ ...prev, [n.id]: n.content ?? "" }));
+                    }}
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: 8,
+                      border: "1px solid #cbd5e1",
+                      background: "#f8fafc",
+                      color: "#0f172a",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Edit
+                  </button>
+                ) : null}
+                {canEditNotes() && permissions?.canWriteNotes && canEditOwnDraftNote(n) && editingNoteId !== n.id ? (
+                  <button
+                    type="button"
+                    disabled={finalizingNoteId === n.id}
                     onClick={async () => {
-                      const text = (addendumDrafts[n.id] ?? "").trim();
-                      if (!text) return;
-                      setAddendumSaving((prev) => ({ ...prev, [n.id]: true }));
-                      setAddendumError((prev) => ({ ...prev, [n.id]: "" }));
+                      setNoteDeleteError(null);
+                      setFinalizingNoteId(n.id);
                       try {
-                        const created = await addAddendum(n.id, text);
-                        setAddendumDrafts((prev) => ({ ...prev, [n.id]: "" }));
-                        setAddendumsByNote((prev) => ({
-                          ...prev,
-                          [n.id]: [
-                            ...(prev[n.id] ?? []),
-                            {
-                              id: created.id,
-                              text,
-                              authorEmail: createdBy,
-                              createdAt: new Date(),
-                            },
-                          ],
-                        }));
+                        await finalizeClinicalNote(n.id);
+                        setNotes((prev) =>
+                          prev.map((x) => (x.id === n.id ? { ...x, status: "final" } : x))
+                        );
+                        setEditingNoteId((prev) => (prev === n.id ? null : prev));
+                        setEditNoteDrafts((prev) => {
+                          if (!(n.id in prev)) return prev;
+                          const next = { ...prev };
+                          delete next[n.id];
+                          return next;
+                        });
+                        showToast("Note finalised", "success");
                       } catch (e) {
-                        setAddendumError((prev) => ({ ...prev, [n.id]: e?.message ?? "Failed to add addendum." }));
+                        const msg = e?.message ?? "Could not finalise note.";
+                        setNoteDeleteError(msg);
+                        showToast(msg);
+                        console.error(e);
                       } finally {
-                        setAddendumSaving((prev) => ({ ...prev, [n.id]: false }));
+                        setFinalizingNoteId(null);
                       }
                     }}
-                    style={{ padding: "6px 10px", borderRadius: 8, border: "none", background: "#2563eb", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: 8,
+                      border: "1px solid #93c5fd",
+                      background: "#eff6ff",
+                      color: "#1e40af",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: finalizingNoteId === n.id ? "wait" : "pointer",
+                    }}
                   >
-                    {addendumSaving[n.id] ? "Saving…" : "Add addendum"}
+                    {finalizingNoteId === n.id ? "Finalising…" : "Finalise"}
                   </button>
-                  {addendumError[n.id] ? (
-                    <span style={{ color: "#991b1b", fontSize: 12, fontWeight: 700 }}>{addendumError[n.id]}</span>
-                  ) : null}
-                </div>
+                ) : null}
+                {noteStatusLabel(n.status) === "final" || noteStatusLabel(n.status) === "approved" ? (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!addendumsByNote[n.id]) {
+                        try {
+                          const rows = await fetchAddendumsForNote(n.id);
+                          setAddendumsByNote((prev) => ({ ...prev, [n.id]: rows }));
+                        } catch (err) {
+                          console.error(err);
+                          showToast("Something went wrong");
+                          setAddendumsByNote((prev) => ({ ...prev, [n.id]: [] }));
+                        }
+                      }
+                    }}
+                    style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #cbd5e1", background: "#fff", color: "#334155", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+                  >
+                    Show addendums
+                  </button>
+                ) : null}
+                {canApproveNote(userProfile?.mdtRole, noteRecordForApproval(n), user?.uid, role) &&
+                noteStatusLabel(n.status) === "final" ? (
+                  <button
+                    type="button"
+                    disabled={approvingNoteId === n.id}
+                    onClick={async () => {
+                      setNoteDeleteError(null);
+                      setApprovingNoteId(n.id);
+                      try {
+                        await approveClinicalNote(n.id);
+                        const mdt = (userProfile?.mdtRole ?? "").toString().trim();
+                        const sys = (role ?? "").toString().trim();
+                        const label =
+                          mdt ||
+                          (["admin", "manager", "super_admin", "global_admin", "group_admin"].includes(
+                            sys.toLowerCase()
+                          )
+                            ? sys
+                            : "");
+                        setNotes((prev) =>
+                          prev.map((x) =>
+                            x.id === n.id
+                              ? {
+                                  ...x,
+                                  status: "approved",
+                                  approvedBy: user?.uid,
+                                  approvedByRole: label || x.approvedByRole,
+                                  approvedAt: new Date(),
+                                }
+                              : x
+                          )
+                        );
+                        setEditingNoteId((prev) => (prev === n.id ? null : prev));
+                        setEditNoteDrafts((prev) => {
+                          if (!(n.id in prev)) return prev;
+                          const next = { ...prev };
+                          delete next[n.id];
+                          return next;
+                        });
+                      } catch (e) {
+                        const msg = e?.message ?? "Could not approve note.";
+                        setNoteDeleteError(msg);
+                        showToast(msg);
+                        console.error(e);
+                      } finally {
+                        setApprovingNoteId(null);
+                      }
+                    }}
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: 8,
+                      border: "1px solid #86efac",
+                      background: "#ecfdf5",
+                      color: "#166534",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: approvingNoteId === n.id ? "wait" : "pointer",
+                    }}
+                  >
+                    {approvingNoteId === n.id ? "Approving…" : "Approve note"}
+                  </button>
+                ) : null}
+                {(canDeleteNotes() && noteStatusLabel(n.status) !== "approved") ||
+                (canEditOwnDraftNote(n) && !canDeleteNotes()) ? (
+                  <button
+                    type="button"
+                    disabled={deletingNoteId === n.id}
+                    onClick={async () => {
+                      const msg =
+                        canDeleteNotes() && noteStatusLabel(n.status) !== "approved"
+                          ? "Soft-delete this clinical note? It will be hidden but retained for audit."
+                          : "Delete your draft note? It will be hidden but retained for audit.";
+                      // eslint-disable-next-line no-alert
+                      if (!globalThis.confirm(msg)) return;
+                      setNoteDeleteError(null);
+                      setDeletingNoteId(n.id);
+                      try {
+                        if (canDeleteNotes() && noteStatusLabel(n.status) !== "approved") {
+                          await deleteClinicalNote(n.id);
+                        } else {
+                          await softDeleteClinicalNoteAsAuthor(n.id);
+                        }
+                        setNotes((prev) => prev.filter((x) => x.id !== n.id));
+                        setAddendumsByNote((prev) => {
+                          const next = { ...prev };
+                          delete next[n.id];
+                          return next;
+                        });
+                        setAddendumDrafts((prev) => {
+                          const next = { ...prev };
+                          delete next[n.id];
+                          return next;
+                        });
+                        showToast("Note removed", "success");
+                      } catch (e) {
+                        const err = e?.message ?? "Could not delete note.";
+                        setNoteDeleteError(err);
+                        showToast(err);
+                        console.error(e);
+                      } finally {
+                        setDeletingNoteId(null);
+                      }
+                    }}
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: 8,
+                      border: "1px solid #fecaca",
+                      background: "#fff1f2",
+                      color: "#991b1b",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: deletingNoteId === n.id ? "wait" : "pointer",
+                    }}
+                  >
+                    {deletingNoteId === n.id ? "Deleting…" : "Delete note"}
+                  </button>
+                ) : null}
               </div>
-              {(addendumsByNote[n.id] ?? []).length > 0 ? (
-                <div style={{ marginTop: 8, padding: "8px 10px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8 }}>
-                  {(addendumsByNote[n.id] ?? []).map((a) => (
-                    <div key={a.id} style={{ marginBottom: 6 }}>
-                      <div style={{ fontSize: 12, color: "#64748b" }}>
-                        {formatDate(a.createdAt)} · {a.authorEmail || "—"}
-                      </div>
-                      <div style={{ fontSize: 13, color: "#334155", whiteSpace: "pre-wrap" }}>{a.text}</div>
+              {n.status === "approved" ? (
+                <>
+                  <div style={{ marginTop: 8 }}>
+                    <textarea
+                      rows={2}
+                      value={addendumDrafts[n.id] ?? ""}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setAddendumDrafts((prev) => ({ ...prev, [n.id]: value }));
+                      }}
+                      placeholder="Add addendum (main note is locked)"
+                      style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1", boxSizing: "border-box" }}
+                    />
+                    <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        disabled={Boolean(addendumSaving[n.id])}
+                        onClick={async () => {
+                          const text = (addendumDrafts[n.id] ?? "").trim();
+                          if (!text) return;
+                          setAddendumSaving((prev) => ({ ...prev, [n.id]: true }));
+                          setAddendumError((prev) => ({ ...prev, [n.id]: "" }));
+                          try {
+                            const created = await addAddendum(n.id, text);
+                            setAddendumDrafts((prev) => ({ ...prev, [n.id]: "" }));
+                            setAddendumsByNote((prev) => ({
+                              ...prev,
+                              [n.id]: [
+                                ...(prev[n.id] ?? []),
+                                {
+                                  id: created.id,
+                                  text,
+                                  authorEmail: createdBy,
+                                  createdAt: new Date(),
+                                },
+                              ],
+                            }));
+                          } catch (e) {
+                            const em = e?.message ?? "Failed to add addendum.";
+                            setAddendumError((prev) => ({ ...prev, [n.id]: em }));
+                            showToast(em);
+                            console.error(e);
+                          } finally {
+                            setAddendumSaving((prev) => ({ ...prev, [n.id]: false }));
+                          }
+                        }}
+                        style={{ padding: "6px 10px", borderRadius: 8, border: "none", background: "#2563eb", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+                      >
+                        {addendumSaving[n.id] ? "Saving…" : "Add addendum"}
+                      </button>
+                      {addendumError[n.id] ? (
+                        <span style={{ color: "#991b1b", fontSize: 12, fontWeight: 700 }}>{addendumError[n.id]}</span>
+                      ) : null}
                     </div>
-                  ))}
-                </div>
+                  </div>
+                  {(addendumsByNote[n.id] ?? []).length > 0 ? (
+                    <div style={{ marginTop: 8, padding: "8px 10px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8 }}>
+                      {(addendumsByNote[n.id] ?? []).map((a) => (
+                        <div key={a.id} style={{ marginBottom: 6 }}>
+                          <div style={{ fontSize: 12, color: "#64748b" }}>
+                            {formatDate(a.createdAt)} · {a.authorEmail || "—"}
+                          </div>
+                          <div style={{ fontSize: 13, color: "#334155", whiteSpace: "pre-wrap" }}>{a.text}</div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </>
               ) : null}
               {n.structured?.riskIndicators?.length > 0 && (
                 <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -485,9 +936,17 @@ export default function ClinicalNotes() {
           currentServiceId={currentServiceId}
           createdBy={createdBy}
           onClose={() => { setShowCreateModal(false); setCreateError(null); }}
-          onSubmit={async ({ patientId, content, mood, discipline }) => {
+          onSubmit={async ({ patientId, content, mood, discipline, riskLevel }) => {
             if (!canEditNotes() || !permissions?.canWriteNotes) {
               setCreateError("Access restricted");
+              return;
+            }
+            // eslint-disable-next-line no-console
+            console.log("ORG ID:", organisationId);
+            if (!organisationId || !String(organisationId).trim()) {
+              // eslint-disable-next-line no-alert
+              alert("Cannot save: organisation is not loaded. Refresh the page or check your account.");
+              setCreateError("Organisation not loaded.");
               return;
             }
             const resolvedDiscipline = (discipline ?? "").toString().trim();
@@ -519,7 +978,15 @@ export default function ClinicalNotes() {
             }
 
             try {
-              const structured = aiResult?.structuredData
+              // eslint-disable-next-line no-console
+              console.log("Saving note:", {
+                content: String(content ?? "").slice(0, 120),
+                patientId,
+                organisationId,
+                createdBy: user?.uid ?? null,
+              });
+
+              let structured = aiResult?.structuredData
                 ? {
                     behaviour: aiResult.structuredData.behaviour,
                     mood: aiResult.structuredData.mood,
@@ -534,7 +1001,13 @@ export default function ClinicalNotes() {
                   }
                 : undefined;
 
-              await addClinicalNote(patientId, {
+              const rl = (riskLevel ?? "auto").toString().trim().toLowerCase();
+              if (rl === "low" || rl === "medium" || rl === "high") {
+                structured = { ...(structured ?? {}), risk: rl };
+              }
+
+              const { id: newNoteId } = await addClinicalNote(patientId, {
+                organisationId,
                 category: "Routine",
                 content,
                 mood: mood ?? aiResult?.structuredData?.mood ?? null,
@@ -549,6 +1022,16 @@ export default function ClinicalNotes() {
                 reports: aiResult?.reports ?? null,
                 careFolder: aiResult?.careFolder ?? null,
               });
+
+              try {
+                const snap = await getDoc(doc(db, NOTES_COLLECTION, newNoteId));
+                if (snap.exists()) {
+                  const newRow = mapFirestoreClinicalNote(snap.id, snap.data());
+                  setNotes((prev) => [newRow, ...prev.filter((n) => n.id !== newRow.id)]);
+                }
+              } catch (refetchErr) {
+                console.warn("Could not refetch new note for UI:", refetchErr);
+              }
               const text = String(content ?? "").toLowerCase();
               const relevantTypes = new Set();
               if (text.includes("medication")) relevantTypes.add("MEDICATION");
@@ -571,7 +1054,9 @@ export default function ClinicalNotes() {
               setShowCreateModal(false);
               await load();
             } catch (err) {
-              console.error("Clinical note pipeline failed:", err);
+              console.error("SAVE ERROR:", err);
+              // eslint-disable-next-line no-alert
+              alert(`Failed to save note: ${err?.message ?? "Unknown error"}`);
               setCreateError(isIndexError(err) ? INDEX_ERROR_MESSAGE : (err?.message ?? "Failed to create clinical note."));
             } finally {
               setCreating(false);
@@ -601,12 +1086,12 @@ function CreateClinicalNoteModal({
   error,
 }) {
   const [patientId, setPatientId] = useState(filterPatientId || "");
-  const [discipline, setDiscipline] = useState("");
+  const [discipline, setDiscipline] = useState(() => defaultDisciplineFromProfile(defaultMdtFromProfile));
+  const [riskLevel, setRiskLevel] = useState("auto");
   const [roleError, setRoleError] = useState(null);
 
   useEffect(() => {
-    const p = (defaultMdtFromProfile ?? "").trim();
-    setDiscipline(p || "Clinical");
+    setDiscipline(defaultDisciplineFromProfile(defaultMdtFromProfile));
   }, [defaultMdtFromProfile]);
 
   useEffect(() => {
@@ -678,36 +1163,58 @@ function CreateClinicalNoteModal({
               </option>
             ))}
           </select>
-          {isManager && (
+          {!patientsLoading && patients.length === 0 ? (
+            <p style={{ margin: "0.5rem 0 0 0", color: "#64748b", fontSize: "0.85rem" }}>
+              No patients in this organisation
+            </p>
+          ) : null}
+          {isManager && patients.length > 0 ? (
             <p style={{ margin: "0.5rem 0 0 0", color: "#64748b", fontSize: "0.8rem" }}>
               Manager view is restricted to a single patient.
             </p>
-          )}
+          ) : null}
         </div>
 
         <div style={{ marginBottom: "1rem" }}>
           <label style={{ display: "block", fontSize: "0.85rem", marginBottom: 4, fontWeight: 700 }}>
-            Discipline *
+            Discipline (MDT role) *
           </label>
-          <input
-            type="text"
+          <select
             value={discipline}
             onChange={(e) => {
               setDiscipline(e.target.value);
               setRoleError(null);
             }}
-            list="clinical-discipline-options"
-            placeholder="e.g. Nurse"
             required
-            style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1", boxSizing: "border-box" }}
-          />
-          <datalist id="clinical-discipline-options">
+            style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1", boxSizing: "border-box", fontSize: 14 }}
+          >
             {MDT_ROLES.map((role) => (
-              <option key={role} value={role} />
+              <option key={role} value={role}>
+                {role}
+              </option>
             ))}
-          </datalist>
+          </select>
           <p style={{ margin: "0.45rem 0 0 0", color: "#64748b", fontSize: "0.8rem" }}>
-            Tip: Press Ctrl + Enter to submit quickly.
+            Defaults from your profile when it matches a standard role. Tip: Ctrl + Enter to submit the note.
+          </p>
+        </div>
+
+        <div style={{ marginBottom: "1rem" }}>
+          <label style={{ display: "block", fontSize: "0.85rem", marginBottom: 4, fontWeight: 700 }}>
+            Risk level
+          </label>
+          <select
+            value={riskLevel}
+            onChange={(e) => setRiskLevel(e.target.value)}
+            style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1", boxSizing: "border-box", fontSize: 14 }}
+          >
+            <option value="auto">Auto (use AI when enabled, otherwise unset)</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+          <p style={{ margin: "0.45rem 0 0 0", color: "#64748b", fontSize: "0.8rem" }}>
+            Choose Low / Medium / High to set explicitly; Auto keeps AI-derived risk when available.
           </p>
         </div>
 
@@ -716,7 +1223,7 @@ function CreateClinicalNoteModal({
           onSubmit={({ content, mood }) => {
             if (!patientId?.trim()) return;
             if (!discipline.trim()) {
-              setRoleError("Please enter a discipline");
+              setRoleError("Please select a discipline");
               return;
             }
             setRoleError(null);
@@ -726,6 +1233,7 @@ function CreateClinicalNoteModal({
               content,
               mood: mood ?? null,
               discipline: discipline.trim(),
+              riskLevel,
               currentServiceId,
               createdBy,
             });

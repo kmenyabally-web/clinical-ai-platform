@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { listPatients } from "../services/patientService";
 import { fetchClinicalNotesForPatient } from "../services/noteService";
 import { generateClinicalReportSection } from "../services/aiService";
 import { useOrganisation } from "../context/OrganisationContext";
 import ActionBar from "../components/ActionBar";
 import { generateMDTReview } from "../services/mdtService";
 import { generateManagementReport } from "../services/managementService";
+import { usePatients } from "../hooks/usePatients";
 
 function toIsoMillis(value) {
   if (!value) return "";
@@ -27,9 +27,7 @@ export default function ClinicalAiReports() {
   const { organisationId, hasFeature } = useOrganisation();
   const immutableClinicalRecords = true;
 
-  const [patients, setPatients] = useState([]);
-  const [patientsLoading, setPatientsLoading] = useState(true);
-  const [patientsError, setPatientsError] = useState(null);
+  const { data: patients = [], loading: patientsLoading, error: patientsError } = usePatients();
 
   const [selectedPatientId, setSelectedPatientId] = useState("");
   const [notes, setNotes] = useState([]);
@@ -41,30 +39,6 @@ export default function ClinicalAiReports() {
   const [reportError, setReportError] = useState(null);
   const [lastGenerated, setLastGenerated] = useState(null);
   const [report, setReport] = useState(null);
-
-  useEffect(() => {
-    let mounted = true;
-    async function loadPatients() {
-      setPatientsLoading(true);
-      setPatientsError(null);
-      try {
-        const list = await listPatients();
-        if (!mounted) return;
-        setPatients(Array.isArray(list) ? list : []);
-      } catch (e) {
-        if (!mounted) return;
-        setPatientsError(e?.message ?? "Failed to load patients.");
-        setPatients([]);
-      } finally {
-        if (!mounted) return;
-        setPatientsLoading(false);
-      }
-    }
-    loadPatients();
-    return () => {
-      mounted = false;
-    };
-  }, []);
 
   const patientOptions = useMemo(
     () =>
@@ -265,7 +239,7 @@ export default function ClinicalAiReports() {
 
       {!organisationId ? (
         <div style={{ background: "#fef2f2", border: "1px solid #fecaca", padding: 12, borderRadius: 10, color: "#991b1b", marginTop: 14 }}>
-          Organisation context missing. Navigation is allowed but report generation may fail.
+          Loading organisation...
         </div>
       ) : null}
 
@@ -285,7 +259,7 @@ export default function ClinicalAiReports() {
                 </option>
               ))
             ) : (
-              <option value="">No patients</option>
+              <option value="">No patients found for this organisation</option>
             )}
           </select>
         </label>
@@ -331,6 +305,11 @@ export default function ClinicalAiReports() {
       {patientsError ? (
         <div style={{ background: "#fef2f2", border: "1px solid #fecaca", padding: 12, borderRadius: 10, color: "#991b1b", marginTop: 14 }}>
           {patientsError}
+        </div>
+      ) : null}
+      {!patientsLoading && patientOptions.length === 0 ? (
+        <div style={{ color: "#64748b", marginTop: 14, fontSize: "0.95rem" }}>
+          No patients found for this organisation
         </div>
       ) : null}
 

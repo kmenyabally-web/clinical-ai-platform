@@ -6,6 +6,7 @@ import {
   mapSystemRoleToEnterpriseCode,
   canViewClinicalNotesAccess,
   canEditClinicalNotesAccess,
+  canDeleteClinicalNotesAccess,
   canViewReportsFromSystemRole,
   isInspectorSystemRole,
 } from "../utils/rbac";
@@ -97,6 +98,7 @@ export function RoleProvider({ children }) {
         (Array.isArray(allowedRoles) && role != null && allowedRoles.includes(role)),
       canViewNotes: () => canViewClinicalNotesAccess(role, mdtRole),
       canEditNotes: () => canEditClinicalNotesAccess(role, mdtRole),
+      canDeleteNotes: () => canDeleteClinicalNotesAccess(role),
       canViewReports: () => canViewReportsFromSystemRole(role),
       isInspectorRole: () => isInspectorSystemRole(role),
     }),

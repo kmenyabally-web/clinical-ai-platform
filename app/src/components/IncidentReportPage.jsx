@@ -4,8 +4,10 @@ import React, { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import IncidentForm from "./IncidentForm";
 import { createIncidentReport } from "../services/incidentService";
+import { useOrganisation } from "../context/OrganisationContext";
 
 export default function IncidentReportPage() {
+  const { organisationId } = useOrganisation();
   const { id } = useParams();
   const navigate = useNavigate();
   const [submitting, setSubmitting] = useState(false);
@@ -57,7 +59,7 @@ export default function IncidentReportPage() {
       ) : null}
 
       <div style={styles.card}>
-        <IncidentForm onSubmit={handleSubmit} loading={submitting} initialPatientId={id} />
+        <IncidentForm onSubmit={handleSubmit} loading={submitting} initialPatientId={id} organisationId={organisationId} />
       </div>
     </div>
   );

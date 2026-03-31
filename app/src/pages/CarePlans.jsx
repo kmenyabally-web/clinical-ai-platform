@@ -7,7 +7,6 @@ import {
   listAiCarePlanDraftsForPatient,
   saveAiCarePlanDraft,
 } from "../services/carePlanManagementService";
-import { listPatients } from "../services/patientService";
 import { generateCarePlanDraft, getCompetencyGapWarning } from "../services/aiService";
 import { getUserContext } from "../services/authService";
 import { listStaffTraining, countValidStaffByTraining } from "../services/staffTrainingService";
@@ -16,6 +15,7 @@ import { useOrganisation } from "../context/OrganisationContext";
 import { CarePlanFullViewModal } from "../components/CarePlanFullViewModal";
 import { db } from "../firebase";
 import { formatUkDateTime } from "../utils/dateFormat";
+import { usePatients } from "../hooks/usePatients";
 
 const clinicalMapping = {
   mobility: "Manual Handling",
@@ -84,9 +84,7 @@ export default function CarePlans() {
   const { organisationId: organisationContextId } = useOrganisation();
   const [activeOrganisationId, setActiveOrganisationId] = useState("");
 
-  const [patients, setPatients] = useState([]);
-  const [patientsLoading, setPatientsLoading] = useState(false);
-  const [patientsError, setPatientsError] = useState(null);
+  const { data: patients = [], loading: patientsLoading, error: patientsError } = usePatients();
 
   const [selectedPatientId, setSelectedPatientId] = useState("");
   const [keyObservationsRisks, setKeyObservationsRisks] = useState("");
@@ -137,29 +135,6 @@ export default function CarePlans() {
       setRecentLoading(false);
     }
   }, [selectedPatientId]);
-
-  useEffect(() => {
-    let mounted = true;
-    async function loadPatients() {
-      setPatientsLoading(true);
-      setPatientsError(null);
-      try {
-        const list = await listPatients();
-        if (!mounted) return;
-        setPatients(Array.isArray(list) ? list : []);
-      } catch (err) {
-        if (!mounted) return;
-        setPatientsError(err?.message ?? "Failed to load patients.");
-        setPatients([]);
-      } finally {
-        if (mounted) setPatientsLoading(false);
-      }
-    }
-    loadPatients();
-    return () => {
-      mounted = false;
-    };
-  }, []);
 
   const refreshTrainingRows = useCallback(async () => {
     setTrainingLoading(true);
@@ -386,6 +361,11 @@ export default function CarePlans() {
           {patientsError}
         </div>
       )}
+      {!patientsLoading && patients.length === 0 ? (
+        <div style={{ marginBottom: 12, color: "#64748b", fontSize: "0.95rem" }}>
+          No patients found for this organisation
+        </div>
+      ) : null}
 
       <section
         style={{
@@ -407,14 +387,18 @@ export default function CarePlans() {
               disabled={patientsLoading || patients.length === 0}
               style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #cbd5e1" }}
             >
-              {patients.map((p) => {
-                const fullName = `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim();
-                return (
-                  <option key={p.id} value={p.id}>
-                    {fullName || p.id} ({p.id})
-                  </option>
-                );
-              })}
+              {patients.length === 0 ? (
+                <option value="">No patients found for this organisation</option>
+              ) : (
+                patients.map((p) => {
+                  const fullName = `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim();
+                  return (
+                    <option key={p.id} value={p.id}>
+                      {fullName || p.id} ({p.id})
+                    </option>
+                  );
+                })
+              )}
             </select>
           </div>
 

@@ -3,17 +3,23 @@ import { Navigate } from "react-router-dom";
 import { useOrganisation } from "../../context/OrganisationContext";
 import { useRole } from "../../context/RoleContext";
 import { listOrganisationsForManagement } from "../../services/organisation";
-import { SYSTEM_ROLES, MDT_ROLES, listUsersInOrganisation, updateUserAssignment } from "../../services/userManagementService";
+import {
+  SYSTEM_ROLES,
+  MDT_ROLES,
+  listUsersInOrganisation,
+  softDeleteUserDirectoryEntry,
+  updateUserAssignment,
+} from "../../services/userManagementService";
 import { listHospitals, listWards } from "../../services/structureService";
 import { managementStyles as s } from "./managementStyles";
-import { MANAGEMENT_ALLOWED_ROLES } from "../../config/routes";
+import { isOrganisationAdminRole } from "../../utils/organisationAdmin";
 import ActionBar from "../../components/ActionBar";
 import AddUserModal from "../../components/AddUserModal";
 
 export default function Users() {
   const { organisationId, isPlatformAdmin } = useOrganisation();
-  const { isAllowed } = useRole();
-  const canManageUsers = isAllowed(MANAGEMENT_ALLOWED_ROLES);
+  const { role } = useRole();
+  const canManageUsers = isOrganisationAdminRole(role) || Boolean(isPlatformAdmin);
 
   const [orgs, setOrgs] = useState<Array<{ id: string; name: string }>>([]);
   const [orgFilter, setOrgFilter] = useState("");
@@ -34,6 +40,7 @@ export default function Users() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [showAddUser, setShowAddUser] = useState(false);
 
@@ -113,6 +120,20 @@ export default function Users() {
       setError(e instanceof Error ? e.message : "Update failed.");
     } finally {
       setSavingId(null);
+    }
+  }
+
+  async function deleteUser(userId: string) {
+    if (!globalThis.confirm("Are you sure you want to delete this item?")) return;
+    setDeletingId(userId);
+    setError(null);
+    try {
+      await softDeleteUserDirectoryEntry(userId);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Delete failed.");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -206,7 +227,7 @@ export default function Users() {
                 <th style={s.th}>MDT role</th>
                 <th style={s.th}>Hospital</th>
                 <th style={s.th}>Ward</th>
-                <th style={s.th} />
+                <th style={s.th}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -244,7 +265,9 @@ function UserRow({
   hospitals,
   wardMap,
   saving,
+  deleting,
   onSave,
+  onDelete,
 }: {
   u: {
     id: string;
@@ -258,7 +281,9 @@ function UserRow({
   hospitals: Array<{ id: string; name: string }>;
   wardMap: Record<string, Array<{ id: string; name: string }>>;
   saving: boolean;
+  deleting: boolean;
   onSave: (userId: string, role: string, mdtRole: string, hospitalId: string, wardId: string) => void;
+  onDelete: (userId: string) => void;
 }) {
   const [r, setR] = useState(u.role ?? "");
   const [m, setM] = useState(u.mdtRole ?? MDT_ROLES[0] ?? "");
@@ -332,25 +357,44 @@ function UserRow({
         </select>
       </td>
       <td style={s.td}>
-        <button
-          type="button"
-          disabled={saving}
-          onClick={() => {
-            if (!r?.trim() || !m?.trim()) return;
-            onSave(u.id, r, m, hospitalId, wardId);
-          }}
-          style={{
-            padding: "6px 12px",
-            background: "#0f172a",
-            color: "#fff",
-            border: "none",
-            borderRadius: 6,
-            fontSize: 12,
-            fontWeight: 700,
-          }}
-        >
-          {saving ? "…" : "Save"}
-        </button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+          <button
+            type="button"
+            disabled={saving || deleting}
+            onClick={() => {
+              if (!r?.trim() || !m?.trim()) return;
+              onSave(u.id, r, m, hospitalId, wardId);
+            }}
+            style={{
+              padding: "6px 12px",
+              background: "#0f172a",
+              color: "#fff",
+              border: "none",
+              borderRadius: 6,
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+          >
+            {saving ? "…" : "Save"}
+          </button>
+          <button
+            type="button"
+            disabled={saving || deleting}
+            onClick={() => onDelete(u.id)}
+            style={{
+              padding: "6px 12px",
+              background: "#fff1f2",
+              color: "#991b1b",
+              border: "1px solid #fecaca",
+              borderRadius: 6,
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: deleting ? "wait" : "pointer",
+            }}
+          >
+            {deleting ? "…" : "Delete"}
+          </button>
+        </div>
       </td>
     </tr>
   );

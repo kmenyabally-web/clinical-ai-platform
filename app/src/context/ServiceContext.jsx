@@ -7,13 +7,12 @@ import {
   useMemo,
 } from "react";
 import { useOrganisation } from "./OrganisationContext";
-import { useAuth } from "./AuthContext";
 import { fetchServices } from "../services/servicesService";
 
 /**
  * ServiceContext – current service scope within an organisation.
- * Provides currentServiceId, setCurrentServiceId, services (list the user can access), and currentService (resolved object).
- * Service managers see only services where managerId === user.uid; Admins see all services.
+ * Provides currentServiceId, setCurrentServiceId, services (list for the org), and currentService (resolved object).
+ * All org members receive the full service list for scoping; Firestore rules enforce tenant access.
  */
 const ServiceContext = createContext(null);
 
@@ -25,13 +24,17 @@ export function useService() {
 
 export function ServiceProvider({ children }) {
   const { organisationId, userProfile } = useOrganisation();
-  const { user } = useAuth();
   const [services, setServices] = useState([]);
   const [currentServiceId, setCurrentServiceIdState] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const role = userProfile?.role;
-  const isAdmin = role === "Admin" || role === "ADMIN" || role === "admin";
+  const isAdmin =
+    role === "Admin" ||
+    role === "ADMIN" ||
+    role === "admin" ||
+    (userProfile?.systemRole ?? "").toString().trim().toUpperCase() === "SUPER_ADMIN" ||
+    (userProfile?.systemRole ?? "").toString().trim().toUpperCase() === "GLOBAL_ADMIN";
   const isServiceManager = role === "Manager" || role === "QualityLead";
 
   const loadServices = useCallback(async () => {
@@ -43,8 +46,10 @@ export function ServiceProvider({ children }) {
     }
     setLoading(true);
     try {
-      const options = isAdmin ? {} : { managerId: user?.uid ?? "" };
-      const list = await fetchServices(organisationId, options);
+      // Always list every service in the org for scoping (incidents, filters, dashboards).
+      // Filtering by managerId hid all services for Staff/clinical users who are not assigned
+      // as `managerId` on a row — Firestore rules still restrict reads to the tenant.
+      const list = await fetchServices(organisationId, {});
       const safeList = Array.isArray(list) ? list : [];
       setServices(safeList);
       setCurrentServiceIdState((prev) => {
@@ -59,7 +64,7 @@ export function ServiceProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  }, [organisationId, isAdmin, user?.uid]);
+  }, [organisationId]);
 
   useEffect(() => {
     loadServices();

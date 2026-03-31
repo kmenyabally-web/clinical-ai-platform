@@ -22,6 +22,8 @@ import { getInspectionInsights } from "../engine/inspectionInsights";
 import PatientTasks from "./PatientTasks";
 import { getTasksByPatient } from "../services/taskService";
 
+const openedAuditKeys = new Set();
+
 export default function PatientDetail() {
   const { id } = useParams();
   const { isInspectorRole, role: userRole } = useRole();
@@ -64,6 +66,9 @@ export default function PatientDetail() {
 
   useEffect(() => {
     if (!id) return;
+    const key = `PATIENT_OPENED:${id}`;
+    if (openedAuditKeys.has(key)) return;
+    openedAuditKeys.add(key);
     void logAuditEvent("PATIENT_OPENED", { patientId: id });
   }, [id]);
 

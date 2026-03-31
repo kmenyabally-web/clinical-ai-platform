@@ -1,10 +1,17 @@
 import { useAuth } from "../context/AuthContext";
 import { useRole } from "../context/RoleContext";
+import { useOrganisation } from "../context/OrganisationContext";
 import { Navigate, useLocation } from "react-router-dom";
 
-export default function ProtectedRoute({ children }) {
+/**
+ * @param {object} props
+ * @param {import('react').ReactNode} props.children
+ * @param {string[]=} props.allowedRoles - If set, user role must be listed (e.g. Admin, Organisation Admin) or platform admin.
+ */
+export default function ProtectedRoute({ children, allowedRoles }) {
   const { loading, user } = useAuth();
   const { role, isGlobalAdmin } = useRole();
+  const { isPlatformAdmin } = useOrganisation();
   const location = useLocation();
 
   const isSuperAdmin = role === "SUPER_ADMIN" || isGlobalAdmin === true;
@@ -18,6 +25,14 @@ export default function ProtectedRoute({ children }) {
 
   if (location.pathname.startsWith("/system-admin") && !isSuperAdmin) {
     return <Navigate to="/dashboard" replace />;
+  }
+
+  if (Array.isArray(allowedRoles) && allowedRoles.length > 0) {
+    const mayAccess =
+      Boolean(isPlatformAdmin) || (role != null && allowedRoles.includes(role));
+    if (!mayAccess) {
+      return <Navigate to="/dashboard" replace />;
+    }
   }
 
   return children;

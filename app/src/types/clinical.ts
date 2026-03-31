@@ -64,6 +64,8 @@ export type ClinicalNote = {
   patientId: string;
 
   discipline: string;
+  /** Governance discipline label (mirrors discipline on create; used for approval rules). */
+  role?: string;
   category?: string;
 
   // Tenant scoping (denormalised for security rules + fast queries)
@@ -98,6 +100,17 @@ export type ClinicalNote = {
   /** AI generated document sections used in Summaries / MDT Review views. */
   summaries?: ClinicalSummary[];
 
+  /** Draft → final → approved (governance). */
+  status?: "draft" | "final" | "approved";
+
+  createdBy?: string;
+  /** MDT / clinical role of author at creation. */
+  createdByRole?: string;
+  approvedBy?: string;
+  approvedAt?: unknown;
+  /** MDT role of the approver at approval time. */
+  approvedByRole?: string;
+
   /** AI generated MDT review notes (used in MDT Reviews tab). */
   mdtReview?: ClinicalMdtReview | null;
 
@@ -108,6 +121,11 @@ export type ClinicalNote = {
   careFolder?: ClinicalCareFolder | null;
 
   createdAt: unknown;
+  /** Last content edit (draft notes). */
+  updatedAt?: unknown;
+  updatedBy?: string;
+  updatedByEmail?: string;
+
   authorEmail?: string;
 
   // Author identity (stored for auditing & report generation)
@@ -115,4 +133,7 @@ export type ClinicalNote = {
   authorRole?: string | null;
   /** MDT / clinical role of the author (from user profile at write time). */
   mdtRole?: string | null;
+
+  /** Soft-delete flag (from Firestore). */
+  isDeleted?: boolean;
 };

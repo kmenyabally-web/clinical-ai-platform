@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { doc, setDoc } from "firebase/firestore";
+import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { db } from "../../firebase";
 import { useAuth } from "../../context/AuthContext";
@@ -13,6 +13,7 @@ import {
   getRolesForOrganisationType,
   getUiModeForOrganisationType,
 } from "../../config/organisationTemplates";
+import { createService } from "../../services/servicesService";
 
 export default function CreateOrganisation() {
   const navigate = useNavigate();
@@ -44,16 +45,19 @@ export default function CreateOrganisation() {
 
     try {
       setCreating(true);
-      const template = ORG_TEMPLATES[type] ?? ORG_TEMPLATES.GENERAL;
+      const features = getFeaturesForOrganisationType(type);
+      const roles = getRolesForOrganisationType(type);
+      const uiMode = getUiModeForOrganisationType(type);
       await setDoc(doc(db, "organisations", cleanedOrgId), {
         name: name.trim(),
         organisationId: cleanedOrgId,
         status: "active",
         plan: "BASIC",
         type,
-        features: template?.features ?? {},
-        roles: template?.roles ?? [],
-        createdAt: new Date(),
+        uiMode,
+        features,
+        roles,
+        createdAt: serverTimestamp(),
         active: true,
       });
       if (user?.uid) {
@@ -62,6 +66,16 @@ export default function CreateOrganisation() {
           { organisationId: cleanedOrgId, orgId: cleanedOrgId },
           { merge: true }
         );
+        try {
+          const auditContext = { organisationId: cleanedOrgId, userId: user.uid, userRole: "Admin" };
+          await createService(
+            cleanedOrgId,
+            { serviceName: "General Service", serviceType: "General", location: "" },
+            auditContext
+          );
+        } catch (svcErr) {
+          console.warn("Default General Service could not be created (non-fatal):", svcErr);
+        }
       }
 
       if (isSuperAdmin && adminEmail.trim() && tempPassword) {

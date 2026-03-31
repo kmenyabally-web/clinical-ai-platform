@@ -40,7 +40,7 @@ function getScoreDocId(organisationId, serviceId) {
  */
 async function fetchScoringData(organisationId, serviceId) {
   const [incidents, evidence, actions] = await Promise.all([
-    fetchIncidents(organisationId, { serviceId: serviceId || null }),
+    fetchIncidents(organisationId, {}),
     fetchEvidence(organisationId, serviceId || null),
     fetchComplianceActions(organisationId, { serviceId: serviceId || null, limitCount: 500 }),
   ]);

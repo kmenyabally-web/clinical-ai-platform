@@ -3,9 +3,11 @@
  * System `role` is for RBAC only; `mdtRole` is clinical identity.
  */
 
-import { collection, doc, getDocs, query, updateDoc, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, updateDoc, where, serverTimestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "../firebase";
+import { assertManagementWrite } from "./managementPermissions";
+import { logManagementAudit } from "./managementAuditLog";
 
 async function ensureAuthTokenForCallable() {
   const user = auth.currentUser;
@@ -41,20 +43,22 @@ export async function listUsersInOrganisation(organisationId) {
 
   const q = query(collection(db, USERS_COLLECTION), where("orgId", "==", organisationId));
   const snap = await getDocs(q);
-  return (snap?.docs ?? []).map((d) => {
-    const x = d?.data?.() ?? {};
-    return {
-      id: d?.id ?? "",
-      email: typeof x.email === "string" ? x.email : undefined,
-      displayName: typeof x.displayName === "string" ? x.displayName : undefined,
-      role: x.role ?? null,
-      mdtRole: typeof x.mdtRole === "string" ? x.mdtRole : null,
-      orgId: x.orgId ?? x.organisationId ?? null,
-      hospitalId: typeof x.hospitalId === "string" ? x.hospitalId : null,
-      wardId: typeof x.wardId === "string" ? x.wardId : null,
-      status: x.status ?? null,
-    };
-  });
+  return (snap?.docs ?? [])
+    .filter((d) => (d?.data?.()?.isDeleted !== true))
+    .map((d) => {
+      const x = d?.data?.() ?? {};
+      return {
+        id: d?.id ?? "",
+        email: typeof x.email === "string" ? x.email : undefined,
+        displayName: typeof x.displayName === "string" ? x.displayName : undefined,
+        role: x.role ?? null,
+        mdtRole: typeof x.mdtRole === "string" ? x.mdtRole : null,
+        orgId: x.orgId ?? x.organisationId ?? null,
+        hospitalId: typeof x.hospitalId === "string" ? x.hospitalId : null,
+        wardId: typeof x.wardId === "string" ? x.wardId : null,
+        status: x.status ?? null,
+      };
+    });
 }
 
 /**
@@ -64,17 +68,72 @@ export async function listUsersInOrganisation(organisationId) {
 export async function updateUserAssignment(userId, updates) {
   if (!userId?.trim()) throw new Error("userId required");
   const uid = auth.currentUser?.uid;
-  if (!uid || !(await isPlatformAdmin(uid))) {
-    await getUserContext();
-  }
+  if (!uid) throw new Error("Not authenticated");
+  await assertManagementWrite();
   const ref = doc(db, USERS_COLLECTION, userId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("User not found.");
+  const cur = snap.data() ?? {};
+  if (cur.isDeleted === true) throw new Error("User record has been removed from the directory.");
+  const ctx = await getUserContext();
+  if (!(await isPlatformAdmin(uid))) {
+    const rowOrg = cur.orgId ?? cur.organisationId ?? null;
+    if (rowOrg !== ctx.organisationId) throw new Error("403 Forbidden: organisation scope mismatch");
+  }
   const payload = {};
   if (updates.role != null) payload.role = updates.role;
   if (updates.mdtRole !== undefined) payload.mdtRole = updates.mdtRole || null;
   if (updates.hospitalId !== undefined) payload.hospitalId = updates.hospitalId || null;
   if (updates.wardId !== undefined) payload.wardId = updates.wardId || null;
   if (Object.keys(payload).length === 0) return;
+  payload.updatedAt = serverTimestamp();
+  payload.updatedBy = uid;
   await updateDoc(ref, payload);
+  const orgId = cur.orgId ?? cur.organisationId ?? null;
+  void logManagementAudit({
+    action: "ORG_ADMIN_UPDATE",
+    entityType: "user",
+    entityId: userId,
+    organisationId: typeof orgId === "string" ? orgId : null,
+  });
+}
+
+/**
+ * Soft-delete a user directory row (does not delete Firebase Auth).
+ * @param {string} userId
+ */
+export async function softDeleteUserDirectoryEntry(userId) {
+  const id = (userId ?? "").toString().trim();
+  if (!id) throw new Error("userId required");
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error("Not authenticated");
+  if (id === uid) throw new Error("You cannot remove your own account from the directory.");
+  await assertManagementWrite();
+  const ref = doc(db, USERS_COLLECTION, id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("User not found.");
+  const cur = snap.data() ?? {};
+  if (cur.isDeleted === true) throw new Error("Already removed.");
+  const ctx = await getUserContext();
+  if (!(await isPlatformAdmin(uid))) {
+    const rowOrg = cur.orgId ?? cur.organisationId ?? null;
+    if (rowOrg !== ctx.organisationId) throw new Error("403 Forbidden: organisation scope mismatch");
+  }
+  await updateDoc(ref, {
+    isDeleted: true,
+    deletedAt: serverTimestamp(),
+    deletedBy: uid,
+    status: "inactive",
+    updatedAt: serverTimestamp(),
+    updatedBy: uid,
+  });
+  const orgId = cur.orgId ?? cur.organisationId ?? null;
+  void logManagementAudit({
+    action: "ORG_ADMIN_DELETE",
+    entityType: "user",
+    entityId: id,
+    organisationId: typeof orgId === "string" ? orgId : null,
+  });
 }
 
 /**

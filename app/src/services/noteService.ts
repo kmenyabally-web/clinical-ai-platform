@@ -14,7 +14,10 @@ import {
   where,
 } from "firebase/firestore";
 import { db, auth } from "../firebase";
-import { logAction, logAudit, logAuditEvent } from "./auditService";
+import { logAction, logAudit, logAuditEvent, logEntityAudit } from "./auditService";
+import { isDocumentActive } from "../utils/auditSchema";
+import { canDeleteClinicalNotesAccess } from "../utils/rbac";
+import { canApproveNote, isSystemApproverRole } from "../utils/clinicalNoteApproval";
 import { safeModeFields } from "../utils/safeMode";
 import { getUserContext } from "./authService";
 import { addTimelineEntry, PATIENT_TIMELINE_COLLECTION } from "./patientTimelineService";
@@ -23,7 +26,7 @@ import { getCurrentUserProfile } from "./organisation";
 import { BEHAVIOURS_COLLECTION, extractBehaviourFromNote } from "./behaviourService";
 import { processClinicalNote } from "./geminiAiService.js";
 import { evaluateRisk } from "./riskEngine.js";
-import { assertTenantContext } from "../utils/tenantContext.js";
+import { assertTenantContext, normalizeHospitalScopeId } from "../utils/tenantContext.js";
 import type {
   ClinicalCareFolder,
   ClinicalMdtReview,
@@ -38,6 +41,15 @@ import type {
 export const NOTES_COLLECTION = "notes";
 export const NOTE_ADDENDUMS_COLLECTION = "note_addendums";
 
+/** Firestore rejects `undefined` anywhere in document data. */
+function omitUndefinedFields(obj: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) out[k] = v;
+  }
+  return out;
+}
+
 function assertRequiredWriteContext({
   organisationId,
   hospitalId,
@@ -50,6 +62,12 @@ function assertRequiredWriteContext({
   if (!organisationId) throw new Error("Missing organisation");
   if (!hospitalId) throw new Error("Missing hospital");
   if (!userId) throw new Error("Missing user");
+}
+
+function assertCanApproveOrDeleteNotes(role: string | null | undefined): void {
+  if (!canDeleteClinicalNotesAccess(role)) {
+    throw new Error("Only Admin or Manager can approve or delete clinical notes.");
+  }
 }
 
 /** Legacy collection — read-only merge for existing deployments. New writes use {@link NOTES_COLLECTION}. */
@@ -98,15 +116,22 @@ function safeString(raw: unknown): string | undefined {
   return s ? s : undefined;
 }
 
-function safeStructuredData(raw: unknown): ClinicalStructuredData | undefined {
-  if (!raw || typeof raw !== "object") return undefined;
+/**
+ * Normalises structured AI payload for Firestore (no `undefined` field values).
+ * When the payload only includes e.g. `risk`, merge `discipline` from the note form via `disciplineFallback`.
+ */
+function safeStructuredData(raw: unknown, disciplineFallback?: string): ClinicalStructuredData | undefined {
+  const fb = safeString(disciplineFallback);
+  if (!raw || typeof raw !== "object") {
+    return fb ? { discipline: fb } : undefined;
+  }
   const o = raw as Record<string, unknown>;
   const structured = safeStructured(o);
-  if (!structured && !safeString(o.discipline)) return undefined;
-  return {
-    ...(structured ?? {}),
-    discipline: safeString(o.discipline) ?? structured?.discipline,
-  };
+  const disc = safeString(o.discipline) ?? fb;
+  if (!structured && !disc) return undefined;
+  const out: Record<string, unknown> = { ...(structured ?? {}) };
+  if (disc) out.discipline = disc;
+  return Object.keys(out).length ? (out as ClinicalStructuredData) : undefined;
 }
 
 function safeSummaries(raw: unknown): ClinicalSummary[] | undefined {
@@ -207,10 +232,17 @@ export function mapFirestoreClinicalNote(
       ? x.discipline.trim()
       : category?.trim() || "Clinical";
 
+  const rawStatus = typeof x.status === "string" ? x.status.trim().toLowerCase() : "";
+  let status: "draft" | "final" | "approved" | undefined;
+  if (rawStatus === "approved") status = "approved";
+  else if (rawStatus === "final") status = "final";
+  else if (rawStatus === "draft") status = "draft";
+
   return {
     id,
     patientId: typeof x.patientId === "string" ? x.patientId : "",
     discipline,
+    role: typeof x.role === "string" && x.role.trim() ? x.role.trim() : discipline,
     category,
     organisationId: typeof x.organisationId === "string" ? x.organisationId : undefined,
     hospitalId: typeof x.hospitalId === "string" ? x.hospitalId : undefined,
@@ -224,17 +256,32 @@ export function mapFirestoreClinicalNote(
     engagement: x.engagement != null ? String(x.engagement) : null,
     structured: mergedStructured,
     correctedNote: safeString(x.correctedNote),
-    structuredData: safeStructuredData(x.structuredData),
+    structuredData: safeStructuredData(x.structuredData, discipline),
     summaries: safeSummaries(x.summaries),
     mdtReview: safeMdtReview(x.mdtReview, discipline) ?? null,
     reports: safeReports(x.reports) ?? null,
     careFolder: safeCareFolder(x.careFolder) ?? null,
     createdAt: x.createdAt ?? null,
+    status: (status ?? "draft") as "draft" | "final" | "approved",
     authorEmail: typeof x.authorEmail === "string" ? x.authorEmail : undefined,
     mood: legacyMood,
     authorId: typeof x.authorId === "string" ? x.authorId : undefined,
+    createdBy: typeof x.createdBy === "string" ? x.createdBy : typeof x.authorId === "string" ? x.authorId : undefined,
+    createdByRole:
+      typeof x.createdByRole === "string" && x.createdByRole.trim()
+        ? x.createdByRole.trim()
+        : typeof x.mdtRole === "string" && x.mdtRole.trim()
+          ? x.mdtRole.trim()
+          : undefined,
     authorRole: typeof x.authorRole === "string" || x.authorRole === null ? (x.authorRole as string | null) : undefined,
     mdtRole: typeof x.mdtRole === "string" || x.mdtRole === null ? (x.mdtRole as string | null) : undefined,
+    approvedBy: typeof x.approvedBy === "string" ? x.approvedBy : undefined,
+    approvedAt: x.approvedAt ?? null,
+    approvedByRole: typeof x.approvedByRole === "string" ? x.approvedByRole : undefined,
+    updatedAt: x.updatedAt ?? null,
+    updatedBy: typeof x.updatedBy === "string" ? x.updatedBy : undefined,
+    updatedByEmail: typeof x.updatedByEmail === "string" ? x.updatedByEmail : undefined,
+    isDeleted: x.isDeleted === true,
   };
 }
 
@@ -253,18 +300,23 @@ export async function addClinicalNote(
   const userId = auth.currentUser?.uid ?? null;
   if (!organisationId) throw new Error("Governance Error: organisationId is missing.");
 
+  const requestedOrg =
+    noteData.organisationId != null && String(noteData.organisationId).trim() !== ""
+      ? String(noteData.organisationId).trim()
+      : "";
+  if (requestedOrg && requestedOrg !== organisationId) {
+    throw new Error("organisationId mismatch between form and session.");
+  }
+
   const mdtProfile = auth.currentUser?.uid ? await getCurrentUserProfile(auth.currentUser.uid) : null;
   const mdtRole = mdtProfile?.mdtRole ?? null;
 
   const content = (noteData.content ?? "").toString().trim();
   const category = (noteData.category ?? "").toString().trim();
   const authorEmail = (noteData.authorEmail ?? auth.currentUser?.email ?? "").toString().trim();
-  const authorId = auth.currentUser?.uid ?? null;
   const mood = (noteData.mood ?? "").toString().trim() || null;
   const serviceId = (noteData.serviceId as string | null | undefined) ?? null;
   const disciplineRaw = (noteData.discipline ?? "").toString().trim();
-  const structuredData = safeStructuredData(noteData.structuredData ?? noteData.structured);
-  const structured = safeStructured(noteData.structuredData ?? noteData.structured);
   const correctedNote = safeString(noteData.correctedNote);
 
   const summaries = safeSummaries(noteData.summaries);
@@ -282,6 +334,9 @@ export async function addClinicalNote(
   if (!discipline) {
     throw new Error("MDT role (discipline) is required. Select a role from the list.");
   }
+
+  const structuredData = safeStructuredData(noteData.structuredData ?? noteData.structured, discipline);
+  const structured = safeStructured(noteData.structuredData ?? noteData.structured);
 
   // Denormalise patient tenant scope onto the note document so Firestore
   // security rules can enforce hospital scoping without cross-document reads.
@@ -306,6 +361,13 @@ export async function addClinicalNote(
       (aiResult?.correctedText != null ? String(aiResult.correctedText) : "") || content,
   });
 
+  const resolvedRisk =
+    structured?.risk != null && String(structured.risk).trim() !== ""
+      ? String(structured.risk).trim().toLowerCase()
+      : aiResult?.risk != null && String(aiResult.risk).trim() !== ""
+        ? String(aiResult.risk).trim().toLowerCase()
+        : null;
+
   const noteDoc: Record<string, unknown> = {
     ...safeModeFields(),
     organisationId,
@@ -317,17 +379,24 @@ export async function addClinicalNote(
     content: correctedText,
     category,
     discipline,
+    role: discipline,
     authorEmail,
-    authorId: authorId ?? undefined,
     authorRole: authorRole ?? null,
     mdtRole,
     mood: aiResult?.mood != null ? (String(aiResult.mood).trim() || null) : mood ?? null,
     behaviour: aiResult?.behaviour != null ? String(aiResult.behaviour).trim() || null : null,
-    risk: aiResult?.risk != null ? String(aiResult.risk).trim() || null : null,
+    risk: resolvedRisk,
     engagement: aiResult?.engagement != null ? String(aiResult.engagement).trim() || null : null,
     incidents: aiResult?.incidents != null ? String(aiResult.incidents).trim() || null : null,
     aiSummary,
     createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    status: "draft",
+    isDeleted: false,
+    deletedAt: null,
+    deletedBy: null,
+    ...(userId ? { authorId: userId, createdBy: userId, updatedBy: userId } : {}),
+    ...(mdtRole ? { createdByRole: mdtRole } : {}),
   };
   if (structured) noteDoc.structured = structured;
   if (correctedNote) noteDoc.correctedNote = correctedNote;
@@ -339,7 +408,7 @@ export async function addClinicalNote(
 
   assertTenantContext(organisationId, hospitalId);
 
-  const noteSnap = await addDoc(collection(db, NOTES_COLLECTION), noteDoc);
+  const noteSnap = await addDoc(collection(db, NOTES_COLLECTION), omitUndefinedFields(noteDoc));
 
   try {
     await addDoc(collection(db, "risk_alerts"), {
@@ -437,8 +506,445 @@ export async function addClinicalNote(
 }
 
 /**
- * Read from `notes` (or legacy) with org scope. Tries orderBy first; on failure (missing index / rules),
- * falls back to equality-only query + client-side sort so notes still display.
+ * Soft-delete a clinical note (retained for audit). Admin / Manager only.
+ */
+export async function deleteClinicalNote(noteId: string): Promise<void> {
+  const id = (noteId ?? "").toString().trim();
+  if (!id) throw new Error("noteId is required.");
+
+  const { organisationId, hospitalId: ctxHospitalId, wardId: ctxWardId, role } = await getUserContext();
+  if (!organisationId) throw new Error("Governance Error: organisationId is missing.");
+  assertCanApproveOrDeleteNotes(role);
+
+  const uid = auth.currentUser?.uid ?? null;
+  if (!uid) throw new Error("Missing user.");
+
+  const noteRef = doc(db, NOTES_COLLECTION, id);
+  const noteSnap = await getDoc(noteRef);
+  if (!noteSnap.exists()) throw new Error("Note not found.");
+  const note = noteSnap.data() as Record<string, unknown>;
+  const noteOrg = typeof note.organisationId === "string" ? note.organisationId : "";
+  if (noteOrg !== organisationId) throw new Error("Organisation scope mismatch.");
+
+  const st = typeof note.status === "string" ? note.status.trim().toLowerCase() : "";
+  if (st === "approved") {
+    throw new Error("Approved notes cannot be deleted.");
+  }
+
+  const patientId = typeof note.patientId === "string" ? note.patientId : "";
+  const noteHospitalId = typeof note.hospitalId === "string" ? note.hospitalId : "";
+  const noteWardId = typeof note.wardId === "string" ? note.wardId : "";
+
+  await updateDoc(noteRef, {
+    isDeleted: true,
+    deletedAt: serverTimestamp(),
+    deletedBy: uid,
+    updatedAt: serverTimestamp(),
+    updatedBy: uid,
+  });
+
+  void logAuditEvent({
+    action: "SOFT_DELETE_NOTE",
+    user: {
+      uid,
+      email: auth.currentUser?.email ?? null,
+      role: role ?? null,
+    },
+    organisationId,
+    hospitalId: noteHospitalId || (ctxHospitalId ? String(ctxHospitalId) : ""),
+    wardId: noteWardId || (ctxWardId ? String(ctxWardId) : null),
+    patientId,
+    metadata: { noteId: id },
+  });
+  void logEntityAudit({
+    action: "SOFT_DELETE_NOTE",
+    entityType: "clinical_note",
+    entityId: id,
+    organisationId,
+    performedBy: uid,
+    role: role ?? null,
+    metadata: { patientId, organisationId },
+  });
+}
+
+/**
+ * Author soft-deletes own draft only (retained for audit).
+ */
+export async function softDeleteClinicalNoteAsAuthor(noteId: string): Promise<void> {
+  const id = (noteId ?? "").toString().trim();
+  if (!id) throw new Error("noteId is required.");
+
+  const { organisationId, hospitalId: ctxHospitalId, wardId: ctxWardId, role } = await getUserContext();
+  if (!organisationId) throw new Error("Governance Error: organisationId is missing.");
+
+  const uid = auth.currentUser?.uid ?? null;
+  if (!uid) throw new Error("Missing user.");
+
+  const noteRef = doc(db, NOTES_COLLECTION, id);
+  const noteSnap = await getDoc(noteRef);
+  if (!noteSnap.exists()) throw new Error("Note not found.");
+  const note = noteSnap.data() as Record<string, unknown>;
+  const noteOrg = typeof note.organisationId === "string" ? note.organisationId : "";
+  if (noteOrg !== organisationId) throw new Error("Organisation scope mismatch.");
+
+  if (note.isDeleted === true) throw new Error("Note already removed.");
+
+  const rawStatus = typeof note.status === "string" ? note.status.trim().toLowerCase() : "";
+  if (rawStatus !== "draft") {
+    throw new Error("Only draft notes can be deleted by the author.");
+  }
+
+  const ownerId =
+    typeof note.createdBy === "string" && note.createdBy.trim()
+      ? note.createdBy.trim()
+      : typeof note.authorId === "string" && note.authorId.trim()
+        ? note.authorId.trim()
+        : "";
+  if (ownerId !== uid) {
+    throw new Error("You can only delete your own draft notes.");
+  }
+
+  const patientId = typeof note.patientId === "string" ? note.patientId : "";
+  const noteHospitalId = typeof note.hospitalId === "string" ? note.hospitalId : "";
+  const noteWardId = typeof note.wardId === "string" ? note.wardId : "";
+
+  await updateDoc(noteRef, {
+    isDeleted: true,
+    deletedAt: serverTimestamp(),
+    deletedBy: uid,
+    updatedAt: serverTimestamp(),
+    updatedBy: uid,
+  });
+
+  void logAuditEvent({
+    action: "SOFT_DELETE_NOTE",
+    user: {
+      uid,
+      email: auth.currentUser?.email ?? null,
+      role: role ?? null,
+    },
+    organisationId,
+    hospitalId: noteHospitalId || (ctxHospitalId ? String(ctxHospitalId) : ""),
+    wardId: noteWardId || (ctxWardId ? String(ctxWardId) : null),
+    patientId,
+    metadata: { noteId: id, authorSelfDelete: true },
+  });
+  void logEntityAudit({
+    action: "SOFT_DELETE_NOTE",
+    entityType: "clinical_note",
+    entityId: id,
+    organisationId,
+    performedBy: uid,
+    role: role ?? null,
+    metadata: { patientId, organisationId, authorSelfDelete: true },
+  });
+}
+
+/**
+ * Draft → final (author only). No further body edits after this.
+ */
+export async function finalizeClinicalNote(noteId: string): Promise<void> {
+  const id = (noteId ?? "").toString().trim();
+  if (!id) throw new Error("noteId is required.");
+
+  const { organisationId, hospitalId: ctxHospitalId, wardId: ctxWardId, role } = await getUserContext();
+  if (!organisationId) throw new Error("Governance Error: organisationId is missing.");
+
+  const uid = auth.currentUser?.uid ?? null;
+  if (!uid) throw new Error("Missing user.");
+
+  const noteRef = doc(db, NOTES_COLLECTION, id);
+  const noteSnap = await getDoc(noteRef);
+  if (!noteSnap.exists()) throw new Error("Note not found.");
+  const note = noteSnap.data() as Record<string, unknown>;
+  const noteOrg = typeof note.organisationId === "string" ? note.organisationId : "";
+  if (noteOrg !== organisationId) throw new Error("Organisation scope mismatch.");
+
+  if (note.isDeleted === true) throw new Error("This note cannot be finalised.");
+
+  const rawStatus = typeof note.status === "string" ? note.status.trim().toLowerCase() : "";
+  if (rawStatus !== "draft") {
+    throw new Error("Only draft notes can be finalised.");
+  }
+
+  const ownerId =
+    typeof note.createdBy === "string" && note.createdBy.trim()
+      ? note.createdBy.trim()
+      : typeof note.authorId === "string" && note.authorId.trim()
+        ? note.authorId.trim()
+        : "";
+  if (ownerId !== uid) {
+    throw new Error("You can only finalise your own notes.");
+  }
+
+  const patientId = typeof note.patientId === "string" ? note.patientId : "";
+  const noteHospitalId = typeof note.hospitalId === "string" ? note.hospitalId : "";
+  const noteWardId = typeof note.wardId === "string" ? note.wardId : "";
+
+  await updateDoc(noteRef, {
+    status: "final",
+    updatedAt: serverTimestamp(),
+    updatedBy: uid,
+    updatedByEmail: auth.currentUser?.email ?? null,
+  });
+
+  void logAuditEvent({
+    action: "NOTE_FINALISED",
+    user: {
+      uid,
+      email: auth.currentUser?.email ?? null,
+      role: role ?? null,
+    },
+    organisationId,
+    hospitalId: noteHospitalId || (ctxHospitalId ? String(ctxHospitalId) : ""),
+    wardId: noteWardId || (ctxWardId ? String(ctxWardId) : null),
+    patientId,
+    metadata: { noteId: id },
+  });
+  void logEntityAudit({
+    action: "NOTE_FINALISED",
+    entityType: "clinical_note",
+    entityId: id,
+    organisationId,
+    performedBy: uid,
+    role: role ?? null,
+    metadata: { patientId, organisationId },
+  });
+  await addDoc(collection(db, "audit_logs"), {
+    action: "NOTE_FINALISED",
+    entityType: "note",
+    entityId: id,
+    performedBy: uid,
+    role: role ?? null,
+    organisationId,
+    timestamp: serverTimestamp(),
+    metadata: { noteId: id },
+  }).catch(() => {});
+}
+
+/**
+ * Update draft note body text only. Author-only; locked after finalisation.
+ */
+export async function updateDraftClinicalNoteContent(noteId: string, content: string): Promise<void> {
+  const id = (noteId ?? "").toString().trim();
+  const updatedContent = (content ?? "").toString().trim();
+  if (!id) throw new Error("noteId is required.");
+  if (!updatedContent) throw new Error("content is required.");
+
+  const { organisationId, hospitalId: ctxHospitalId, wardId: ctxWardId, role } = await getUserContext();
+  if (!organisationId) throw new Error("Governance Error: organisationId is missing.");
+
+  const uid = auth.currentUser?.uid ?? null;
+  if (!uid) throw new Error("Missing user.");
+
+  const noteRef = doc(db, NOTES_COLLECTION, id);
+  const noteSnap = await getDoc(noteRef);
+  if (!noteSnap.exists()) throw new Error("Note not found.");
+  const note = noteSnap.data() as Record<string, unknown>;
+  const noteOrg = typeof note.organisationId === "string" ? note.organisationId : "";
+  if (noteOrg !== organisationId) throw new Error("Organisation scope mismatch.");
+
+  if (note.isDeleted === true) throw new Error("This note cannot be edited.");
+
+  const rawStatus = typeof note.status === "string" ? note.status.trim().toLowerCase() : "";
+  if (rawStatus !== "draft") {
+    throw new Error("This record cannot be edited. Add addendum instead.");
+  }
+
+  const ownerId =
+    typeof note.createdBy === "string" && note.createdBy.trim()
+      ? note.createdBy.trim()
+      : typeof note.authorId === "string" && note.authorId.trim()
+        ? note.authorId.trim()
+        : "";
+  if (ownerId !== uid) {
+    throw new Error("You can only edit your own draft notes.");
+  }
+
+  const patientId = typeof note.patientId === "string" ? note.patientId : "";
+  const noteHospitalId = typeof note.hospitalId === "string" ? note.hospitalId : "";
+  const noteWardId = typeof note.wardId === "string" ? note.wardId : "";
+  const userEmail = auth.currentUser?.email ?? null;
+
+  await updateDoc(noteRef, {
+    content: updatedContent,
+    updatedAt: serverTimestamp(),
+    updatedBy: uid,
+    updatedByEmail: userEmail ?? null,
+  });
+
+  void logAuditEvent({
+    action: "NOTE_EDITED",
+    user: {
+      uid,
+      email: userEmail,
+      role: role ?? null,
+    },
+    organisationId,
+    hospitalId: noteHospitalId || (ctxHospitalId ? String(ctxHospitalId) : ""),
+    wardId: noteWardId || (ctxWardId ? String(ctxWardId) : null),
+    patientId,
+    metadata: { noteId: id, preview: updatedContent.slice(0, 100) },
+  });
+  void logEntityAudit({
+    action: "NOTE_EDITED",
+    entityType: "clinical_note",
+    entityId: id,
+    organisationId,
+    performedBy: uid,
+    role: role ?? null,
+    metadata: { patientId, organisationId, noteId: id, userId: uid },
+  });
+  await addDoc(collection(db, "audit_logs"), {
+    action: "NOTE_EDITED",
+    entityType: "note",
+    entityId: id,
+    performedBy: uid,
+    role: role ?? null,
+    noteId: id,
+    userId: uid,
+    organisationId,
+    timestamp: serverTimestamp(),
+    metadata: { preview: updatedContent.slice(0, 120) },
+  }).catch(() => {});
+}
+
+/**
+ * Approve a final clinical note. Discipline-based rules + Admin/Manager system override.
+ */
+export async function approveClinicalNote(noteId: string): Promise<void> {
+  const id = (noteId ?? "").toString().trim();
+  if (!id) throw new Error("noteId is required.");
+
+  const { organisationId, hospitalId: ctxHospitalId, wardId: ctxWardId, role } = await getUserContext();
+  if (!organisationId) throw new Error("Governance Error: organisationId is missing.");
+
+  const uid = auth.currentUser?.uid ?? null;
+  if (!uid) throw new Error("Missing user.");
+
+  const profile = auth.currentUser?.uid ? await getCurrentUserProfile(auth.currentUser.uid) : null;
+  const approverMdt = profile?.mdtRole != null ? String(profile.mdtRole).trim() : "";
+
+  const noteRef = doc(db, NOTES_COLLECTION, id);
+  const noteSnap = await getDoc(noteRef);
+  if (!noteSnap.exists()) throw new Error("Note not found.");
+  const note = noteSnap.data() as Record<string, unknown>;
+  const noteOrg = typeof note.organisationId === "string" ? note.organisationId : "";
+  if (noteOrg !== organisationId) throw new Error("Organisation scope mismatch.");
+
+  if (!canApproveNote(approverMdt, note, uid, role)) {
+    throw new Error("You do not have permission to approve this note.");
+  }
+
+  const patientId = typeof note.patientId === "string" ? note.patientId : "";
+  const noteHospitalId = typeof note.hospitalId === "string" ? note.hospitalId : "";
+  const noteWardId = typeof note.wardId === "string" ? note.wardId : "";
+
+  const approvedByRoleLabel =
+    approverMdt ||
+    (isSystemApproverRole(role) && role ? String(role).trim() : "") ||
+    null;
+
+  await updateDoc(noteRef, {
+    status: "approved",
+    approvedBy: uid,
+    approvedAt: serverTimestamp(),
+    approvedByRole: approvedByRoleLabel,
+    updatedAt: serverTimestamp(),
+    updatedBy: uid,
+  });
+
+  void logAuditEvent({
+    action: "NOTE_APPROVED",
+    user: {
+      uid,
+      email: auth.currentUser?.email ?? null,
+      role: role ?? null,
+    },
+    organisationId,
+    hospitalId: noteHospitalId || (ctxHospitalId ? String(ctxHospitalId) : ""),
+    wardId: noteWardId || (ctxWardId ? String(ctxWardId) : null),
+    patientId,
+    metadata: { noteId: id, approvedByRole: approvedByRoleLabel },
+  });
+  void logEntityAudit({
+    action: "NOTE_APPROVED",
+    entityType: "clinical_note",
+    entityId: id,
+    organisationId,
+    performedBy: uid,
+    role: approvedByRoleLabel ?? approverMdt ?? role,
+    metadata: {
+      patientId,
+      organisationId,
+      noteId: id,
+      approvedBy: uid,
+      role: approvedByRoleLabel ?? approverMdt ?? role,
+    },
+  });
+  await addDoc(collection(db, "audit_logs"), {
+    action: "NOTE_APPROVED",
+    entityType: "note",
+    entityId: id,
+    performedBy: uid,
+    noteId: id,
+    approvedBy: uid,
+    role: approvedByRoleLabel ?? approverMdt ?? role,
+    organisationId,
+    timestamp: serverTimestamp(),
+    metadata: { approvedByRole: approvedByRoleLabel },
+  }).catch(() => {});
+}
+
+/**
+ * Raw note documents for one org (canonical `notes` collection only).
+ * Tries composite query (organisationId + orderBy createdAt); on failure (e.g. missing index),
+ * falls back to equality-only query and sorts in memory so notes still load.
+ */
+export async function getNotes(
+  organisationId: string,
+  limitCount: number = 1000
+): Promise<Array<{ id: string } & Record<string, unknown>>> {
+  return getOrganisationNoteDocuments(NOTES_COLLECTION, organisationId, limitCount);
+}
+
+/** Firestore Timestamp-safe sort (handles `seconds` / `toMillis` / missing). */
+function sortNoteDocsByCreatedAtDesc<T extends { createdAt?: unknown }>(data: T[]): T[] {
+  return [...data].sort((a, b) => createdAtMillis(b.createdAt) - createdAtMillis(a.createdAt));
+}
+
+/**
+ * Internal: one collection, org scope, primary query with index or fallback without orderBy.
+ */
+async function getOrganisationNoteDocuments(
+  collectionName: string,
+  organisationId: string,
+  fetchCap: number
+): Promise<Array<{ id: string } & Record<string, unknown>>> {
+  const col = collection(db, collectionName);
+  const capped = Math.min(1000, Math.max(1, fetchCap));
+
+  try {
+    const q = query(
+      col,
+      where("organisationId", "==", organisationId),
+      orderBy("createdAt", "desc"),
+      limit(capped)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ ...d.data(), id: d.id }));
+  } catch (err) {
+    console.warn("Primary query failed, using fallback", err);
+    const qFallback = query(col, where("organisationId", "==", organisationId), limit(capped));
+    const snap = await getDocs(qFallback);
+    const data = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
+    return sortNoteDocsByCreatedAtDesc(data);
+  }
+}
+
+/**
+ * Read from `notes` (or legacy) with org scope.
+ * Uses {@link getOrganisationNoteDocuments} so listing works even when the composite index is missing.
  */
 async function fetchNotesFromCollection(
   collectionName: string,
@@ -447,40 +953,27 @@ async function fetchNotesFromCollection(
   patientId: string | null,
   limitCount: number
 ): Promise<Array<ClinicalNote & { mood?: string | null }>> {
-  const col = collection(db, collectionName);
   const pid = patientId ? (patientId ?? "").toString().trim() : "";
-  const cap = Math.min(500, Math.max(limitCount, 50));
+  const fetchCap = Math.min(1000, Math.max(limitCount * 3, 200));
 
-  const mapDocs = (snapshot: Awaited<ReturnType<typeof getDocs>>) =>
-    (snapshot?.docs ?? []).map((d) => mapFirestoreClinicalNote(d.id, d.data() as Record<string, unknown>));
+  const raw = await getOrganisationNoteDocuments(collectionName, organisationId, fetchCap);
+  const rows = raw.map(({ id, ...data }) =>
+    mapFirestoreClinicalNote(id, data as Record<string, unknown>)
+  );
 
-  const sortAndSlice = (rows: Array<ClinicalNote & { mood?: string | null }>) => {
-    rows.sort((x, y) => createdAtMillis(y.createdAt) - createdAtMillis(x.createdAt));
-    return rows.slice(0, limitCount);
+  const sortAndSlice = (r: Array<ClinicalNote & { mood?: string | null }>) => {
+    r.sort((x, y) => createdAtMillis(y.createdAt) - createdAtMillis(x.createdAt));
+    return r.slice(0, limitCount);
   };
 
-  const constraintsBase: ReturnType<typeof where>[] = [where("organisationId", "==", organisationId)];
-  if (hospitalId) constraintsBase.push(where("hospitalId", "==", hospitalId));
-  if (pid) constraintsBase.push(where("patientId", "==", pid));
+  const filterRows = (r: Array<ClinicalNote & { mood?: string | null }>) => {
+    let out = r;
+    if (hospitalId) out = out.filter((row) => (row.hospitalId ?? "") === hospitalId);
+    if (pid) out = out.filter((row) => (row.patientId ?? "") === pid);
+    return sortAndSlice(out);
+  };
 
-  try {
-    const qOrdered = query(
-      col,
-      ...constraintsBase,
-      orderBy("createdAt", "desc"),
-      limit(limitCount)
-    );
-    const snapshot = await getDocs(qOrdered);
-    return mapDocs(snapshot);
-  } catch (err) {
-    console.warn(
-      `[noteService] orderBy query failed for "${collectionName}" (add Firestore composite index if possible). Using client sort.`,
-      err
-    );
-    const qFallback = query(col, ...constraintsBase, limit(cap));
-    const snapshot = await getDocs(qFallback);
-    return sortAndSlice(mapDocs(snapshot));
-  }
+  return filterRows(rows);
 }
 
 /**
@@ -489,21 +982,45 @@ async function fetchNotesFromCollection(
 export async function fetchClinicalNotesForOrganisation({
   patientId = null,
   limitCount = 300,
+  hospitalScopeId = null,
 }: {
   patientId?: string | null;
   limitCount?: number;
+  /** When set (e.g. from the patient record), prefer this over profile hospital for queries. */
+  hospitalScopeId?: string | null;
 } = {}): Promise<Array<ClinicalNote & { mood?: string | null }>> {
-  const { organisationId, hospitalId: ctxHospitalId } = await getUserContext();
+  const { organisationId, hospitalId: ctxHospitalId, role: ctxRole } = await getUserContext();
   if (!organisationId) throw new Error("Governance Error: organisationId is missing.");
-  if (!ctxHospitalId) throw new Error("hospitalId is required for clinical note queries.");
+
+  const pid = patientId != null ? String(patientId).trim() : "";
+  const profile =
+    auth.currentUser?.uid != null ? await getCurrentUserProfile(auth.currentUser.uid) : null;
+  const roleUpper = (ctxRole ?? "").toString().trim().toUpperCase();
+  /** Org-wide list: super/global/group admins must see all hospitals; profile hospital would hide notes. */
+  const skipOrgWideHospitalScope =
+    !pid &&
+    (roleUpper === "SUPER_ADMIN" ||
+      roleUpper === "GLOBAL_ADMIN" ||
+      roleUpper === "GROUP_ADMIN" ||
+      profile?.isGlobalAdmin === true);
+
+  const fromPatient = normalizeHospitalScopeId(hospitalScopeId);
+  const fromCtx = normalizeHospitalScopeId(ctxHospitalId);
+  // Single-patient fetch: prefer patient record hospital, then profile. Org-wide list: use profile hospital
+  // for staff/manager (one hospital) — never "UNASSIGNED". Admins skip hospital filter here.
+  const effectiveHospitalIdForQuery = pid
+    ? fromPatient ?? fromCtx
+    : skipOrgWideHospitalScope
+      ? null
+      : fromCtx ?? null;
 
   const [a, b] = await Promise.all([
-    fetchNotesFromCollection(NOTES_COLLECTION, organisationId, ctxHospitalId ?? null, patientId, limitCount).catch((e) => {
+    fetchNotesFromCollection(NOTES_COLLECTION, organisationId, effectiveHospitalIdForQuery, pid || null, limitCount).catch((e) => {
       console.error(`[noteService] Failed to read "${NOTES_COLLECTION}":`, e);
       return [];
     }),
     // Legacy notes may not have `hospitalId` denormalised; read without hospital filter then enforce via patient lookup when needed.
-    fetchNotesFromCollection(LEGACY_CLINICAL_NOTES_COLLECTION, organisationId, null, patientId, limitCount).catch((e) => {
+    fetchNotesFromCollection(LEGACY_CLINICAL_NOTES_COLLECTION, organisationId, null, pid || null, limitCount).catch((e) => {
       console.warn(`[noteService] Legacy "${LEGACY_CLINICAL_NOTES_COLLECTION}" read skipped:`, e);
       return [];
     }),
@@ -521,7 +1038,8 @@ export async function fetchClinicalNotesForOrganisation({
   // Hospital boundary enforcement for organisation-scoped note listing.
   // Notes themselves are scoped by (organisationId, patientId), so we filter by
   // each patient's hospitalId when listing across multiple patients.
-  if (ctxHospitalId && !patientId) {
+  const scopedCtxHospital = normalizeHospitalScopeId(ctxHospitalId);
+  if (scopedCtxHospital && !pid && !skipOrgWideHospitalScope) {
     const uniquePatientIds = Array.from(
       new Set(merged.map((n) => (n.patientId ?? "").toString().trim()).filter(Boolean))
     );
@@ -541,7 +1059,7 @@ export async function fetchClinicalNotesForOrganisation({
       })
     );
 
-    const filtered = merged.filter((n) => hospitalByPatientId.get(String(n.patientId ?? "")) === ctxHospitalId);
+    const filtered = merged.filter((n) => hospitalByPatientId.get(String(n.patientId ?? "")) === scopedCtxHospital);
     merged.splice(0, merged.length, ...filtered);
   }
 
@@ -555,9 +1073,12 @@ export async function fetchClinicalNotesForPatient(
 ): Promise<Array<ClinicalNote & { mood?: string | null }>> {
   const pid = (patientId ?? "").toString().trim();
   if (!pid) return [];
-  // Validate tenant scope (organisation + hospital) for this specific patient.
-  await getPatientById(pid);
-  return fetchClinicalNotesForOrganisation({ patientId: pid, limitCount });
+  const patient = await getPatientById(pid);
+  return fetchClinicalNotesForOrganisation({
+    patientId: pid,
+    limitCount,
+    hospitalScopeId: patient.hospitalId ?? null,
+  });
 }
 
 /**
@@ -589,7 +1110,7 @@ export async function saveClinicalNote(note: ClinicalNote): Promise<{ id: string
   const rawCategory = (note.category ?? "").toString().trim();
   const category = ALLOWED_CATEGORIES.includes(rawCategory) ? rawCategory : "Structured";
   const structured = safeStructured(note.structured);
-  const structuredData = safeStructuredData(note.structuredData ?? note.structured);
+  const structuredData = safeStructuredData(note.structuredData ?? note.structured, discipline);
   const correctedNote = safeString(note.correctedNote);
   const summaries = safeSummaries(note.summaries);
   const mdtReview = safeMdtReview(note.mdtReview, discipline) ?? null;
@@ -632,6 +1153,7 @@ export async function saveClinicalNote(note: ClinicalNote): Promise<{ id: string
     ...safeModeFields(),
     ...updatePayload,
     content,
+    role: discipline,
     mdtRole: mdtRoleSave,
     mood: structured?.mood ?? null,
     behaviour: null,
@@ -648,7 +1170,17 @@ export async function saveClinicalNote(note: ClinicalNote): Promise<{ id: string
 
   assertTenantContext(organisationId, hospitalId);
 
-  const noteSnap = await addDoc(collection(db, NOTES_COLLECTION), { ...createPayload, createdAt: serverTimestamp() });
+  const noteSnap = await addDoc(collection(db, NOTES_COLLECTION), {
+    ...createPayload,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    status: "draft",
+    isDeleted: false,
+    deletedAt: null,
+    deletedBy: null,
+    ...(userId ? { createdBy: userId, updatedBy: userId } : {}),
+    ...(mdtRoleSave ? { createdByRole: mdtRoleSave } : {}),
+  });
 
   const behaviourSave = await extractBehaviourFromNote(content);
   try {
@@ -764,6 +1296,11 @@ export async function addAddendum(noteId: string, text: string): Promise<{ id: s
   if (!noteOrgId || noteOrgId !== organisationId) throw new Error("403 Forbidden: organisation scope mismatch");
   if (!noteHospitalId || noteHospitalId !== ctxHospitalId) throw new Error("403 Forbidden: hospital scope mismatch");
 
+  const noteStatus = typeof note.status === "string" ? note.status.trim().toLowerCase() : "";
+  if (noteStatus !== "approved" && noteStatus !== "final") {
+    throw new Error("Add addendum is only available after the note is finalised or approved.");
+  }
+
   const addendum = await addDoc(collection(db, NOTE_ADDENDUMS_COLLECTION), {
     organisationId,
     hospitalId: noteHospitalId,
@@ -772,6 +1309,7 @@ export async function addAddendum(noteId: string, text: string): Promise<{ id: s
     patientId,
     text: addendumText,
     authorId: userId,
+    createdBy: userId,
     authorEmail: userEmail,
     authorRole: role ?? null,
     createdAt: serverTimestamp(),

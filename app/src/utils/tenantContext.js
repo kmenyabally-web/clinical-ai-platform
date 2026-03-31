@@ -41,6 +41,25 @@ export function assertSameOrganisationData(dataOrganisationId, userOrganisationI
   }
 }
 
+/** Treat placeholder / unassigned ids as “no hospital scope” for reads and queries. */
+export function normalizeHospitalScopeId(id) {
+  if (id == null || typeof id !== "string") return null;
+  const t = id.trim();
+  if (!t) return null;
+  if (t.toUpperCase() === "UNASSIGNED") return null;
+  if (t === TENANT_UNSCOPED_HOSPITAL) return null;
+  return t;
+}
+
+export function normalizeWardScopeId(id) {
+  if (id == null || typeof id !== "string") return null;
+  const t = id.trim();
+  if (!t) return null;
+  if (t.toUpperCase() === "UNASSIGNED") return null;
+  if (t === TENANT_UNSCOPED_WARD) return null;
+  return t;
+}
+
 /**
  * @param {{ organisationId?: string | null, hospitalId?: string | null, wardId?: string | null }} ctx
  * @returns {{ organisationId: string, hospitalId: string, wardId: string }}

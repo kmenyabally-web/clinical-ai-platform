@@ -11,6 +11,21 @@ import { listHospitals, listWards } from "../services/structureService";
 
 const STORAGE_PREFIX = "cqc.structure.";
 
+/** Profile placeholders that must not block picking a real hospital/ward in the UI. */
+function isPlaceholderHospitalId(id) {
+  if (id == null || typeof id !== "string") return true;
+  const t = id.trim();
+  if (!t) return true;
+  return t.toUpperCase() === "UNASSIGNED";
+}
+
+function isPlaceholderWardId(id) {
+  if (id == null || typeof id !== "string") return true;
+  const t = id.trim();
+  if (!t) return true;
+  return t.toUpperCase() === "UNASSIGNED";
+}
+
 const StructureContext = createContext(null);
 
 export function useStructure() {
@@ -65,9 +80,19 @@ export function StructureProvider({ children }) {
     if (!organisationId || hospitals.length === 0) return;
     const fromProfile = userProfile?.hospitalId;
     const stored = storageKeyHospital ? localStorage.getItem(storageKeyHospital) : null;
-    const preferred = fromProfile || stored;
-    if (preferred && hospitals.some((h) => h.id === preferred)) {
+    let preferred = null;
+    for (const c of [fromProfile, stored]) {
+      if (c != null && !isPlaceholderHospitalId(c) && hospitals.some((h) => h.id === c)) {
+        preferred = c;
+        break;
+      }
+    }
+    if (preferred) {
       setCurrentHospitalIdState(preferred);
+    } else if (hospitals.length === 1) {
+      const only = hospitals[0].id;
+      setCurrentHospitalIdState(only);
+      if (storageKeyHospital) localStorage.setItem(storageKeyHospital, only);
     }
   }, [organisationId, hospitals, userProfile?.hospitalId, storageKeyHospital]);
 
@@ -96,9 +121,19 @@ export function StructureProvider({ children }) {
     }
     const fromProfile = userProfile?.wardId;
     const stored = storageKeyWard ? localStorage.getItem(storageKeyWard) : null;
-    const preferred = fromProfile || stored;
-    if (preferred && wards.some((w) => w.id === preferred)) {
+    let preferred = null;
+    for (const c of [fromProfile, stored]) {
+      if (c != null && !isPlaceholderWardId(c) && wards.some((w) => w.id === c)) {
+        preferred = c;
+        break;
+      }
+    }
+    if (preferred) {
       setCurrentWardIdState(preferred);
+    } else if (wards.length === 1) {
+      const only = wards[0].id;
+      setCurrentWardIdState(only);
+      if (storageKeyWard) localStorage.setItem(storageKeyWard, only);
     } else {
       setCurrentWardIdState(null);
     }

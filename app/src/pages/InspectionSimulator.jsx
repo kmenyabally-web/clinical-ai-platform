@@ -28,7 +28,7 @@ export default function InspectionSimulator() {
 
   async function fetchInspectionContext() {
     const [incidents, carePlans] = await Promise.all([
-      fetchIncidents(organisationId, { serviceId: currentServiceId ?? undefined }),
+      fetchIncidents(organisationId, {}),
       listCarePlans(organisationId, { serviceId: currentServiceId ?? undefined, limitCount: 3 }),
     ]);
     const recentIncidents = (Array.isArray(incidents) ? incidents : []).slice(0, 5);

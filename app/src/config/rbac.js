@@ -6,6 +6,8 @@
 export const ROLE_PERMISSIONS = {
   /** Full access: wildcard handled in getPermissionsForRole / canAccess. */
   Admin: ["*"],
+  /** Same tenant scope as Admin; preferred label for enterprise RBAC. */
+  "Organisation Admin": ["*"],
   Manager: [
     "audit:create",
     "audit:update",
@@ -40,6 +42,9 @@ const ROLE_ALIASES = {
   Auditor: "Inspector",
   Administrator: "Admin",
   administrator: "Admin",
+  "Organisation Admin": "Organisation Admin",
+  ORGANISATION_ADMIN: "Organisation Admin",
+  ORGANIZATION_ADMIN: "Organisation Admin",
 };
 
 /**
@@ -75,6 +80,7 @@ function roleKeyForPermissions(role) {
   const n = normalizeRole(role) ?? role;
   const t = typeof n === "string" ? n.trim() : "";
   if (t === "Admin") return "ADMIN";
+  if (t === "Organisation Admin") return "ADMIN";
   if (t === "Manager") return "MANAGER";
   if (t === "QualityLead") return "MANAGER";
   if (t === "Inspector") return "STAFF";
@@ -104,7 +110,7 @@ export function getPermissionsForRole(role) {
   if (!role || typeof role !== "string") return [];
   const normalised = normalizeRole(role) ?? role;
   const perms = ROLE_PERMISSIONS[normalised] ?? [];
-  if (normalised === "Admin" || perms.includes("*")) {
+  if (normalised === "Admin" || normalised === "Organisation Admin" || perms.includes("*")) {
     return [
       "*",
       "audit:create",
@@ -127,7 +133,7 @@ export function getPermissionsForRole(role) {
 export function canAccess(role, permission) {
   if (!role) return false;
   const normalised = normalizeRole(role) ?? role;
-  if (normalised === "Admin") return true;
+  if (normalised === "Admin" || normalised === "Organisation Admin") return true;
   const perms = ROLE_PERMISSIONS[normalised] ?? [];
   if (perms.includes("*")) return true;
   return perms.includes(permission);

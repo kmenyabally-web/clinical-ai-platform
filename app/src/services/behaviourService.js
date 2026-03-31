@@ -1,1 +1,9 @@
-export { BEHAVIOURS_COLLECTION, extractBehaviourFromNote, fetchBehaviourForPatient } from "./behaviourService.ts";
+export {
+  BEHAVIOURS_COLLECTION,
+  behaviourTypes,
+  createBehaviourLog,
+  extractBehaviourFromNote,
+  fetchBehaviourForPatient,
+  fetchStructuredBehaviourLogsForPatient,
+  isValidStructuredBehaviourLog,
+} from "./behaviourService.ts";
