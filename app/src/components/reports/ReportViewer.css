@@ -1,0 +1,104 @@
+/* Print and screen: NHS-style clinical report shell */
+.clinical-report-viewer-wrap {
+  margin-top: 1.5rem;
+}
+
+.clinical-report-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.clinical-report-toolbar button {
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+}
+
+.clinical-report-toolbar button.clinical-report-btn-primary {
+  background: #0f172a;
+  color: #fff;
+  border-color: #0f172a;
+}
+
+.clinical-report-toolbar button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+#report-container {
+  background: #ffffff;
+  padding: 40px;
+  max-width: 800px;
+  margin: 0 auto;
+  font-family: Arial, Helvetica, sans-serif;
+  color: #0f172a;
+  line-height: 1.55;
+  box-sizing: border-box;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+}
+
+#report-container .cr-title {
+  font-size: 22px;
+  font-weight: 800;
+  margin: 0 0 8px 0;
+  letter-spacing: -0.02em;
+}
+
+#report-container .cr-meta {
+  font-size: 13px;
+  margin: 0 0 24px 0;
+  padding-bottom: 16px;
+  border-bottom: 2px solid #0f172a;
+}
+
+#report-container .cr-meta p {
+  margin: 4px 0;
+}
+
+#report-container .cr-section {
+  margin-bottom: 20px;
+}
+
+#report-container .cr-section h2 {
+  font-size: 15px;
+  font-weight: 800;
+  margin: 20px 0 8px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #ddd;
+  color: #0f172a;
+}
+
+#report-container .cr-section p {
+  margin: 0;
+  font-size: 14px;
+  white-space: pre-wrap;
+}
+
+@media print {
+  .clinical-report-toolbar {
+    display: none !important;
+  }
+  body * {
+    visibility: hidden;
+  }
+  #report-container,
+  #report-container * {
+    visibility: visible;
+  }
+  #report-container {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    max-width: none;
+    border: none;
+    padding: 24px;
+  }
+}

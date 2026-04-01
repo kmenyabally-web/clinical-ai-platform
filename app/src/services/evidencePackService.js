@@ -2,11 +2,22 @@ import JSZip from "jszip";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { fetchClinicalNotesForPatient } from "./noteService";
-import { listCarePlansForPatient } from "./carePlanManagementService";
+import { listCarePlansForPatient, listCarePlansForOrganisation } from "./carePlanManagementService";
 import { fetchDocuments } from "./documentService";
+import { fetchIncidents } from "./incidentService";
+import { listStaffTraining } from "./staffTrainingService";
 import { getStompAlerts } from "../utils/stompAlerts";
 import { getInspectionAlerts } from "../utils/inspectionAlerts";
-
+import {
+  mapEvidenceToDomains,
+  buildCqcInspectionSections,
+  detectCriticalIssues,
+} from "../engine/cqcInspectionPack";
+import {
+  runInspectionSimulation,
+  getWarnings,
+  buildSimulationInputFromMapped,
+} from "../engine/inspectionSimulationEngine";
 function safeFilename(s) {
   return String(s ?? "")
     .replace(/[<>:"/\\|?*]+/g, "_")
@@ -220,4 +231,164 @@ export async function generateEvidencePack({ organisationId }) {
       historyCount: inspectionScores.length,
     },
   };
+}
+
+/**
+ * CQC inspection engine: domain-grouped evidence, gaps, and risk flags.
+ * When `patientId` is set, notes and care plans are scoped to that patient; org-wide incidents/training/policies remain.
+ *
+ * @param {{ organisationId: string, patientId?: string | null }} params
+ */
+export async function generateInspectionEnginePack({ organisationId, patientId = null }) {
+  const org = String(organisationId ?? "").trim();
+  if (!org) throw new Error("organisationId is required");
+
+  const pid = (patientId ?? "").toString().trim() || null;
+
+  const [
+    notesSnap,
+    auditSnap,
+    inspectionSnap,
+    patientsSnap,
+    inspectionScoreSnap,
+    docResult,
+    incidents,
+    training,
+  ] = await Promise.all([
+    getDocs(query(collection(db, "notes"), where("organisationId", "==", org))),
+    getDocs(query(collection(db, "audit_logs"), where("organisationId", "==", org))),
+    getDocs(query(collection(db, "inspection_reports"), where("organisationId", "==", org))),
+    getDocs(query(collection(db, "patients"), where("organisationId", "==", org))),
+    getDocs(query(collection(db, "inspection_scores"), where("organisationId", "==", org))),
+    fetchDocuments(org, { limitCount: 150 }),
+    fetchIncidents(org, {}).catch(() => []),
+    listStaffTraining(org).catch(() => []),
+  ]);
+
+  let notes = (notesSnap?.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
+  if (pid) {
+    notes = notes.filter((n) => String(n.patientId ?? "") === pid);
+  }
+
+  let carePlans = [];
+  if (pid) {
+    try {
+      carePlans = await listCarePlansForPatient(org, pid);
+    } catch {
+      carePlans = [];
+    }
+  }
+
+  const audits = (auditSnap?.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
+  const inspections = (inspectionSnap?.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
+  const inspectionScores = (inspectionScoreSnap?.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
+  inspectionScores.sort((a, b) => {
+    const ta = typeof a?.createdAt?.toMillis === "function" ? a.createdAt.toMillis() : 0;
+    const tb = typeof b?.createdAt?.toMillis === "function" ? b.createdAt.toMillis() : 0;
+    return tb - ta;
+  });
+  const latestScore = inspectionScores[0] ?? null;
+  const latestDomainScores = latestScore?.domainScores ?? null;
+  const keyAlerts = latestDomainScores ? getInspectionAlerts(latestDomainScores) : [];
+  const stompPatients = (patientsSnap?.docs ?? [])
+    .map((d) => ({ id: d.id, ...(d.data() ?? {}) }))
+    .filter((p) => p?.stompMonitoring === true)
+    .map((p) => ({
+      patientId: p.id,
+      patientName: [p.firstName, p.lastName].filter(Boolean).join(" ").trim() || p.name || p.id,
+      medications: Array.isArray(p.medications) ? p.medications : [],
+      alerts: getStompAlerts(p),
+    }));
+
+  const documents = docResult?.documents ?? [];
+  const policyDocs = documents.filter((d) => d.documentType === "policy" || String(d.collection ?? "").includes("policies"));
+
+  const mapped = mapEvidenceToDomains({
+    notes,
+    incidents,
+    carePlans,
+    training,
+    policies: documents,
+    audits,
+  });
+
+  const simulationInput = buildSimulationInputFromMapped(mapped);
+  const simulation = runInspectionSimulation(simulationInput);
+  const simulationWarnings = getWarnings(simulation.domains);
+
+  const cqcDomains = buildCqcInspectionSections(mapped);
+  const criticalIssues = detectCriticalIssues({
+    training,
+    policies: policyDocs,
+    incidents,
+    notes,
+  });
+
+  return {
+    summary: `Inspection engine — notes: ${notes.length}, incidents: ${incidents.length}, care plans: ${carePlans.length}, training records: ${training.length}, policy docs: ${policyDocs.length}`,
+    patientId: pid,
+    notes,
+    audits,
+    inspections,
+    incidents,
+    training,
+    documents,
+    carePlans,
+    stompCompliance: stompPatients,
+    inspectionIntelligence: {
+      overallScore: latestScore?.overallScore ?? null,
+      domainScores: latestDomainScores,
+      keyAlerts,
+      historyCount: inspectionScores.length,
+    },
+    cqcInspection: {
+      domains: cqcDomains,
+      criticalIssues,
+      simulation: {
+        domains: simulation.domains,
+        overallScore: simulation.overallScore,
+        rating: simulation.rating,
+        warnings: simulationWarnings,
+      },
+      counts: {
+        notes: notes.length,
+        incidents: incidents.length,
+        carePlans: carePlans.length,
+        training: training.length,
+        policies: policyDocs.length,
+        audits: audits.length,
+      },
+    },
+  };
+}
+
+/**
+ * Org-wide evidence map for the live inspection simulator (dashboard).
+ * @param {string} organisationId
+ */
+export async function fetchEvidenceForCqcSimulation(organisationId) {
+  const org = String(organisationId ?? "").trim();
+  if (!org) throw new Error("organisationId is required");
+
+  const [notesSnap, auditSnap, docResult, incidents, training, carePlans] = await Promise.all([
+    getDocs(query(collection(db, "notes"), where("organisationId", "==", org))),
+    getDocs(query(collection(db, "audit_logs"), where("organisationId", "==", org))),
+    fetchDocuments(org, { limitCount: 150 }),
+    fetchIncidents(org, {}).catch(() => []),
+    listStaffTraining(org).catch(() => []),
+    listCarePlansForOrganisation(org, { limitCount: 300 }).catch(() => []),
+  ]);
+
+  const notes = (notesSnap?.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
+  const audits = (auditSnap?.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
+  const documents = docResult?.documents ?? [];
+
+  return mapEvidenceToDomains({
+    notes,
+    incidents,
+    carePlans,
+    training,
+    policies: documents,
+    audits,
+  });
 }

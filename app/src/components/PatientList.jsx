@@ -2,7 +2,15 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { listPatients, createPatient, updatePatientDemographics, softDeletePatient } from "../services/patientService";
+import {
+  listPatients,
+  createPatient,
+  updatePatientDemographics,
+  softDeletePatient,
+  getPatientsByOrganisation,
+  restorePatient,
+} from "../services/patientService";
+import { showToast } from "../utils/toast";
 import { listWards } from "../services/structureService";
 import { logAuditEventNonBlocking } from "../services/auditService";
 import { useOrganisation } from "../context/OrganisationContext";
@@ -36,6 +44,9 @@ export default function PatientList() {
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [archiveConfirmPatient, setArchiveConfirmPatient] = useState(null);
+  const [restoreConfirmPatient, setRestoreConfirmPatient] = useState(null);
 
   const canManagePatients = isOrganisationAdminRole(role) || Boolean(isPlatformAdmin);
 
@@ -50,18 +61,26 @@ export default function PatientList() {
     setIsLoading(true);
     setError(null);
     try {
-      const filters = {};
-      if (currentHospitalId) filters.hospitalId = currentHospitalId;
-      if (currentWardId) filters.wardId = currentWardId;
-      const data = await listPatients(filters);
-      setRows(Array.isArray(data) ? data : []);
+      if (showArchived && canManagePatients) {
+        const all = await getPatientsByOrganisation(organisationId, { includeArchived: true });
+        let list = Array.isArray(all) ? all.filter((p) => p.isDeleted === true) : [];
+        if (currentHospitalId) list = list.filter((p) => (p.hospitalId ?? "") === currentHospitalId);
+        if (currentWardId) list = list.filter((p) => (p.wardId ?? "") === currentWardId);
+        setRows(list);
+      } else {
+        const filters = {};
+        if (currentHospitalId) filters.hospitalId = currentHospitalId;
+        if (currentWardId) filters.wardId = currentWardId;
+        const data = await listPatients(filters);
+        setRows(Array.isArray(data) ? data : []);
+      }
     } catch (err) {
       setError(err);
       setRows([]);
     } finally {
       setIsLoading(false);
     }
-  }, [organisationId, currentHospitalId, currentWardId]);
+  }, [organisationId, currentHospitalId, currentWardId, showArchived, canManagePatients]);
 
   useEffect(() => {
     if (structureLoading) return;
@@ -107,6 +126,21 @@ export default function PatientList() {
       </div>
 
       <h2 style={styles.title}>Patient list</h2>
+
+      {!organisationId ? (
+        <p style={styles.text}>Loading organisation…</p>
+      ) : null}
+
+      {organisationId && canManagePatients ? (
+        <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, fontSize: 13, fontWeight: 700, color: "#334155" }}>
+          <input
+            type="checkbox"
+            checked={showArchived}
+            onChange={(e) => setShowArchived(e.target.checked)}
+          />
+          Show archived records only
+        </label>
+      ) : null}
 
       {organisationId ? (
         <div
@@ -186,7 +220,7 @@ export default function PatientList() {
         />
       </div>
 
-      {structureLoading || isLoading ? (
+      {!organisationId ? null : structureLoading || isLoading ? (
         <p style={styles.text}>Loading patient metadata…</p>
       ) : error ? (
         <div style={styles.errorBox}>
@@ -202,6 +236,7 @@ export default function PatientList() {
               <th style={styles.th}>Hospital</th>
               <th style={styles.th}>Ward</th>
               <th style={styles.th}>DOB</th>
+              {canManagePatients ? <th style={styles.th}>Actions</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -220,14 +255,49 @@ export default function PatientList() {
                 <td style={styles.td}>{r.hospitalName || r.hospitalId || "—"}</td>
                 <td style={styles.td}>{r.wardName || r.wardId || "—"}</td>
                 <td style={styles.td}>{formatDob(r.dob)}</td>
+                {canManagePatients ? (
+                  <td style={styles.td}>
+                    {showArchived ? (
+                      <button
+                        type="button"
+                        disabled={deletingId === r.id}
+                        onClick={() => setRestoreConfirmPatient(r)}
+                        style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #86efac", background: "#ecfdf5", fontWeight: 700, cursor: "pointer", fontSize: 12 }}
+                      >
+                        Restore
+                      </button>
+                    ) : (
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditPatient(r);
+                            setEditError(null);
+                          }}
+                          style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #cbd5e1", background: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 12 }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          disabled={deletingId === r.id}
+                          onClick={() => setArchiveConfirmPatient(r)}
+                          style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #fecaca", background: "#fff1f2", color: "#991b1b", fontWeight: 700, cursor: "pointer", fontSize: 12 }}
+                        >
+                          {deletingId === r.id ? "…" : "Archive"}
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                ) : null}
               </tr>
             ))}
             {filteredRows.length === 0 ? (
               <tr>
-                <td style={styles.td} colSpan={5}>
+                <td style={styles.td} colSpan={canManagePatients ? 6 : 5}>
                   {isSearchActive
                     ? "No patients match your search criteria."
-                    : "No patients found for this scope."}
+                    : "No patients registered yet"}
                 </td>
               </tr>
             ) : null}
@@ -254,14 +324,65 @@ export default function PatientList() {
               await updatePatientDemographics(editPatient.id, payload);
               setEditPatient(null);
               await load();
+              showToast("Patient updated", "success");
             } catch (err) {
-              setEditError(err?.message ?? "Failed to update patient.");
+              const msg = err?.message ?? "Failed to update patient.";
+              setEditError(msg);
+              showToast(msg);
             } finally {
               setEditSaving(false);
             }
           }}
           loading={editSaving}
           error={editError}
+        />
+      ) : null}
+
+      {archiveConfirmPatient && organisationId && canManagePatients ? (
+        <ConfirmModal
+          title="Archive patient record?"
+          body="This will archive the record. It can be restored later."
+          confirmLabel="Archive"
+          onCancel={() => setArchiveConfirmPatient(null)}
+          onConfirm={async () => {
+            const p = archiveConfirmPatient;
+            setArchiveConfirmPatient(null);
+            if (!p?.id) return;
+            setDeletingId(p.id);
+            try {
+              await softDeletePatient(p.id);
+              showToast("Record archived", "success");
+              await load();
+            } catch (err) {
+              showToast(err?.message ?? "Could not archive patient.");
+            } finally {
+              setDeletingId(null);
+            }
+          }}
+        />
+      ) : null}
+
+      {restoreConfirmPatient && organisationId && canManagePatients ? (
+        <ConfirmModal
+          title="Restore patient record?"
+          body="This will make the record active again in patient lists."
+          confirmLabel="Restore"
+          onCancel={() => setRestoreConfirmPatient(null)}
+          onConfirm={async () => {
+            const p = restoreConfirmPatient;
+            setRestoreConfirmPatient(null);
+            if (!p?.id) return;
+            setDeletingId(p.id);
+            try {
+              await restorePatient(p.id);
+              showToast("Patient restored", "success");
+              await load();
+            } catch (err) {
+              showToast(err?.message ?? "Could not restore patient.");
+            } finally {
+              setDeletingId(null);
+            }
+          }}
         />
       ) : null}
 
@@ -295,6 +416,25 @@ export default function PatientList() {
           error={createError}
         />
       ) : null}
+    </div>
+  );
+}
+
+function ConfirmModal({ title, body, confirmLabel, onCancel, onConfirm }) {
+  return (
+    <div style={styles.modalBackdrop}>
+      <div style={{ ...styles.modalCard, maxWidth: 400 }}>
+        <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>{title}</h2>
+        <p style={{ color: "#475569", fontSize: 14 }}>{body}</p>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+          <button type="button" onClick={onCancel} style={styles.secondaryBtn}>
+            Cancel
+          </button>
+          <button type="button" onClick={onConfirm} style={styles.primaryBtn}>
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -481,53 +621,21 @@ function EditPatientModal({
   const [firstName, setFirstName] = useState(patient?.firstName ?? "");
   const [lastName, setLastName] = useState(patient?.lastName ?? "");
   const [dob, setDob] = useState(() => formatDob(patient?.dob));
-  const [hospitalId, setHospitalId] = useState(patient?.hospitalId ?? "");
-  const [wardId, setWardId] = useState(patient?.wardId ?? "");
-  const [wardOptions, setWardOptions] = useState(wards);
 
   React.useEffect(() => {
     setFirstName(patient?.firstName ?? "");
     setLastName(patient?.lastName ?? "");
     setDob(formatDob(patient?.dob));
-    setHospitalId(patient?.hospitalId ?? "");
-    setWardId(patient?.wardId ?? "");
   }, [patient]);
 
-  React.useEffect(() => {
-    setWardOptions(wards);
-  }, [wards]);
-
-  React.useEffect(() => {
-    if (!organisationId || !hospitalId?.trim()) {
-      setWardOptions([]);
-      return;
-    }
-    let cancelled = false;
-    listWards(organisationId, hospitalId)
-      .then((list) => {
-        if (!cancelled) setWardOptions(Array.isArray(list) ? list : []);
-      })
-      .catch(() => {
-        if (!cancelled) setWardOptions([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [organisationId, hospitalId]);
-
-  const hospitalName = hospitals.find((h) => h.id === hospitalId)?.name ?? patient?.hospitalName ?? "";
-  const wardName = wardOptions.find((w) => w.id === wardId)?.name ?? patient?.wardName ?? "";
+  const hospitalName = hospitals.find((h) => h.id === patient?.hospitalId)?.name ?? patient?.hospitalName ?? "";
+  const wardName = wards.find((w) => w.id === patient?.wardId)?.name ?? patient?.wardName ?? "";
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!hospitalId?.trim() || !wardId?.trim()) return;
     onSubmit({
       firstName,
       lastName,
-      hospitalId,
-      wardId,
-      hospitalName,
-      wardName,
       dateOfBirth: dob || null,
     });
   };
@@ -552,36 +660,12 @@ function EditPatientModal({
             <input value={organisationName || organisationId} readOnly style={{ ...styles.input, background: "#f8fafc" }} />
           </label>
           <label style={styles.lbl}>
-            Hospital
-            <select
-              required
-              value={hospitalId}
-              onChange={(e) => {
-                setHospitalId(e.target.value);
-                setWardId("");
-              }}
-              style={styles.select}
-            >
-              <option value="">Select hospital</option>
-              {hospitals.map((h) => (
-                <option key={h.id} value={h.id}>
-                  {h.name}
-                </option>
-              ))}
-            </select>
+            Hospital (locked after creation)
+            <input value={hospitalName || hospitalId || "—"} readOnly style={{ ...styles.input, background: "#f8fafc" }} />
           </label>
           <label style={styles.lbl}>
-            Ward
-            <select required value={wardId} onChange={(e) => setWardId(e.target.value)} style={styles.select}
-              disabled={!hospitalId?.trim()}
-            >
-              <option value="">{hospitalId?.trim() ? "Select ward" : "Select hospital first"}</option>
-              {wardOptions.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name}
-                </option>
-              ))}
-            </select>
+            Ward (locked after creation)
+            <input value={wardName || wardId || "—"} readOnly style={{ ...styles.input, background: "#f8fafc" }} />
           </label>
           <label style={styles.lbl}>
             First name

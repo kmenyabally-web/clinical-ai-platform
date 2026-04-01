@@ -1,10 +1,58 @@
 /** [ENABLEMENT GATE: STAGE 12 - AI CARE PLAN GENERATOR] */
 
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { DEFAULT_GEMINI_MODEL_ID } from "../config/geminiModel.js";
 
-const GEMINI_MODEL =
-  (import.meta.env.VITE_GEMINI_MODEL && String(import.meta.env.VITE_GEMINI_MODEL).trim()) ||
-  "gemini-2.5-flash";
+/** Global model — Gemini REST v1beta generateContent. */
+export const MODEL = DEFAULT_GEMINI_MODEL_ID;
+
+const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+
+/**
+ * Single entry for all Gemini text generation (REST).
+ * @param {string} prompt
+ * @param {{ responseMimeType?: string, temperature?: number }} [options]
+ * @returns {Promise<string | null>}
+ */
+export async function generateAIContent(prompt, options = {}) {
+  const key = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!key || typeof key !== "string" || !key.trim()) {
+    console.error("AI ERROR:", new Error("Missing VITE_GEMINI_API_KEY"));
+    return null;
+  }
+
+  const body = {
+    contents: [{ parts: [{ text: String(prompt ?? "") }] }],
+  };
+  const gc = {};
+  if (options.responseMimeType) gc.responseMimeType = options.responseMimeType;
+  if (typeof options.temperature === "number") gc.temperature = options.temperature;
+  if (Object.keys(gc).length) body.generationConfig = gc;
+
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-goog-api-key": key.trim(),
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("AI ERROR:", res.status, errText);
+      return null;
+    }
+
+    const data = await res.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    console.log("AI RESPONSE:", typeof text === "string" ? text.slice(0, 800) : text);
+    return text || null;
+  } catch (err) {
+    console.error("AI ERROR:", err);
+    return null;
+  }
+}
 
 function isUncertain(text) {
   const t = String(text ?? "").toLowerCase();
@@ -16,15 +64,12 @@ function isUncertain(text) {
   );
 }
 
-function requireApiKey() {
-  const key = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!key || typeof key !== "string" || !key.trim()) {
-    throw new Error("Missing VITE_GEMINI_API_KEY. Add it to your .env file.");
-  }
-}
+const STRICT_DATA_ONLY_RULES =
+  "STRICT MODE: Do not invent facts, dates, diagnoses, or care details. Use ONLY information explicitly present in the provided data. If information is missing or unclear, write exactly: Insufficient data.";
 
 const SYSTEM_PROMPT =
-  "You are a CQC Clinical Consultant. Create a Regulation 9 compliant care plan. Use professional, person-centred language (e.g., 'Amina prefers...' instead of 'The patient needs...').";
+  "You are a CQC Clinical Consultant. Create a Regulation 9 compliant care plan. Use professional, person-centred language (e.g., 'Amina prefers...' instead of 'The patient needs...'). " +
+  STRICT_DATA_ONLY_RULES;
 
 function buildPrompt(details) {
   const patientName = (details?.patientName ?? "").toString().trim();
@@ -52,27 +97,18 @@ function buildPrompt(details) {
     "- Use person-centred language throughout.",
     "- Include practical actions that support safety and dignity.",
     "- Do not include private or sensitive identifiers beyond what is provided.",
+    "",
+    STRICT_DATA_ONLY_RULES,
   ].join("\n");
 }
 
 export async function generateClinicalCarePlan(details) {
-  try {
-    requireApiKey();
-    const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-
-    const prompt = buildPrompt(details);
-    const result = await model.generateContent(prompt);
-
-    const text = result?.response?.text?.() ?? "";
-    if (!text.trim() || isUncertain(text)) {
-      return null;
-    }
-    return text.trim();
-  } catch (e) {
-    console.warn("AI failed, fallback used");
+  const prompt = buildPrompt(details);
+  const text = await generateAIContent(prompt);
+  if (!text?.trim() || isUncertain(text)) {
     return null;
   }
+  return text.trim();
 }
 
 export async function generateCarePlanDraft(patientName, observations) {
@@ -121,6 +157,8 @@ function buildInspectorPrompt(data) {
           .join("\n");
 
   return [
+    STRICT_DATA_ONLY_RULES,
+    "",
     "You are a Senior CQC Inspector.",
     "Review the provided incidents and care plans.",
     "Find one inconsistency or gap where a risk was identified but the care plan wasn't updated.",
@@ -140,21 +178,12 @@ function buildInspectorPrompt(data) {
 }
 
 export async function generateInspectorChallenge(data) {
-  try {
-    requireApiKey();
-    const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-    const prompt = buildInspectorPrompt(data);
-    const result = await model.generateContent(prompt);
-    const text = result?.response?.text?.() ?? "";
-    if (!text.trim() || isUncertain(text)) {
-      return null;
-    }
-    return text.trim();
-  } catch (e) {
-    console.warn("AI failed, fallback used");
+  const prompt = buildInspectorPrompt(data);
+  const text = await generateAIContent(prompt);
+  if (!text?.trim() || isUncertain(text)) {
     return null;
   }
+  return text.trim();
 }
 
 function buildInspectorAuditPrompt(data, managerResponse) {
@@ -177,6 +206,8 @@ function buildInspectorAuditPrompt(data, managerResponse) {
     .join("\n");
 
   return [
+    STRICT_DATA_ONLY_RULES,
+    "",
     "You are a strict CQC Lead Inspector.",
     "First line MUST be exactly this sentence and quoted text:",
     "I've reviewed your Safeguarding logs. You said 'Yes' to protecting people, but I see an open incident for Amina Diallo from yesterday. Why hasn't this been closed yet?",
@@ -197,28 +228,14 @@ function buildInspectorAuditPrompt(data, managerResponse) {
 }
 
 export async function generateInspectorAuditFeedback(data, managerResponse) {
-  try {
-    requireApiKey();
-    const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-    const prompt = buildInspectorAuditPrompt(data, managerResponse);
-    const result = await model.generateContent(prompt);
-    const text = result?.response?.text?.() ?? "";
-    if (!text.trim() || isUncertain(text)) {
-      return null;
-    }
-    return text.trim();
-  } catch (e) {
-    console.warn("AI failed, fallback used");
+  const prompt = buildInspectorAuditPrompt(data, managerResponse);
+  const text = await generateAIContent(prompt);
+  if (!text?.trim() || isUncertain(text)) {
     return null;
   }
+  return text.trim();
 }
 
-/**
- * Duty of Candour letter (draft) for families — Regulation 20 (Health and Social Care Act 2008 (Regulated Activities) Regulations 2014).
- * @param {Record<string, unknown>} incidentData
- * @param {Record<string, unknown>} patientData
- */
 function buildCandourLetterPrompt(incidentData, patientData) {
   const inc = incidentData && typeof incidentData === "object" ? incidentData : {};
   const pat = patientData && typeof patientData === "object" ? patientData : {};
@@ -264,30 +281,14 @@ function buildCandourLetterPrompt(incidentData, patientData) {
 }
 
 export async function generateCandourLetter(incidentData, patientData) {
-  try {
-    requireApiKey();
-    const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-    const prompt = buildCandourLetterPrompt(incidentData, patientData);
-    const result = await model.generateContent(prompt);
-    const text = result?.response?.text?.() ?? "";
-    if (!text.trim() || isUncertain(text)) {
-      return null;
-    }
-    return text.trim();
-  } catch (e) {
-    console.warn("AI failed, fallback used");
+  const prompt = buildCandourLetterPrompt(incidentData, patientData);
+  const text = await generateAIContent(prompt);
+  if (!text?.trim() || isUncertain(text)) {
     return null;
   }
+  return text.trim();
 }
 
-// --- Staff competency vs care plan needs (clinical governance) ---
-
-/**
- * Deterministic fallback: match care text to training types and warn if valid staff count is below threshold.
- * @param {{ combinedCareText: string, validCountsByTraining: Record<string, number> }} args
- * @returns {string|null}
- */
 export function heuristicCompetencyGapWarning({ combinedCareText, validCountsByTraining }) {
   const text = (combinedCareText ?? "").toLowerCase();
   const counts = validCountsByTraining ?? {};
@@ -329,11 +330,6 @@ function buildCompetencyGapPrompt(patientDisplayName, combinedCareText, training
   ].join("\n");
 }
 
-/**
- * Uses Gemini when VITE_GEMINI_API_KEY is set; otherwise falls back to {@link heuristicCompetencyGapWarning}.
- * @param {{ patientDisplayName?: string, careNeeds?: string, riskAssessment?: string, supportStrategies?: string, planContent?: string, validCountsByTraining: Record<string, number> }} args
- * @returns {Promise<string|null>}
- */
 export async function getCompetencyGapWarning({
   patientDisplayName,
   careNeeds,
@@ -348,18 +344,8 @@ export async function getCompetencyGapWarning({
     .map(([k, v]) => `${k}: ${v} staff`)
     .join("\n");
 
-  let aiText = "";
-  try {
-    requireApiKey();
-    const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-    const prompt = buildCompetencyGapPrompt(patientDisplayName, combined, trainingSummaryLines);
-    const result = await model.generateContent(prompt);
-    aiText = (result?.response?.text?.() ?? "").trim();
-  } catch (e) {
-    console.warn("AI failed, fallback used");
-    aiText = "";
-  }
+  const prompt = buildCompetencyGapPrompt(patientDisplayName, combined, trainingSummaryLines);
+  const aiText = (await generateAIContent(prompt))?.trim() ?? "";
 
   if (aiText && !/^NONE$/i.test(aiText) && !/^no warning\.?$/i.test(aiText)) {
     return aiText.replace(/^["']|["']$/g, "").trim();
@@ -368,12 +354,6 @@ export async function getCompetencyGapWarning({
   return heuristicCompetencyGapWarning({ combinedCareText: combined, validCountsByTraining });
 }
 
-// --- Clinical note: grammar + structured extraction + summary (Gemini JSON) ---
-
-/**
- * Redact common identifiers before sending text to external AI (defence in depth).
- * @param {string} text
- */
 export function sanitizeClinicalText(text) {
   if (!text) return "";
 
@@ -385,7 +365,7 @@ export function sanitizeClinicalText(text) {
 }
 
 /** Strip markdown code fences; models often wrap JSON in ```json blocks. */
-function stripJsonFence(text) {
+export function stripJsonFence(text) {
   if (!text || typeof text !== "string") return "";
   let t = text.trim();
   const fence = /^```(?:json)?\s*([\s\S]*?)```$/im;
@@ -394,33 +374,9 @@ function stripJsonFence(text) {
   return t;
 }
 
-const CLINICAL_NOTE_MODEL = "gemini-1.5-flash";
-
-/**
- * Grammar correction + structured fields + short summary. Returns parsed JSON or null if key missing / parse fails.
- * @param {string} noteText
- * @returns {Promise<{
- *   correctedText?: string;
- *   mood?: string | null;
- *   behaviour?: string | null;
- *   risk?: string | null;
- *   engagement?: string | null;
- *   incidents?: string | null;
- *   summary?: string | null;
- * } | null>}
- */
 export async function processClinicalNote(noteText) {
   const raw = (noteText ?? "").toString().trim();
   if (!raw) return null;
-
-  const key = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!key || typeof key !== "string" || !key.trim()) {
-    console.warn("processClinicalNote: VITE_GEMINI_API_KEY missing; skipping AI.");
-    return null;
-  }
-
-  const genAI = new GoogleGenerativeAI(key.trim());
-  const model = genAI.getGenerativeModel({ model: CLINICAL_NOTE_MODEL });
 
   const safeText = sanitizeClinicalText(raw);
   const safeInput = JSON.stringify(safeText);
@@ -428,12 +384,12 @@ export async function processClinicalNote(noteText) {
   const prompt = `
 You are a clinical documentation assistant.
 
-STRICT RULES:
-
-* Do NOT invent information
-* Only use what is written
-* If missing, return null
-* Keep language professional and clinical
+STRICT MODE (INSPECTION-GRADE):
+* Do NOT hallucinate or invent clinical facts, events, medications, or risk levels.
+* Use ONLY what appears in the input note below.
+* If something cannot be determined from the text alone, use null for that JSON field.
+* If the input is empty or unusable, return JSON with all string fields null and correctedText equal to the input.
+* Keep language professional and clinical.
 
 ---
 
@@ -455,49 +411,29 @@ RETURN JSON ONLY (no markdown, no commentary):
 }
 `;
 
+  const text = await generateAIContent(prompt, { responseMimeType: "application/json", temperature: 0.2 });
+  if (!text) return null;
   try {
-    const result = await model.generateContent(prompt);
-    const text = result?.response?.text?.() ?? "";
     const cleaned = stripJsonFence(text);
     const parsed = JSON.parse(cleaned);
     return typeof parsed === "object" && parsed !== null ? parsed : null;
   } catch (e) {
-    console.warn("AI failed, fallback used");
+    console.error("AI ERROR:", e);
     return null;
   }
 }
 
-/**
- * Multi-section clinical reports (CPA, Tribunal, etc.). Uses the same model but does not wrap
- * the prompt in the single-note JSON schema used by {@link processClinicalNote}.
- * @param {string} fullPrompt
- * @returns {Promise<Record<string, unknown> | null>}
- */
 export async function generateGeminiReportFromPrompt(fullPrompt) {
   const raw = (fullPrompt ?? "").toString().trim();
   if (!raw) return null;
 
-  const key = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!key || typeof key !== "string" || !key.trim()) {
-    console.warn("generateGeminiReportFromPrompt: VITE_GEMINI_API_KEY missing.");
-    return null;
-  }
-
-  const genAI = new GoogleGenerativeAI(key.trim());
-  const model = genAI.getGenerativeModel({ model: CLINICAL_NOTE_MODEL });
-
+  const text = await generateAIContent(raw, { responseMimeType: "application/json", temperature: 0.2 });
+  if (!text) return null;
+  const cleaned = stripJsonFence(text);
   try {
-    const result = await model.generateContent(raw);
-    const text = result?.response?.text?.() ?? "";
-    const cleaned = stripJsonFence(text);
-    try {
-      const parsed = JSON.parse(cleaned);
-      return typeof parsed === "object" && parsed !== null ? parsed : { raw: text };
-    } catch {
-      return { raw: text };
-    }
-  } catch (e) {
-    console.warn("AI failed, fallback used");
-    return null;
+    const parsed = JSON.parse(cleaned);
+    return typeof parsed === "object" && parsed !== null ? parsed : { raw: text };
+  } catch {
+    return { raw: text };
   }
 }

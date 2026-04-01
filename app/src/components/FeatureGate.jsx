@@ -9,6 +9,11 @@ export default function FeatureGate({ feature, children }) {
     return <div style={{ padding: 24 }}>Loading...</div>;
   }
 
+  // DEV: allow all gated routes without Firestore feature toggles (production still enforced below).
+  if (import.meta.env.DEV) {
+    return children;
+  }
+
   const enabled = feature ? organisation?.features?.[feature] === true : true;
   if (enabled) return children;
 

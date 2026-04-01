@@ -16,7 +16,7 @@ export function usePatients() {
   useEffect(() => {
     if (!organisationId) {
       setPatients([]);
-      setLoading(false);
+      setLoading(true);
       setError(null);
       return;
     }
@@ -58,8 +58,9 @@ export function usePatients() {
       data: patients,
       patients,
       loading,
+      organisationReady: Boolean(organisationId),
       error,
     }),
-    [patients, loading, error]
+    [patients, loading, error, organisationId]
   );
 }

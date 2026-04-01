@@ -1,15 +1,42 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchClinicalNotesForPatient } from "../services/noteService";
+import { fetchStructuredBehaviourLogsForPatient } from "../services/behaviourService";
+import { fetchIncidentsForPatient } from "../services/incidentService";
 import { useRole } from "../context/RoleContext";
 import { useOrganisation } from "../context/OrganisationContext";
 import ActionBar from "../components/ActionBar";
 import { usePermissions } from "../hooks/usePermissions";
 import { usePatients } from "../hooks/usePatients";
+import { buildStructuredMdtSummary, disciplineToBucket } from "../utils/mdtSummaryEngine";
+import { formatBehaviourClinicalUk } from "../utils/behaviourClinicalTime";
 
 function safeString(v) {
   return typeof v === "string" ? v : "";
 }
+
+function formatWhen(value) {
+  if (!value) return "—";
+  try {
+    if (typeof value === "object" && value !== null && typeof value.toMillis === "function") {
+      return new Date(value.toMillis()).toLocaleString("en-GB");
+    }
+    if (value instanceof Date) return value.toLocaleString("en-GB");
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString("en-GB");
+  } catch {
+    return "—";
+  }
+}
+
+const BUCKET_LABELS = {
+  nurse: "Nursing & support",
+  doctor: "Medical",
+  psychologist: "Psychology",
+  ot: "Occupational therapy",
+  salt: "Speech & language",
+  other: "Other disciplines",
+};
 
 export default function MdtReviews() {
   const { organisationId } = useOrganisation();
@@ -20,8 +47,10 @@ export default function MdtReviews() {
 
   const [selectedPatientId, setSelectedPatientId] = useState("");
   const [notes, setNotes] = useState([]);
-  const [notesLoading, setNotesLoading] = useState(false);
-  const [notesError, setNotesError] = useState(null);
+  const [behaviours, setBehaviours] = useState([]);
+  const [incidents, setIncidents] = useState([]);
+  const [bundleLoading, setBundleLoading] = useState(false);
+  const [bundleError, setBundleError] = useState(null);
 
   const options = useMemo(
     () =>
@@ -46,22 +75,30 @@ export default function MdtReviews() {
   useEffect(() => {
     if (!selectedPatientId) return;
     let mounted = true;
-    async function loadNotes() {
-      setNotesLoading(true);
-      setNotesError(null);
+    async function loadBundle() {
+      setBundleLoading(true);
+      setBundleError(null);
       try {
-        const list = await fetchClinicalNotesForPatient(selectedPatientId, { limitCount: 80 });
+        const [noteList, behList, incList] = await Promise.all([
+          fetchClinicalNotesForPatient(selectedPatientId, { limitCount: 120 }).catch(() => []),
+          fetchStructuredBehaviourLogsForPatient(selectedPatientId, { limitCount: 80 }).catch(() => []),
+          fetchIncidentsForPatient(selectedPatientId, { limitCount: 40 }).catch(() => []),
+        ]);
         if (!mounted) return;
-        setNotes(Array.isArray(list) ? list : []);
+        setNotes(Array.isArray(noteList) ? noteList : []);
+        setBehaviours(Array.isArray(behList) ? behList : []);
+        setIncidents(Array.isArray(incList) ? incList : []);
       } catch (e) {
         if (!mounted) return;
-        setNotesError(e?.message ?? "Failed to load MDT reviews.");
+        setBundleError(e?.message ?? "Failed to load MDT data.");
         setNotes([]);
+        setBehaviours([]);
+        setIncidents([]);
       } finally {
-        if (mounted) setNotesLoading(false);
+        if (mounted) setBundleLoading(false);
       }
     }
-    loadNotes();
+    loadBundle();
     return () => {
       mounted = false;
     };
@@ -74,6 +111,17 @@ export default function MdtReviews() {
   }
 
   const redactSensitive = Boolean(isInspectorRole());
+
+  const summary = useMemo(
+    () =>
+      buildStructuredMdtSummary({
+        notes,
+        behaviours,
+        incidents,
+      }),
+    [notes, behaviours, incidents]
+  );
+
   const mdtRows = (notes ?? [])
     .map((n) => ({ note: n, mdt: n?.mdtReview ?? null }))
     .filter((x) => x.mdt && typeof x.mdt.summary === "string" && x.mdt.summary.trim())
@@ -120,14 +168,16 @@ export default function MdtReviews() {
             disabled={patientsLoading || options.length === 0}
             style={{ marginLeft: 10, padding: "6px 10px" }}
           >
-            {options.length ? (
+            {!organisationId ? (
+              <option value="">Loading organisation...</option>
+            ) : options.length ? (
               options.map((opt) => (
                 <option key={opt.id} value={opt.id}>
                   {opt.label}
                 </option>
               ))
             ) : (
-              <option value="">No patients found for this organisation</option>
+              <option value="">No patients registered yet</option>
             )}
           </select>
         </label>
@@ -137,86 +187,188 @@ export default function MdtReviews() {
       </div>
 
       {!patientsLoading && options.length === 0 && organisationId ? (
-        <div style={{ color: "#64748b", marginBottom: 16, fontSize: "0.95rem" }}>
-          No patients found for this organisation
-        </div>
+        <div style={{ color: "#64748b", marginBottom: 16, fontSize: "0.95rem" }}>No patients registered yet</div>
       ) : null}
 
-      {notesError ? (
+      {bundleError ? (
         <div style={{ background: "#fef2f2", border: "1px solid #fecaca", padding: "12px 14px", borderRadius: 10, color: "#991b1b", marginBottom: 14 }}>
-          {notesError}
+          {bundleError}
         </div>
       ) : null}
 
-      {notesLoading ? (
-        <div style={{ color: "#64748b" }}>Loading MDT reviews…</div>
+      {bundleLoading ? (
+        <div style={{ color: "#64748b" }}>Loading MDT data…</div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {mdtRows.length === 0 ? (
-            <div style={{ color: "#64748b" }}>No MDT review outputs available for this patient.</div>
-          ) : (
-            mdtRows.map(({ note, mdt }) => (
-              <div key={note.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                  <div style={{ fontWeight: 900 }}>
-                    [{note.discipline || "MDT"}] MDT summary
-                  </div>
-                  <div style={{ color: "#64748b", fontSize: 12 }}>
-                    {note?.createdAt?.toMillis ? new Date(note.createdAt.toMillis()).toISOString() : "—"}
-                  </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <section style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: 16 }}>
+            <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>Structured MDT summary</h2>
+            {redactSensitive ? (
+              <p style={{ color: "#92400e", fontSize: 13 }}>Structured summary restricted for this role.</p>
+            ) : (
+              <>
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontWeight: 800, fontSize: 12, color: "#475569" }}>Current presentation</div>
+                  <p style={{ margin: "6px 0 0 0", whiteSpace: "pre-wrap", color: "#0f172a" }}>{summary.currentPresentation}</p>
                 </div>
-                <div style={{ marginTop: 8, color: "#0f172a", whiteSpace: "pre-wrap" }}>
-                  {redactSensitive ? "" : mdt.summary}
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontWeight: 800, fontSize: 12, color: "#475569" }}>Risks</div>
+                  <ul style={{ margin: "6px 0 0 18px" }}>
+                    {summary.risks.map((r) => (
+                      <li key={r}>{r}</li>
+                    ))}
+                  </ul>
                 </div>
-
-                {redactSensitive ? (
-                  <div style={{ marginTop: 10, fontSize: 12, color: "#92400e", background: "#fffbeb", border: "1px solid #fcd34d", padding: "8px 10px", borderRadius: 8 }}>
-                    Structured details restricted for this role.
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontWeight: 800, fontSize: 12, color: "#475569" }}>Behaviour trends</div>
+                  <p style={{ margin: "6px 0 0 0", color: "#334155" }}>{summary.behaviourTrends}</p>
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontWeight: 800, fontSize: 12, color: "#475569" }}>Medication concerns</div>
+                  <p style={{ margin: "6px 0 0 0", color: "#334155" }}>{summary.medicationConcerns}</p>
+                </div>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: 12, color: "#475569", marginBottom: 8 }}>
+                    Recommendations by discipline
                   </div>
-                ) : null}
+                  {Object.entries(summary.recommendationsByDiscipline).map(([k, lines]) => (
+                    <div key={k} style={{ marginBottom: 10 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>{BUCKET_LABELS[k] ?? k}</div>
+                      <ul style={{ margin: "4px 0 0 18px" }}>
+                        {(lines ?? []).map((line) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </section>
 
-                {redactSensitive ? null : (
-                  <>
-                    {Array.isArray(mdt.recommendations) && mdt.recommendations.length ? (
-                      <div style={{ marginTop: 10 }}>
-                        <div style={{ fontWeight: 900, fontSize: 12, color: "#334155" }}>Recommendations</div>
-                        <ul style={{ margin: "6px 0 0 18px" }}>
-                          {mdt.recommendations.map((r) => (
-                            <li key={r}>{r}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
+          <section style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 16 }}>
+            <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>Notes by discipline (grouped)</h2>
+            {["nurse", "doctor", "psychologist", "ot", "salt", "other"].map((bucket) => {
+              const arr = summary.grouped?.[bucket] ?? [];
+              return (
+                <div key={bucket} style={{ marginBottom: 14 }}>
+                  <div style={{ fontWeight: 800, color: "#0f172a" }}>{BUCKET_LABELS[bucket] ?? bucket}</div>
+                  {arr.length === 0 ? (
+                    <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>No notes in this group.</div>
+                  ) : (
+                    <ul style={{ margin: "6px 0 0 18px", padding: 0 }}>
+                      {arr.slice(0, 8).map((n) => (
+                        <li key={n.id} style={{ marginBottom: 6, fontSize: 13, color: "#334155" }}>
+                          <span style={{ color: "#64748b" }}>{formatWhen(n.createdAt)}</span> · {safeString(n.discipline)} —{" "}
+                          {(n.content ?? "").toString().slice(0, 160)}
+                          {(n.content ?? "").toString().length > 160 ? "…" : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              );
+            })}
+          </section>
 
-                    {Array.isArray(mdt.risksToAddress) && mdt.risksToAddress.length ? (
-                      <div style={{ marginTop: 10 }}>
-                        <div style={{ fontWeight: 900, fontSize: 12, color: "#334155" }}>Risks to address</div>
-                        <ul style={{ margin: "6px 0 0 18px" }}>
-                          {mdt.risksToAddress.map((r) => (
-                            <li key={r}>{r}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
+          <section style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 16 }}>
+            <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>Behaviour logs (sample)</h2>
+            {behaviours.length === 0 ? (
+              <div style={{ color: "#64748b", fontSize: 14 }}>No structured behaviour logs for this patient.</div>
+            ) : (
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                {behaviours.slice(0, 10).map((b) => (
+                  <li key={b.id} style={{ marginBottom: 8, fontSize: 13 }}>
+                    <strong>{b.behaviourType}</strong> ({b.severity}) — {formatBehaviourClinicalUk(b)}
+                    {b.trigger ? <span style={{ color: "#475569" }}> — trigger: {b.trigger}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
 
-                    {Array.isArray(mdt.nextActions) && mdt.nextActions.length ? (
-                      <div style={{ marginTop: 10 }}>
-                        <div style={{ fontWeight: 900, fontSize: 12, color: "#334155" }}>Next actions</div>
-                        <ul style={{ margin: "6px 0 0 18px" }}>
-                          {mdt.nextActions.map((a) => (
-                            <li key={a}>{a}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                  </>
-                )}
-              </div>
-            ))
-          )}
+          <section style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 16 }}>
+            <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>Incidents (sample)</h2>
+            {incidents.length === 0 ? (
+              <div style={{ color: "#64748b", fontSize: 14 }}>No incidents on file for this patient in scope.</div>
+            ) : (
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                {incidents.slice(0, 10).map((i) => (
+                  <li key={i.id} style={{ marginBottom: 8, fontSize: 13 }}>
+                    <strong>{i.severity}</strong> · {i.status ?? "—"} — {formatWhen(i.createdAt)}
+                    {i.description ? <div style={{ color: "#475569", marginTop: 4 }}>{String(i.description).slice(0, 200)}</div> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section>
+            <h2 style={{ fontSize: "1.05rem" }}>AI-generated MDT blocks (from notes)</h2>
+            {mdtRows.length === 0 ? (
+              <div style={{ color: "#64748b" }}>No AI MDT review blocks stored on notes yet.</div>
+            ) : (
+              mdtRows.map(({ note, mdt }) => (
+                <div key={note.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, marginBottom: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ fontWeight: 900 }}>
+                      [{note.discipline || "MDT"}] · bucket: {disciplineToBucket(note.discipline)}
+                    </div>
+                    <div style={{ color: "#64748b", fontSize: 12 }}>
+                      {note?.createdAt?.toMillis ? new Date(note.createdAt.toMillis()).toISOString() : "—"}
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 8, color: "#0f172a", whiteSpace: "pre-wrap" }}>
+                    {redactSensitive ? "" : mdt.summary}
+                  </div>
+
+                  {redactSensitive ? (
+                    <div style={{ marginTop: 10, fontSize: 12, color: "#92400e", background: "#fffbeb", border: "1px solid #fcd34d", padding: "8px 10px", borderRadius: 8 }}>
+                      Structured details restricted for this role.
+                    </div>
+                  ) : null}
+
+                  {redactSensitive ? null : (
+                    <>
+                      {Array.isArray(mdt.recommendations) && mdt.recommendations.length ? (
+                        <div style={{ marginTop: 10 }}>
+                          <div style={{ fontWeight: 900, fontSize: 12, color: "#334155" }}>Recommendations</div>
+                          <ul style={{ margin: "6px 0 0 18px" }}>
+                            {mdt.recommendations.map((r) => (
+                              <li key={r}>{r}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+
+                      {Array.isArray(mdt.risksToAddress) && mdt.risksToAddress.length ? (
+                        <div style={{ marginTop: 10 }}>
+                          <div style={{ fontWeight: 900, fontSize: 12, color: "#334155" }}>Risks to address</div>
+                          <ul style={{ margin: "6px 0 0 18px" }}>
+                            {mdt.risksToAddress.map((r) => (
+                              <li key={r}>{r}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+
+                      {Array.isArray(mdt.nextActions) && mdt.nextActions.length ? (
+                        <div style={{ marginTop: 10 }}>
+                          <div style={{ fontWeight: 900, fontSize: 12, color: "#334155" }}>Next actions</div>
+                          <ul style={{ margin: "6px 0 0 18px" }}>
+                            {mdt.nextActions.map((a) => (
+                              <li key={a}>{a}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              ))
+            )}
+          </section>
         </div>
       )}
     </div>
   );
 }
-

@@ -27,8 +27,22 @@ export function isSystemApproverRole(systemRole: unknown): boolean {
   return ["ADMIN", "MANAGER", "SUPER_ADMIN", "GLOBAL_ADMIN", "GROUP_ADMIN", "ORGANISATION ADMIN", "ORGANIZATION ADMIN"].includes(s);
 }
 
-function noteStatus(note: Record<string, unknown> | null | undefined): string {
-  return norm((note as Record<string, unknown>)?.status).toLowerCase();
+/**
+ * Single source of truth for governance status (must match {@link mapFirestoreClinicalNote} in noteService).
+ * Missing/unknown `status` in Firestore → treated as `draft` (legacy notes).
+ * If `status` is absent but approval fields exist → `approved`.
+ */
+export function getNormalizedNoteStatus(note: Record<string, unknown> | null | undefined): "draft" | "final" | "approved" {
+  if (!note || typeof note !== "object") return "draft";
+  let raw = "";
+  if (typeof note.status === "string") raw = note.status.trim().toLowerCase();
+  else if (note.status != null && note.status !== undefined) raw = String(note.status).trim().toLowerCase();
+
+  if (raw === "approved") return "approved";
+  if (raw === "final") return "final";
+  if (raw === "draft") return "draft";
+  if (note.approvedBy || note.approvedAt) return "approved";
+  return "draft";
 }
 
 /**
@@ -43,7 +57,7 @@ export function canApproveNote(
   if (!note || typeof note !== "object") return false;
   if (note.isDeleted === true) return false;
 
-  const st = noteStatus(note);
+  const st = getNormalizedNoteStatus(note);
   if (st === "approved") return false;
   /** Only finalized notes enter the approval queue. */
   if (st !== "final") return false;

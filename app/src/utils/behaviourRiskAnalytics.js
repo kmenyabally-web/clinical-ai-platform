@@ -1,14 +1,16 @@
 /**
  * Real-time behaviour risk signals (pattern, trend, alerts) from structured logs.
- * Expects `behaviours` sorted newest-first (e.g. from Firestore orderBy createdAt desc).
+ * Uses **clinical** time (`clinicalTime` / legacy `eventAt` / `createdAt`) for ordering and windows.
  */
+
+import { getBehaviourClinicalTimeMs, sortBehavioursByClinicalTimeDesc } from "./behaviourClinicalTime";
 
 function severityStr(b) {
   return String(b?.severity ?? "").trim();
 }
 
 /**
- * @param {Array<{ severity?: string, medicationRefused?: boolean }>} behaviours - valid structured rows, newest first
+ * @param {Array<{ severity?: string, medicationRefused?: boolean, clinicalTime?: string, eventAt?: unknown, createdAt?: unknown }>} behaviours - valid structured rows
  * @returns {{
  *   recentBehaviours: typeof behaviours,
  *   highSeverity: number,
@@ -21,20 +23,37 @@ function severityStr(b) {
  * }}
  */
 export function analyseBehaviourRiskSignals(behaviours) {
-  const list = Array.isArray(behaviours) ? behaviours : [];
+  const list = sortBehavioursByClinicalTimeDesc(Array.isArray(behaviours) ? behaviours : []);
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const weekMs = 7 * dayMs;
+
   const recentBehaviours = list.slice(0, 5);
 
   const highSeverity = list.filter((b) => severityStr(b) === "High").length;
   const mediumSeverity = list.filter((b) => severityStr(b) === "Medium").length;
   const medicationRefusal = list.filter((b) => b?.medicationRefused === true).length;
 
-  let patternDetected = false;
-  if (recentBehaviours.length >= 2) {
+  const inLastDay = list.filter((b) => {
+    const t = getBehaviourClinicalTimeMs(b);
+    return t > 0 && now - t <= dayMs;
+  });
+
+  let patternDetected = inLastDay.length >= 2;
+  if (recentBehaviours.length >= 2 && !patternDetected) {
     patternDetected = true;
   }
 
+  const highInWeek = list.filter((b) => {
+    if (severityStr(b) !== "High") return false;
+    const t = getBehaviourClinicalTimeMs(b);
+    return t > 0 && now - t <= weekMs;
+  }).length;
+
   let riskTrend = "stable";
-  if (highSeverity >= 1 || medicationRefusal >= 1) {
+  if (highInWeek >= 2 || highSeverity >= 2) {
+    riskTrend = "increasing";
+  } else if (highSeverity >= 1 || medicationRefusal >= 1) {
     riskTrend = "increasing";
   }
 

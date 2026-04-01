@@ -174,6 +174,7 @@ export default function Incidents() {
         status: "open",
       });
       await loadIncidents();
+      showToast("Incident logged", "success");
     } catch (err) {
       console.error("INCIDENT SAVE ERROR:", err);
       // eslint-disable-next-line no-alert

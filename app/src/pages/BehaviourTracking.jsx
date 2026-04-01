@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { BEHAVIOUR_TYPES } from "../constants/behaviours";
 import {
-  behaviourTypes,
   createBehaviourLog,
   fetchStructuredBehaviourLogsForPatient,
   isValidStructuredBehaviourLog,
@@ -18,23 +18,20 @@ import { fetchIncidentsForPatient } from "../services/incidentService";
 import { usePatients } from "../hooks/usePatients";
 import { showToast } from "../utils/toast";
 
-function formatBehaviourTime(value) {
-  if (!value) return "—";
-  if (typeof value?.toDate === "function") {
-    try {
-      return value.toDate().toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" });
-    } catch {
-      return "—";
-    }
-  }
-  return "—";
-}
-
 function severityBadgeStyle(severity) {
   const s = String(severity ?? "").toLowerCase();
   if (s === "high") return { background: "#fee2e2", color: "#991b1b", border: "1px solid #fecaca" };
   if (s === "medium") return { background: "#fffbeb", color: "#92400e", border: "1px solid #fde68a" };
   return { background: "#ecfdf5", color: "#065f46", border: "1px solid #a7f3d0" };
+}
+
+/** Clinical behaviour type badge — key types use fixed colours for quick scanning. */
+function behaviourTypeBadgeStyle(type) {
+  const t = String(type ?? "").toLowerCase();
+  if (t === "verbal aggression") return { background: "#ffedd5", color: "#c2410c", border: "1px solid #fdba74" };
+  if (t === "physical aggression") return { background: "#fee2e2", color: "#991b1b", border: "1px solid #fecaca" };
+  if (t === "agitation") return { background: "#fef9c3", color: "#854d0e", border: "1px solid #fde047" };
+  return { background: "#f1f5f9", color: "#334155", border: "1px solid #e2e8f0" };
 }
 
 const inputStyle = {
@@ -79,8 +76,38 @@ function BehaviourRiskAlert({ type, children }) {
   );
 }
 
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+/** Clinical instant for display: ISO `clinicalTime` first, then record / legacy fields. */
+function formatBehaviourLogTimestamp(entry) {
+  const raw = entry?.clinicalTime ?? entry?.createdAt ?? entry?.eventAt;
+  if (raw == null) return "—";
+  let d;
+  if (typeof raw === "string") {
+    d = new Date(raw);
+  } else if (typeof raw?.toDate === "function") {
+    try {
+      d = raw.toDate();
+    } catch {
+      return "—";
+    }
+  } else {
+    d = new Date(raw);
+  }
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export default function BehaviourTracking() {
-  const { organisationId, hasFeature } = useOrganisation();
+  const { organisationId, hospitalId, wardId, hasFeature } = useOrganisation();
   const { user } = useAuth();
   const { isInspectorRole } = useRole();
   const permissions = usePermissions();
@@ -94,12 +121,10 @@ export default function BehaviourTracking() {
   const [logsError, setLogsError] = useState(null);
 
   const [timeMode, setTimeMode] = useState("auto");
-  const [manualTime, setManualTime] = useState(() => {
-    const d = new Date();
-    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-    return d.toISOString().slice(0, 16);
-  });
-  const [behaviourType, setBehaviourType] = useState(behaviourTypes[0]);
+  const [manualDate, setManualDate] = useState("");
+  const [manualTime, setManualTime] = useState("");
+  const [behaviourType, setBehaviourType] = useState(BEHAVIOUR_TYPES[0]);
+  const [behaviourCustom, setBehaviourCustom] = useState("");
   const [severity, setSeverity] = useState("Medium");
   const [trigger, setTrigger] = useState("");
   const [actionTaken, setActionTaken] = useState("");
@@ -113,6 +138,15 @@ export default function BehaviourTracking() {
       setSelectedPatientId(patients[0].id ?? "");
     }
   }, [patients, selectedPatientId]);
+
+  useEffect(() => {
+    if (timeMode !== "manual") return;
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    const timeStr = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+    setManualDate((d) => (d && d.trim() ? d : today));
+    setManualTime((t) => (t && t.trim() ? t : timeStr));
+  }, [timeMode]);
 
   useEffect(() => {
     if (!selectedPatientId || !organisationId) {
@@ -187,11 +221,18 @@ export default function BehaviourTracking() {
       return;
     }
     const bt = (behaviourType ?? "").toString().trim();
+    const custom = (behaviourCustom ?? "").toString().trim();
     const sev = (severity ?? "").toString().trim();
     const tr = (trigger ?? "").toString().trim();
     const act = (actionTaken ?? "").toString().trim();
     if (!bt || !sev) {
       const msg = "Behaviour type and severity are required.";
+      setSaveError(msg);
+      showToast(msg);
+      return;
+    }
+    if (bt === "Other" && !custom) {
+      const msg = "Specify the behaviour when type is Other.";
       setSaveError(msg);
       showToast(msg);
       return;
@@ -202,22 +243,50 @@ export default function BehaviourTracking() {
       showToast(msg);
       return;
     }
+
+    let clinicalTime;
+    if (timeMode === "auto") {
+      clinicalTime = new Date();
+    } else {
+      if (!manualDate || !manualTime) {
+        const msg = "Please enter date and time";
+        setSaveError(msg);
+        alert(msg);
+        return;
+      }
+      clinicalTime = new Date(`${manualDate}T${manualTime}`);
+      if (Number.isNaN(clinicalTime.getTime())) {
+        const msg = "Please enter date and time";
+        setSaveError(msg);
+        alert(msg);
+        return;
+      }
+    }
+
+    // eslint-disable-next-line no-console -- clinical timestamp debug (behaviour logging)
+    console.log("Saving behaviour with time:", clinicalTime);
+
+    const clinicalTimeIso = clinicalTime.toISOString();
+
     setSaving(true);
     try {
       await createBehaviourLog({
         patientId: selectedPatientId,
         organisationId,
+        clinicalTimeIso,
+        hospitalId: hospitalId ?? null,
+        wardId: wardId ?? null,
         behaviourType: bt,
+        behaviourCustom: bt === "Other" ? custom : null,
         severity: sev,
         trigger: trigger.trim(),
         action: actionTaken.trim(),
         stompRelated,
         medicationRefused,
-        useManualEventTime: timeMode === "manual",
-        manualEventAt: timeMode === "manual" && manualTime ? new Date(manualTime) : null,
       });
       setTrigger("");
       setActionTaken("");
+      setBehaviourCustom("");
       setTimeMode("auto");
       const [rows, inc] = await Promise.all([
         fetchStructuredBehaviourLogsForPatient(selectedPatientId, { limitCount: 100 }),
@@ -337,34 +406,78 @@ export default function BehaviourTracking() {
         ) : (
           <form onSubmit={handleSubmitBehaviour}>
             <div style={{ marginBottom: 12 }}>
-              <span style={{ fontWeight: 700, display: "block", marginBottom: 6 }}>Time</span>
+              <span style={{ fontWeight: 700, display: "block", marginBottom: 6 }}>Time mode</span>
               <label style={{ marginRight: 16 }}>
-                <input type="radio" name="timeMode" checked={timeMode === "auto"} onChange={() => setTimeMode("auto")} />{" "}
+                <input
+                  type="radio"
+                  name="timeMode"
+                  value="auto"
+                  checked={timeMode === "auto"}
+                  onChange={() => setTimeMode("auto")}
+                />{" "}
                 Auto (now)
               </label>
               <label>
-                <input type="radio" name="timeMode" checked={timeMode === "manual"} onChange={() => setTimeMode("manual")} />{" "}
+                <input
+                  type="radio"
+                  name="timeMode"
+                  value="manual"
+                  checked={timeMode === "manual"}
+                  onChange={() => setTimeMode("manual")}
+                />{" "}
                 Manual
               </label>
-              {timeMode === "manual" ? (
-                <input
-                  type="datetime-local"
-                  value={manualTime}
-                  onChange={(e) => setManualTime(e.target.value)}
-                  style={{ ...inputStyle, marginTop: 8, display: "block" }}
-                />
-              ) : null}
+              {timeMode === "manual" && (
+                <div style={{ display: "flex", gap: "10px", marginTop: "10px", flexWrap: "wrap", alignItems: "center" }}>
+                  <input
+                    type="date"
+                    value={manualDate}
+                    onChange={(e) => setManualDate(e.target.value)}
+                    style={{ ...inputStyle, minWidth: 160, maxWidth: 220 }}
+                    aria-label="Behaviour date"
+                  />
+                  <input
+                    type="time"
+                    value={manualTime}
+                    onChange={(e) => setManualTime(e.target.value)}
+                    style={{ ...inputStyle, minWidth: 120, maxWidth: 180 }}
+                    aria-label="Behaviour time"
+                  />
+                </div>
+              )}
             </div>
 
             <div style={{ marginBottom: 12 }}>
               <label style={{ fontWeight: 700, display: "block", marginBottom: 4 }}>Behaviour type</label>
-              <select value={behaviourType} onChange={(e) => setBehaviourType(e.target.value)} style={inputStyle} required>
-                {behaviourTypes.map((t) => (
+              <select
+                value={behaviourType}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setBehaviourType(v);
+                  if (v !== "Other") setBehaviourCustom("");
+                }}
+                style={inputStyle}
+                required
+              >
+                {BEHAVIOUR_TYPES.map((t) => (
                   <option key={t} value={t}>
                     {t}
                   </option>
                 ))}
               </select>
+              {behaviourType === "Other" ? (
+                <div style={{ marginTop: 8 }}>
+                  <label style={{ fontWeight: 700, display: "block", marginBottom: 4 }}>Specify behaviour</label>
+                  <input
+                    type="text"
+                    value={behaviourCustom}
+                    onChange={(e) => setBehaviourCustom(e.target.value)}
+                    style={inputStyle}
+                    placeholder="Short structured label (required)"
+                    autoComplete="off"
+                  />
+                </div>
+              ) : null}
             </div>
 
             <div style={{ marginBottom: 12 }}>
@@ -539,14 +652,27 @@ export default function BehaviourTracking() {
           <div style={{ color: "#64748b" }}>No valid structured behaviour entries yet. Use Log Behaviour above.</div>
         ) : (
           validBehaviours.map((entry) => {
-            const displayTime = formatBehaviourTime(entry.eventAt ?? entry.createdAt);
+            const displayTime = formatBehaviourLogTimestamp(entry);
             const trig = redactSensitive && entry.trigger ? "[Redacted]" : entry.trigger || "—";
             const act = redactSensitive && entry.action ? "[Redacted]" : entry.action || "—";
             return (
               <div key={entry.id} style={cardStyle}>
                 <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 8 }}>
                   <span style={{ fontWeight: 800, color: "#0f172a" }}>{displayTime}</span>
-                  <span style={{ fontWeight: 700, color: "#1e293b" }}>{entry.behaviourType || "—"}</span>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 800,
+                      padding: "4px 10px",
+                      borderRadius: 6,
+                      ...behaviourTypeBadgeStyle(entry.behaviourType),
+                    }}
+                  >
+                    {entry.behaviourType || "—"}
+                    {entry.behaviourType === "Other" && entry.behaviourCustom
+                      ? `: ${redactSensitive ? "[Redacted]" : entry.behaviourCustom}`
+                      : ""}
+                  </span>
                   <span
                     style={{
                       fontSize: 12,

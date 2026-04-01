@@ -41,6 +41,20 @@ export function assertSameOrganisationData(dataOrganisationId, userOrganisationI
   }
 }
 
+/**
+ * Cross-module write guard: patient record must belong to the active organisation session.
+ * @throws {Error} message "Data mismatch detected" when organisations differ
+ */
+export function assertPatientOrganisationMatch(patientOrganisationId, sessionOrganisationId) {
+  const p = (patientOrganisationId ?? "").toString().trim();
+  const s = (sessionOrganisationId ?? "").toString().trim();
+  if (!p || !s || p !== s) {
+    const err = new Error("Data mismatch detected");
+    err.code = "DATA_MISMATCH";
+    throw err;
+  }
+}
+
 /** Treat placeholder / unassigned ids as “no hospital scope” for reads and queries. */
 export function normalizeHospitalScopeId(id) {
   if (id == null || typeof id !== "string") return null;

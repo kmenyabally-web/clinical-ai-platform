@@ -113,6 +113,25 @@ export async function listCarePlansForPatient(organisationId, patientId, { limit
   return rows;
 }
 
+/**
+ * All care plans for a tenant (org-wide list for dashboards / inspection simulation).
+ * @param {string} organisationId
+ * @param {{ limitCount?: number }} [options]
+ */
+export async function listCarePlansForOrganisation(organisationId, { limitCount = 300 } = {}) {
+  const org = (organisationId ?? "").trim();
+  if (!org) return [];
+
+  const q = query(
+    collection(db, CARE_PLANS_COLLECTION),
+    where("organisationId", "==", org),
+    limit(Math.min(limitCount, 500))
+  );
+  const snapshot = await getDocs(q);
+  const docs = snapshot?.docs ?? [];
+  return docs.map((d) => snapshotFromDoc(d));
+}
+
 /** List AI-saved drafts for a patient (documents with status "draft" and `content`). */
 export async function listAiCarePlanDraftsForPatient(organisationId, patientId, { limitCount = 25 } = {}) {
   const org = (organisationId ?? "").trim() || null;

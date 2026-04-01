@@ -4,12 +4,23 @@
  * Requires `VITE_GEMINI_API_KEY` in `.env` (see `.env.example`). Key is compile-time only — never log or render it.
  */
 
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import type { ClinicalCareFolder, ClinicalMdtReview, ClinicalReportSection, ClinicalReports, ClinicalStructuredData, ClinicalSummary } from "../types/clinical";
+/* eslint-disable no-console -- model id debug for Gemini integration */
+import type {
+  ClinicalCareFolder,
+  ClinicalMdtReview,
+  ClinicalReportSection,
+  ClinicalReports,
+  ClinicalStructuredData,
+  ClinicalSummary,
+  StructuredClinicalReport,
+  StructuredClinicalReportSections,
+} from "../types/clinical";
+import { DEFAULT_GEMINI_MODEL_ID } from "../config/geminiModel.js";
+import { generateAIContent } from "./geminiAiService.js";
 
 export * from "./geminiAiService.js";
 
-const NOTE_ANALYSIS_MODEL = "gemini-2.0-flash";
+const NOTE_ANALYSIS_MODEL = DEFAULT_GEMINI_MODEL_ID;
 
 export type NoteAnalysisResult = {
   discipline: string;
@@ -31,14 +42,6 @@ export type ClinicalNoteEngineResult = {
   reports: ClinicalReports;
   careFolder: ClinicalCareFolder;
 };
-
-function requireGeminiKey(): string {
-  const key = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!key || typeof key !== "string" || !key.trim()) {
-    throw new Error("Missing VITE_GEMINI_API_KEY. Copy app/.env.example to app/.env and add your key.");
-  }
-  return key.trim();
-}
 
 function parseFailureFallback(discipline: string, detail?: string): NoteAnalysisResult {
   return {
@@ -238,18 +241,9 @@ export async function analyseNote(
   discipline: string,
   patientId: string
 ): Promise<NoteAnalysisResult> {
-  const apiKey = requireGeminiKey();
-  const genAI = new GoogleGenerativeAI(apiKey);
-
-  const model = genAI.getGenerativeModel({
-    model: NOTE_ANALYSIS_MODEL,
-    generationConfig: {
-      responseMimeType: "application/json",
-      temperature: 0.2,
-    },
-  });
-
   const prompt = `You are a clinical documentation assistant for UK health and social care.
+
+STRICT MODE: Do not hallucinate. Use ONLY information in the note text below. If there is no usable content, set string fields to "Insufficient data" and arrays to [].
 
 Analyse the following note and return STRICT JSON only (no markdown, no commentary).
 
@@ -276,21 +270,32 @@ Return exactly this JSON shape with string values and string arrays:
 }
 
 Rules:
-- Use "Not documented" where information is missing.
+- Use "Insufficient data" where the note provides no information on that field.
+- Use "Not documented" only where the topic is relevant but not described.
 - Use professional, person-centred clinical language.
 - riskIndicators: short lowercase tags where appropriate (e.g. "aggression", "medication refusal").
 - incidents: brief descriptors if relevant, else [].
 - Do not include explanations outside the JSON.`;
 
-  const result = await model.generateContent(prompt);
-  const text = result?.response?.text?.() ?? "";
+  const disc = discipline || "Clinical";
+  // eslint-disable-next-line no-console
+  console.log("Using model:", NOTE_ANALYSIS_MODEL);
+  try {
+    const text = await generateAIContent(prompt, { responseMimeType: "application/json", temperature: 0.2 });
+    if (!text) {
+      return parseFailureFallback(disc, "AI generation unavailable. Showing structured fallback report.");
+    }
 
-  const parsed = safeParse(text);
-  if (!parsed) {
-    console.error("Gemini clinical note parse error (safeParse returned null):", text);
-    return parseFailureFallback(discipline || "Clinical", "AI parsing failed");
+    const parsed = safeParse(text);
+    if (!parsed) {
+      console.error("Gemini clinical note parse error (safeParse returned null):", text);
+      return parseFailureFallback(disc, "AI parsing failed");
+    }
+    return normaliseResult(parsed, disc);
+  } catch (err) {
+    console.error("AI ERROR:", err);
+    return parseFailureFallback(disc, "AI generation unavailable. Showing structured fallback report.");
   }
-  return normaliseResult(parsed, discipline || "Clinical");
 }
 
 /**
@@ -302,19 +307,11 @@ export async function analyseClinicalNoteEngine(
   discipline: string,
   patientId: string
 ): Promise<ClinicalNoteEngineResult> {
-  const apiKey = requireGeminiKey();
-  const genAI = new GoogleGenerativeAI(apiKey);
-
-  const model = genAI.getGenerativeModel({
-    model: NOTE_ANALYSIS_MODEL,
-    generationConfig: {
-      responseMimeType: "application/json",
-      temperature: 0.2,
-    },
-  });
-
   const safeDiscipline = discipline || "Clinical";
   const prompt = `You are a clinical documentation assistant for UK health and social care.
+
+STRICT MODE: Do not hallucinate clinical events, medications, or risks. Derive every output field ONLY from the note text. If the note is empty or unusable, use "Insufficient data" for narrative fields and empty arrays where appropriate.
+
 Analyse the following raw staff note and produce STRICT JSON only (no markdown, no commentary).
 
 Context (record ID only, do not quote or repeat it in output):
@@ -368,26 +365,35 @@ Return exactly this JSON shape:
 }
 
 Rules:
-- Use "Not documented" where information is missing.
+- Use "Insufficient data" when the note does not support a section.
+- Use "Not documented" only where the topic applies but is not described in the note.
 - Do not invent clinical events that are not in the note.
 - riskIndicators must be short lowercase tags (e.g. "aggression", "medication refusal").
 - incidents must be brief descriptors if relevant, else [].
 - Do not include explanations outside the JSON.
 - correctedNote should not include PHI that isn't already in the note.`;
 
-  const result = await model.generateContent(prompt);
-  const text = result?.response?.text?.() ?? "";
-
-  const parsed = safeParse(text);
-  if (!parsed) {
-    console.error("Gemini clinical note engine parse error (safeParse returned null):", text);
-    return parseEngineFallback(safeDiscipline, "AI parsing failed");
-  }
-
+  console.log("Using model:", NOTE_ANALYSIS_MODEL);
   try {
-    return normaliseEngineResult(parsed, safeDiscipline, content);
-  } catch {
-    return parseEngineFallback(safeDiscipline, "AI parsing failed");
+    const text = await generateAIContent(prompt, { responseMimeType: "application/json", temperature: 0.2 });
+    if (!text) {
+      return parseEngineFallback(safeDiscipline, "AI generation unavailable. Showing structured fallback report.");
+    }
+
+    const parsed = safeParse(text);
+    if (!parsed) {
+      console.error("Gemini clinical note engine parse error (safeParse returned null):", text);
+      return parseEngineFallback(safeDiscipline, "AI parsing failed");
+    }
+
+    try {
+      return normaliseEngineResult(parsed, safeDiscipline, content);
+    } catch {
+      return parseEngineFallback(safeDiscipline, "AI parsing failed");
+    }
+  } catch (err) {
+    console.error("AI ERROR:", err);
+    return parseEngineFallback(safeDiscipline, "AI generation unavailable. Showing structured fallback report.");
   }
 }
 
@@ -409,34 +415,309 @@ export async function analyseClinicalNote(note: {
 
 export type ClinicalReportType = "cpa" | "tribunal" | "mdtReview";
 
-function reportFallback(reportType: ClinicalReportType): ClinicalReportSection {
+function defaultStructuredTitle(reportType: ClinicalReportType): string {
+  if (reportType === "cpa") return "Care Programme Approach (CPA) Report";
+  if (reportType === "tribunal") return "Mental Health Tribunal Report";
+  return "Multi-Disciplinary Team Review Report";
+}
+
+function emptyStructuredSections(): StructuredClinicalReportSections {
+  return {
+    patientOverview: "",
+    currentPresentation: "",
+    riskAssessment: "",
+    incidentsSummary: "",
+    behaviourAnalysis: "",
+    medicationCompliance: "",
+    MDTObservations: "",
+    legalContext: "",
+    recommendation: "",
+  };
+}
+
+/** Deterministic placeholder when AI is unavailable or parse fails. */
+export function structuredReportFallback(reportType: ClinicalReportType): StructuredClinicalReport {
+  const base = emptyStructuredSections();
+  if (reportType === "tribunal") {
+    const sections = {
+      ...base,
+      patientOverview: "Patient currently admitted; confirm status and legal framework from the live record.",
+      currentPresentation: "Patient presents with difficulties as documented in available notes; expand with latest assessment.",
+      riskAssessment: "Risk remains elevated; multidisciplinary review and formal risk tools are required.",
+      incidentsSummary: "Recent incidents include those recorded in supplied notes; verify against the full incident log.",
+      behaviourAnalysis: "Behavioural patterns indicate ongoing need for structured observation and care planning.",
+      medicationCompliance: "Medication adherence is inconsistent where noted; confirm with MAR and prescriber.",
+      MDTObservations: "MDT reports indicate ongoing care coordination; align with latest meeting records.",
+      legalContext: "Patient detained under the Mental Health Act; confirm section and authority from statutory documentation.",
+      recommendation: "Continued detention and treatment in accordance with the care plan and legal framework is recommended pending review.",
+    };
+    return {
+      title: "Tribunal Report",
+      summary:
+        "Structured tribunal report placeholder. Populate from live records and multidisciplinary review before submission.",
+      sections,
+      recommendations: [
+        "Confirm legal status and detention authority from statutory records.",
+        "Complete formal risk formulation with the multidisciplinary team.",
+      ],
+    };
+  }
+  if (reportType === "cpa") {
+    const sections = {
+      ...base,
+      patientOverview: "Care Programme Approach summary; confirm identifiers and legal status from the live record.",
+      currentPresentation: "Current presentation as documented in available notes; expand with latest observations.",
+      riskAssessment: "Risks identified in the record require ongoing review and mitigation planning.",
+      incidentsSummary: "Incident history should be cross-checked with the organisation’s incident system.",
+      behaviourAnalysis: "Behavioural themes reflect entries in the supplied notes only.",
+      medicationCompliance: "Medication issues require validation with the MAR and prescriber.",
+      MDTObservations: "MDT input should be updated after the next scheduled review.",
+      legalContext: "Regulatory and consent matters must reflect current documentation.",
+      recommendation: "Recommendations are interim until a full CPA review is completed.",
+    };
+    return {
+      title: "CPA Report",
+      summary:
+        "Structured CPA report placeholder. Use only verified note content and complete a full CPA review meeting.",
+      sections,
+      recommendations: [
+        "Schedule a full CPA review with the care team and service user.",
+        "Update the care plan and risk assessment after review.",
+      ],
+    };
+  }
+  const sections = {
+    ...base,
+    patientOverview: "Patient overview to be completed from multidisciplinary records.",
+    currentPresentation: "Current presentation reflects available note content.",
+    riskAssessment: "Risk assessment requires confirmation with the clinical team.",
+    incidentsSummary: "Incident summary is indicative only; verify with formal logs.",
+    behaviourAnalysis: "Behavioural analysis is based on supplied documentation.",
+    medicationCompliance: "Medication compliance to be confirmed with clinical staff.",
+    MDTObservations: "MDT observations to be aligned with latest meeting minutes.",
+    legalContext: "Legal context to be verified by responsible clinicians.",
+    recommendation: "Further MDT follow-up recommended.",
+  };
+  return {
+    title: "MDT Review Report",
+    summary: "Structured MDT review placeholder. Synthesise from current multidisciplinary records and governance.",
+    sections,
+    recommendations: ["Convene MDT to confirm risks and next actions.", "Document decisions in the clinical record."],
+  };
+}
+
+const HEADING_TO_SECTION_KEY: Record<string, keyof StructuredClinicalReportSections> = {
+  "patient overview": "patientOverview",
+  "current presentation": "currentPresentation",
+  "risk assessment": "riskAssessment",
+  "incident summary": "incidentsSummary",
+  "incidents summary": "incidentsSummary",
+  "behavioural analysis": "behaviourAnalysis",
+  "behavior analysis": "behaviourAnalysis",
+  "medication compliance": "medicationCompliance",
+  "mdt observations": "MDTObservations",
+  "legal context": "legalContext",
+  "clinical recommendation": "recommendation",
+  recommendation: "recommendation",
+};
+
+function sectionsFromHeadingArray(arr: unknown): Partial<Record<keyof StructuredClinicalReportSections, string>> | null {
+  if (!Array.isArray(arr)) return null;
+  const out: Partial<Record<keyof StructuredClinicalReportSections, string>> = {};
+  for (const item of arr) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const heading = typeof row.heading === "string" ? row.heading.trim().toLowerCase() : "";
+    const content = typeof row.content === "string" ? row.content.trim() : "";
+    if (!heading || !content) continue;
+    const key = HEADING_TO_SECTION_KEY[heading];
+    if (key) out[key] = content;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+function normaliseStructuredReport(raw: unknown, reportType: ClinicalReportType): StructuredClinicalReport {
+  const fallback = structuredReportFallback(reportType);
+  if (!raw || typeof raw !== "object") return fallback;
+  const o = raw as Record<string, unknown>;
   const title =
-    reportType === "cpa"
-      ? "CPA report"
-      : reportType === "tribunal"
-        ? "Tribunal report"
-        : "MDT review report";
-  return { title, content: "Report generation unavailable." };
+    typeof o.title === "string" && o.title.trim() ? o.title.trim() : defaultStructuredTitle(reportType);
+  const summary = typeof o.summary === "string" && o.summary.trim() ? o.summary.trim() : "";
+
+  let recs: string[] = [];
+  if (Array.isArray(o.recommendations)) {
+    recs = o.recommendations.map((x) => String(x ?? "").trim()).filter(Boolean);
+  }
+
+  const secRaw = o.sections;
+  let fromArray: Partial<Record<keyof StructuredClinicalReportSections, string>> | null = null;
+  if (Array.isArray(secRaw)) {
+    fromArray = sectionsFromHeadingArray(secRaw);
+  }
+  const sec =
+    secRaw && typeof secRaw === "object" && secRaw !== null && !Array.isArray(secRaw)
+      ? (secRaw as Record<string, unknown>)
+      : {};
+  const pick = (key: keyof StructuredClinicalReportSections): string => {
+    if (fromArray && fromArray[key]) return fromArray[key] as string;
+    const v = sec[key];
+    return typeof v === "string" ? v.trim() : "";
+  };
+
+  const sections: StructuredClinicalReportSections = {
+    patientOverview: pick("patientOverview"),
+    currentPresentation: pick("currentPresentation"),
+    riskAssessment: pick("riskAssessment"),
+    incidentsSummary: pick("incidentsSummary"),
+    behaviourAnalysis: pick("behaviourAnalysis"),
+    medicationCompliance: pick("medicationCompliance"),
+    MDTObservations: pick("MDTObservations") || pick("mdtObservations"),
+    legalContext: pick("legalContext"),
+    recommendation: pick("recommendation"),
+  };
+
+  const summaryOut =
+    summary ||
+    [sections.patientOverview, sections.currentPresentation].filter(Boolean).join("\n\n").trim() ||
+    fallback.summary;
+
+  const recommendationsOut = recs.length ? recs : sections.recommendation ? [sections.recommendation] : fallback.recommendations;
+
+  return {
+    title,
+    summary: summaryOut,
+    sections,
+    recommendations: recommendationsOut,
+  };
+}
+
+function buildStructuredReportPrompt(
+  reportType: ClinicalReportType,
+  patientId: string,
+  discipline: string,
+  contextBlock: string
+): string {
+  const jsonFooter = `Return STRICT JSON only (no markdown fences) with exactly this shape:
+{
+  "title": "string",
+  "summary": "string",
+  "recommendations": ["string"],
+  "sections": {
+    "patientOverview": "string",
+    "currentPresentation": "string",
+    "riskAssessment": "string",
+    "incidentsSummary": "string",
+    "behaviourAnalysis": "string",
+    "medicationCompliance": "string",
+    "MDTObservations": "string",
+    "legalContext": "string",
+    "recommendation": "string"
+  }
+}
+
+Alternatively you may use "sections" as an array of { "heading": "Section name", "content": "..." } with headings matching the nine section titles above.
+
+Use "Insufficient data" for a section only when the notes contain no relevant information. Do not invent clinical facts.`;
+
+  if (reportType === "tribunal") {
+    return `You are a senior consultant psychiatrist.
+
+Generate a PROFESSIONAL UK mental health tribunal report.
+
+Rules:
+- Use formal clinical tone
+- No bullet points
+- No hallucination
+- Only use provided data
+
+Structure EXACTLY:
+
+1. Patient Overview
+2. Current Presentation
+3. Risk Assessment
+4. Incident Summary
+5. Behavioural Analysis
+6. Medication Compliance
+7. MDT Observations
+8. Legal Context
+9. Clinical Recommendation
+
+Write in paragraphs. Map each section to the corresponding JSON field under "sections".
+
+Context record ID (do not repeat verbatim in output): ${patientId}
+Discipline / MDT role: ${discipline}
+
+Clinical notes context:
+${contextBlock}
+
+${jsonFooter}`;
+  }
+
+  if (reportType === "cpa") {
+    return `You are a senior UK clinician preparing a Regulation 9 aligned Care Programme Approach (CPA) report.
+
+Rules:
+- Formal clinical tone; continuous prose only (no bullet points)
+- No hallucination; only use provided data
+- Populate all nine sections from the structure below
+
+Sections:
+1. Patient Overview
+2. Current Presentation
+3. Risk Assessment
+4. Incident Summary
+5. Behavioural Analysis
+6. Medication Compliance
+7. MDT Observations
+8. Legal Context
+9. Clinical Recommendation
+
+Context record ID: ${patientId}
+Discipline: ${discipline}
+
+Clinical notes:
+${contextBlock}
+
+${jsonFooter}`;
+  }
+
+  return `You are a senior UK clinician preparing a multi-disciplinary team (MDT) review summary for governance and care planning.
+
+Rules:
+- Formal clinical tone; paragraphs only (no bullet points)
+- No hallucination; only use provided data
+
+Use the same nine sections:
+
+1. Patient Overview
+2. Current Presentation
+3. Risk Assessment
+4. Incident Summary
+5. Behavioural Analysis
+6. Medication Compliance
+7. MDT Observations
+8. Legal Context
+9. Clinical Recommendation
+
+Context record ID: ${patientId}
+Discipline: ${discipline}
+
+Clinical notes:
+${contextBlock}
+
+${jsonFooter}`;
 }
 
 /**
- * Generates a single report section (title + content) for a given set of clinical notes.
+ * Generates a structured clinical report (nine narrative sections) from note context.
  */
 export async function generateClinicalReportSection(params: {
   reportType: ClinicalReportType;
   patientId: string;
   discipline: string;
   contextNotes: Array<{ rawNote: string; correctedNote?: string | null; structuredSummary?: string | null }>;
-}): Promise<ClinicalReportSection> {
+}): Promise<StructuredClinicalReport> {
   const { reportType, patientId, discipline, contextNotes } = params;
-
-  const apiKey = requireGeminiKey();
-  const genAI = new GoogleGenerativeAI(apiKey);
-
-  const model = genAI.getGenerativeModel({
-    model: NOTE_ANALYSIS_MODEL,
-    generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
-  });
 
   const context = (contextNotes ?? [])
     .map((n, idx) => {
@@ -446,45 +727,22 @@ export async function generateClinicalReportSection(params: {
     })
     .join("\n\n---\n\n");
 
-  const reportInstructions =
-    reportType === "cpa"
-      ? "Create a Regulation 9 compliant Care Programme Approach (CPA) report draft."
-      : reportType === "tribunal"
-        ? "Create a Tribunal report draft (clear facts as documented; do not speculate)."
-        : "Create an MDT review report draft for the provided clinical context.";
+  const prompt = buildStructuredReportPrompt(reportType, patientId, discipline, context || "(none)");
 
-  const prompt = `You are a clinical documentation assistant for UK health and social care.
-Generate ${reportType} documentation based ONLY on the provided notes.
-
-Context record ID (do not repeat):
-${patientId}
-
-Discipline / MDT role:
-${discipline}
-
-Task:
-${reportInstructions}
-
-Return STRICT JSON only:
-{ "title": "string", "content": "string" }
-
-Rules:
-- Do not invent facts not present in the notes.
-- Use professional, person-centred language.
-- Include relevant risks and actions derived from the note context.
-- If information is missing, state "Not documented" rather than guessing.
-- Content must be plain text (no markdown tables).`;
-
-  const result = await model.generateContent(`${prompt}\n\nClinical notes context:\n${context}`);
-  const text = result?.response?.text?.() ?? "";
-  const parsed = safeParse(text);
-  if (!parsed || !parsed || typeof parsed !== "object") {
-    console.error("Gemini report parse error:", text);
-    return reportFallback(reportType);
+  console.log("Using model:", NOTE_ANALYSIS_MODEL);
+  try {
+    const text = await generateAIContent(prompt, { responseMimeType: "application/json", temperature: 0.2 });
+    if (!text) {
+      return structuredReportFallback(reportType);
+    }
+    const parsed = safeParse(text);
+    if (!parsed || typeof parsed !== "object") {
+      console.error("Gemini structured report parse error:", text);
+      return structuredReportFallback(reportType);
+    }
+    return normaliseStructuredReport(parsed, reportType);
+  } catch (err) {
+    console.error("AI ERROR:", err);
+    return structuredReportFallback(reportType);
   }
-
-  const o = parsed as Record<string, unknown>;
-  const title = typeof o.title === "string" ? o.title.trim() : reportFallback(reportType).title;
-  const content = typeof o.content === "string" ? o.content.trim() : reportFallback(reportType).content;
-  return { title: title || reportFallback(reportType).title, content };
 }

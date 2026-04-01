@@ -3,9 +3,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useOrganisation } from "../context/OrganisationContext";
-import { listPatients } from "../services/patientService";
+import { getPatientsByOrg } from "../services/patientService";
 import { getUserContext } from "../services/authService";
-import { buildEvidencePackZip, generateEvidencePack } from "../services/evidencePackService";
+import { buildEvidencePackZip, generateInspectionEnginePack } from "../services/evidencePackService";
+import CqcInspectionPackView from "../components/evidence/CqcInspectionPackView";
 import { logAuditEvent } from "../services/auditService";
 import { getSubscription } from "../services/subscriptionService";
 import { hasFeature } from "../utils/featureAccess.js";
@@ -16,7 +17,8 @@ export default function EvidencePack() {
   const { organisationId, organisation } = useOrganisation();
   const [subscription, setSubscription] = useState(null);
   const [subscriptionLoading, setSubscriptionLoading] = useState(true);
-  const canAccess = hasFeature(subscription, "evidencePack");
+  const canAccess =
+    import.meta.env.DEV === true || hasFeature(subscription, "evidencePack");
   const [patients, setPatients] = useState([]);
   const [loadingPatients, setLoadingPatients] = useState(true);
   const [patientsError, setPatientsError] = useState(null);
@@ -65,37 +67,52 @@ export default function EvidencePack() {
   }, [organisationId]);
 
   useEffect(() => {
-    if (!canAccess) {
+    if (import.meta.env.DEV && organisation?.features) {
+      // eslint-disable-next-line no-console -- dev diagnostics for evidence pack
+      console.log("FEATURE FLAGS:", organisation.features);
+    }
+  }, [organisation]);
+
+  useEffect(() => {
+    if (!canAccess || !organisationId) {
+      setPatients([]);
       setLoadingPatients(false);
       return;
     }
     let mounted = true;
-    async function load() {
+
+    async function loadPatients() {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console -- evidence pack diagnostics
+        console.log("ACTIVE ORG ID:", organisationId);
+      }
       setLoadingPatients(true);
       setPatientsError(null);
       try {
-        const list = await listPatients();
+        const data = await getPatientsByOrg(organisationId);
         if (!mounted) return;
-        setPatients(Array.isArray(list) ? list : []);
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console -- evidence pack diagnostics
+          console.log("Loaded patients:", data);
+          // eslint-disable-next-line no-console -- evidence pack diagnostics
+          console.log("PATIENTS:", data);
+        }
+        setPatients(Array.isArray(data) ? data : []);
       } catch (e) {
         if (!mounted) return;
+        console.error("Failed to load patients", e);
         setPatientsError(e?.message ?? "Failed to load patients.");
         setPatients([]);
       } finally {
         if (mounted) setLoadingPatients(false);
       }
     }
-    load();
+
+    void loadPatients();
     return () => {
       mounted = false;
     };
-  }, [canAccess]);
-
-  useEffect(() => {
-    if (!selectedPatientId && patients.length > 0) {
-      setSelectedPatientId(patients[0].id ?? "");
-    }
-  }, [patients, selectedPatientId]);
+  }, [canAccess, organisationId]);
 
   if (subscriptionLoading) {
     return (
@@ -177,7 +194,10 @@ export default function EvidencePack() {
     try {
       const { organisationId } = await getUserContext();
       if (!organisationId) throw new Error("organisationId required");
-      const data = await generateEvidencePack({ organisationId });
+      const data = await generateInspectionEnginePack({
+        organisationId,
+        patientId: selectedPatientId.trim() || null,
+      });
       setPack(data);
       setPackGeneratedAt(new Date().toLocaleString());
     } catch (e) {
@@ -203,8 +223,8 @@ export default function EvidencePack() {
           Generated: {new Date().toLocaleDateString()}
         </p>
         <p style={{ margin: 0, color: "#64748b", fontSize: "0.95rem", lineHeight: 1.5 }}>
-          Generate a single inspection bundle (ZIP) containing clinical notes, care plans as readable text files, and
-          organisation policy/evidence documents for the selected patient and organisation.
+          Generate a CQC inspection engine view (five domains, gaps, risks) and a ZIP bundle of notes, care plans, and
+          organisation documents. Select a patient before running the inspection preview to scope notes and care plans.
         </p>
       </header>
 
@@ -216,12 +236,28 @@ export default function EvidencePack() {
             onClick: () => generateZipEvidencePack(),
           },
           {
-            label: packLoading ? "Generating report..." : "Generate Evidence Pack (Preview)",
+            label: packLoading ? "Running inspection engine…" : "Run CQC inspection engine",
             type: "secondary",
             onClick: () => handleGeneratePack(),
           },
         ]}
       />
+
+      {!pack && !lastSummary && !packLoading && !generating ? (
+        <p
+          style={{
+            margin: "0 0 16px 0",
+            padding: "12px 14px",
+            background: "#f1f5f9",
+            border: "1px solid #e2e8f0",
+            borderRadius: 10,
+            color: "#475569",
+            fontSize: 14,
+          }}
+        >
+          No evidence generated yet. Click generate.
+        </p>
+      ) : null}
 
       <section
         style={{
@@ -244,7 +280,10 @@ export default function EvidencePack() {
         {!loadingPatients && !patientsError && (
           <select
             value={selectedPatientId}
-            onChange={(e) => setSelectedPatientId(e.target.value)}
+            onChange={(e) => {
+              const id = e.target.value;
+              setSelectedPatientId(id);
+            }}
             disabled={patients.length === 0}
             style={{
               width: "100%",
@@ -255,6 +294,7 @@ export default function EvidencePack() {
               fontSize: 14,
             }}
           >
+            <option value="">Select patient</option>
             {patients.map((p) => {
               const name = `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim();
               return (
@@ -352,103 +392,95 @@ export default function EvidencePack() {
       </div>
 
       {pack ? (
-        <section
-          style={{
-            marginTop: 16,
-            background: "#fff",
-            border: "1px solid #e2e8f0",
-            borderRadius: 12,
-            padding: "1rem",
-          }}
-        >
-          <p style={{ marginTop: 0, marginBottom: 8, color: "#64748b", fontSize: 13 }}>
+        <>
+          <p style={{ marginTop: 16, marginBottom: 0, color: "#64748b", fontSize: 13 }}>
             Organisation: <strong>{organisation?.name ?? "Unknown"}</strong>
             {" · "}
             Generated at: <strong>{packGeneratedAt || "—"}</strong>
+            {pack.patientId ? (
+              <>
+                {" · "}
+                Patient scope: <strong>{patientLabel}</strong>
+              </>
+            ) : (
+              <>
+                {" · "}
+                <span style={{ color: "#b45309" }}>Org-wide notes (no patient selected)</span>
+              </>
+            )}
           </p>
-          <h2 style={{ marginTop: 0 }}>Evidence Pack</h2>
-          <h3 style={{ marginBottom: 6 }}>Summary</h3>
-          <p style={{ marginTop: 0 }}>{pack.summary}</p>
 
-          <h3 style={{ marginBottom: 6 }}>Clinical Notes</h3>
-          {(pack.notes ?? []).map((n, i) => (
-            <div key={n.id ?? i} style={{ marginBottom: 6, color: "#334155" }}>
-              {n.content ?? "No content"}
-            </div>
-          ))}
+          <CqcInspectionPackView pack={pack} />
 
-          <h3 style={{ marginBottom: 6, marginTop: 12 }}>Audit Logs</h3>
-          {(pack.audits ?? []).map((a, i) => (
-            <div key={a.id ?? i} style={{ marginBottom: 6, color: "#334155" }}>
-              {(a.action ?? a.eventType ?? "UNKNOWN")} by {a.userEmail ?? "Unknown user"}
-            </div>
-          ))}
-
-          <h3 style={{ marginBottom: 6, marginTop: 12 }}>Inspection Reports</h3>
-          {(pack.inspections ?? []).map((r, i) => (
-            <div key={r.id ?? i} style={{ marginBottom: 6, color: "#334155" }}>
-              Score: {r.score ?? r.overallScore ?? "—"} | Rating: {r.rating ?? r.overallRating ?? "—"}
-            </div>
-          ))}
-
-          <h3 style={{ marginBottom: 6, marginTop: 12 }}>STOMP Compliance</h3>
-          {(pack.stompCompliance ?? []).length === 0 ? (
-            <p style={{ marginTop: 0, color: "#64748b" }}>No STOMP-monitored patients found.</p>
-          ) : (
-            (pack.stompCompliance ?? []).map((p, i) => (
-              <div key={p.patientId ?? i} style={{ marginBottom: 8, color: "#334155" }}>
-                <strong>{p.patientName ?? p.patientId}</strong> — medications: {(p.medications ?? []).length}
-                {(p.alerts ?? []).length > 0 ? (
-                  <ul style={{ margin: "6px 0 0 18px" }}>
-                    {(p.alerts ?? []).map((a, j) => (
-                      <li key={`${p.patientId}-a-${j}`}>
-                        {a.severity === "high" ? "🔴" : "🟡"} {a.text}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div style={{ color: "#166534", fontSize: 13 }}>No STOMP alerts.</div>
-                )}
-              </div>
-            ))
-          )}
-
-          <h3 style={{ marginBottom: 6, marginTop: 12 }}>Inspection Intelligence</h3>
-          <p style={{ marginTop: 0, color: "#334155" }}>
-            Overall score: {pack.inspectionIntelligence?.overallScore ?? "—"} | Snapshots: {pack.inspectionIntelligence?.historyCount ?? 0}
-          </p>
-          {pack.inspectionIntelligence?.domainScores ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {Object.entries(pack.inspectionIntelligence.domainScores).map(([domain, score]) => (
-                <div
-                  key={domain}
-                  style={{
-                    border: "1px solid #e2e8f0",
-                    borderRadius: 8,
-                    padding: "6px 10px",
-                    background: "#f8fafc",
-                    color: "#0f172a",
-                    fontSize: 13,
-                    fontWeight: 700,
-                  }}
-                >
-                  {domain}: {score}%
+          <section
+            style={{
+              marginTop: 20,
+              background: "#f8fafc",
+              border: "1px solid #e2e8f0",
+              borderRadius: 12,
+              padding: "1rem",
+            }}
+          >
+            <h3 style={{ marginTop: 0, fontSize: "0.95rem", fontWeight: 900, color: "#0f172a" }}>STOMP &amp; inspection scores</h3>
+            <h4 style={{ margin: "8px 0 6px 0", fontSize: 13, color: "#64748b" }}>STOMP</h4>
+            {(pack.stompCompliance ?? []).length === 0 ? (
+              <p style={{ marginTop: 0, color: "#64748b", fontSize: 14 }}>No STOMP-monitored patients found.</p>
+            ) : (
+              (pack.stompCompliance ?? []).map((p, i) => (
+                <div key={p.patientId ?? i} style={{ marginBottom: 8, color: "#334155", fontSize: 14 }}>
+                  <strong>{p.patientName ?? p.patientId}</strong> — medications: {(p.medications ?? []).length}
+                  {(p.alerts ?? []).length > 0 ? (
+                    <ul style={{ margin: "6px 0 0 18px" }}>
+                      {(p.alerts ?? []).map((a, j) => (
+                        <li key={`${p.patientId}-a-${j}`}>
+                          {a.severity === "high" ? "🔴" : "🟡"} {a.text}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div style={{ color: "#166534", fontSize: 13 }}>No STOMP alerts.</div>
+                  )}
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p style={{ marginTop: 0, color: "#64748b" }}>No inspection score snapshots yet.</p>
-          )}
-          {(pack.inspectionIntelligence?.keyAlerts ?? []).length > 0 ? (
-            <ul style={{ margin: "6px 0 0 18px" }}>
-              {(pack.inspectionIntelligence?.keyAlerts ?? []).map((a, idx) => (
-                <li key={`ia-${idx}`} style={{ color: a.level === "critical" ? "#991b1b" : "#9a3412" }}>
-                  {a.level === "critical" ? "🔴" : "🟠"} {a.message}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </section>
+              ))
+            )}
+
+            <h4 style={{ margin: "12px 0 6px 0", fontSize: 13, color: "#64748b" }}>Inspection snapshots</h4>
+            <p style={{ marginTop: 0, color: "#334155", fontSize: 14 }}>
+              Overall score: {pack.inspectionIntelligence?.overallScore ?? "—"} | Snapshots: {pack.inspectionIntelligence?.historyCount ?? 0}
+            </p>
+            {pack.inspectionIntelligence?.domainScores ? (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {Object.entries(pack.inspectionIntelligence.domainScores).map(([domain, score]) => (
+                  <div
+                    key={domain}
+                    style={{
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 8,
+                      padding: "6px 10px",
+                      background: "#fff",
+                      color: "#0f172a",
+                      fontSize: 13,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {domain}: {score}%
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p style={{ marginTop: 0, color: "#64748b", fontSize: 14 }}>No inspection score snapshots yet.</p>
+            )}
+            {(pack.inspectionIntelligence?.keyAlerts ?? []).length > 0 ? (
+              <ul style={{ margin: "8px 0 0 18px", fontSize: 14 }}>
+                {(pack.inspectionIntelligence?.keyAlerts ?? []).map((a, idx) => (
+                  <li key={`ia-${idx}`} style={{ color: a.level === "critical" ? "#991b1b" : "#9a3412" }}>
+                    {a.level === "critical" ? "🔴" : "🟠"} {a.message}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
+        </>
       ) : null}
 
       <section style={{ marginTop: "2rem", paddingTop: "1.25rem", borderTop: "1px solid #e2e8f0" }}>

@@ -17,6 +17,15 @@ import { DEV_AUTH_BYPASS } from "../config/devAuth";
 import { hasFeature as planHasFeature, normalizePlanKey } from "../utils/featureAccess";
 import { auth, db } from "../firebase";
 import { getFeaturesForOrganisationType } from "../config/organisationTemplates";
+import { applyDevOrganisationFeatures } from "../config/devFeatureOverrides";
+
+/**
+ * Dev-only: unlock plan feature `"ai"` while running the Vite dev server (`import.meta.env.DEV` is false in production builds).
+ * Does not remove feature flags — org `features.ai` and plan matrix still apply in prod.
+ */
+function isDevAiFeatureOverride() {
+  return import.meta.env.DEV === true;
+}
 
 /** Normalise org / hospital / ward ids from Firestore (string, DocumentReference, or number). */
 function coerceTenantId(value) {
@@ -84,7 +93,7 @@ export function OrganisationProvider({ children }) {
         wardId: null,
       };
       setOrganisationId(devOrgId);
-      setOrganisation(devOrg);
+      setOrganisation(applyDevOrganisationFeatures(devOrg));
       setSubscription(null);
       setUserProfile(devProfile);
       setError(null);
@@ -403,12 +412,12 @@ export function OrganisationProvider({ children }) {
           sub = null;
         }
       }
-      setOrganisation(org);
+      setOrganisation(applyDevOrganisationFeatures(org));
       setSubscription(sub);
       setNeedsSetup(false);
       if (org.status === "suspended") {
         setOrganisationId(null);
-        setOrganisation(org);
+        setOrganisation(applyDevOrganisationFeatures(org));
         setSubscription(null);
         setNeedsSetup(false);
         setError("This organisation has been suspended. Contact support.");
@@ -467,6 +476,9 @@ export function OrganisationProvider({ children }) {
 
   const hasFeature = useCallback(
     (feature) => {
+      if (feature === "ai" && isDevAiFeatureOverride()) {
+        return true;
+      }
       const orgFeatures = organisation?.features;
       if (orgFeatures && typeof orgFeatures === "object" && orgFeatures[feature] === true) {
         return true;

@@ -36,6 +36,47 @@ import { getInspectionInsights } from "../engine/inspectionInsights";
 import { canApproveNote } from "../utils/clinicalNoteApproval";
 import { showToast } from "../utils/toast";
 
+function ConfirmDialog({ title, body, confirmLabel, danger, onCancel, onConfirm }) {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(15,23,42,0.45)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 70,
+      }}
+    >
+      <div style={{ background: "#fff", borderRadius: 12, padding: "1.25rem 1.5rem", maxWidth: 420, width: "100%", boxShadow: "0 12px 40px rgba(0,0,0,0.2)" }}>
+        <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>{title}</h2>
+        <p style={{ color: "#475569", fontSize: 14 }}>{body}</p>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+          <button type="button" onClick={onCancel} style={{ padding: "8px 16px", background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 8, cursor: "pointer" }}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            style={{
+              padding: "8px 16px",
+              background: danger ? "#991b1b" : "#2563eb",
+              color: "#fff",
+              border: "none",
+              borderRadius: 8,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function formatDate(value) {
   return formatUkDateTime(value, "—");
 }
@@ -121,7 +162,7 @@ function defaultDisciplineFromProfile(mdt) {
 }
 
 export default function ClinicalNotes() {
-  const { organisationId, organisation, hasFeature, userProfile } = useOrganisation();
+  const { organisationId, organisation, userProfile } = useOrganisation();
   const { currentServiceId, services } = useService();
   const { user } = useAuth();
   const { role, canViewNotes, canEditNotes, canDeleteNotes, loading: roleLoading } = useRole();
@@ -152,6 +193,8 @@ export default function ClinicalNotes() {
   const [editNoteDrafts, setEditNoteDrafts] = useState({});
   const [savingEditNoteId, setSavingEditNoteId] = useState(null);
   const [noteEditError, setNoteEditError] = useState(null);
+  const [historyNote, setHistoryNote] = useState(null);
+  const [deleteNoteTarget, setDeleteNoteTarget] = useState(null);
 
   const load = useCallback(() => {
     if (!organisationId) {
@@ -182,7 +225,13 @@ export default function ClinicalNotes() {
         setError(isIndexError(err) ? INDEX_ERROR_MESSAGE : (err?.message ?? "Failed to load clinical notes."));
         setNotes([]);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        try {
+          setLoading(false);
+        } catch {
+          /* ignore */
+        }
+      });
   }, [organisationId, isManager, filterPatientId, canViewNotes]);
 
   useEffect(() => {
@@ -325,9 +374,6 @@ export default function ClinicalNotes() {
           ]}
         />
       ) : null}
-      <div style={{ marginTop: 10, marginBottom: 12, padding: "10px 12px", border: "1px solid #fde68a", background: "#fffbeb", borderRadius: 8, color: "#92400e", fontSize: 13, fontWeight: 700 }}>
-        This record cannot be edited. Add addendum instead.
-      </div>
 
       {isManager && (
         <div
@@ -399,9 +445,13 @@ export default function ClinicalNotes() {
 
       {loading && <p style={{ color: "#666" }}>Loading clinical notes…</p>}
 
-      {!loading && !error && notes.length === 0 && (
+      {!organisationId ? (
+        <p style={{ color: "#64748b", padding: "2rem", background: "#f8fafc", borderRadius: 12 }}>Loading organisation…</p>
+      ) : null}
+
+      {organisationId && !loading && !error && notes.length === 0 && (
         <p style={{ color: "#64748b", padding: "2rem", background: "#f8fafc", borderRadius: 12 }}>
-          No data available. Start by adding a clinical note with Add Note.
+          No clinical notes yet. Add a note to begin the record.
         </p>
       )}
 
@@ -566,6 +616,7 @@ export default function ClinicalNotes() {
                             delete next[n.id];
                             return next;
                           });
+                          showToast("Note saved", "success");
                         } catch (e) {
                           const msg = e?.message ?? "Could not save note.";
                           setNoteEditError(msg);
@@ -615,7 +666,7 @@ export default function ClinicalNotes() {
                     </button>
                   </div>
                 </div>
-              ) : n.content ? (
+              ) : n.content && noteStatusLabel(n.status) === "draft" ? (
                 <p style={{ margin: "8px 0 0 0", color: "#334155", fontSize: "0.9rem", whiteSpace: "pre-wrap" }}>
                   {n.content}
                 </p>
@@ -670,7 +721,7 @@ export default function ClinicalNotes() {
                           delete next[n.id];
                           return next;
                         });
-                        showToast("Note finalised", "success");
+                        showToast("Note saved", "success");
                       } catch (e) {
                         const msg = e?.message ?? "Could not finalise note.";
                         setNoteDeleteError(msg);
@@ -692,26 +743,6 @@ export default function ClinicalNotes() {
                     }}
                   >
                     {finalizingNoteId === n.id ? "Finalising…" : "Finalise"}
-                  </button>
-                ) : null}
-                {noteStatusLabel(n.status) === "final" || noteStatusLabel(n.status) === "approved" ? (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (!addendumsByNote[n.id]) {
-                        try {
-                          const rows = await fetchAddendumsForNote(n.id);
-                          setAddendumsByNote((prev) => ({ ...prev, [n.id]: rows }));
-                        } catch (err) {
-                          console.error(err);
-                          showToast("Something went wrong");
-                          setAddendumsByNote((prev) => ({ ...prev, [n.id]: [] }));
-                        }
-                      }
-                    }}
-                    style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #cbd5e1", background: "#fff", color: "#334155", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
-                  >
-                    Show addendums
                   </button>
                 ) : null}
                 {canApproveNote(userProfile?.mdtRole, noteRecordForApproval(n), user?.uid, role) &&
@@ -753,6 +784,7 @@ export default function ClinicalNotes() {
                           delete next[n.id];
                           return next;
                         });
+                        showToast("Note approved", "success");
                       } catch (e) {
                         const msg = e?.message ?? "Could not approve note.";
                         setNoteDeleteError(msg);
@@ -781,41 +813,9 @@ export default function ClinicalNotes() {
                   <button
                     type="button"
                     disabled={deletingNoteId === n.id}
-                    onClick={async () => {
-                      const msg =
-                        canDeleteNotes() && noteStatusLabel(n.status) !== "approved"
-                          ? "Soft-delete this clinical note? It will be hidden but retained for audit."
-                          : "Delete your draft note? It will be hidden but retained for audit.";
-                      // eslint-disable-next-line no-alert
-                      if (!globalThis.confirm(msg)) return;
+                    onClick={() => {
                       setNoteDeleteError(null);
-                      setDeletingNoteId(n.id);
-                      try {
-                        if (canDeleteNotes() && noteStatusLabel(n.status) !== "approved") {
-                          await deleteClinicalNote(n.id);
-                        } else {
-                          await softDeleteClinicalNoteAsAuthor(n.id);
-                        }
-                        setNotes((prev) => prev.filter((x) => x.id !== n.id));
-                        setAddendumsByNote((prev) => {
-                          const next = { ...prev };
-                          delete next[n.id];
-                          return next;
-                        });
-                        setAddendumDrafts((prev) => {
-                          const next = { ...prev };
-                          delete next[n.id];
-                          return next;
-                        });
-                        showToast("Note removed", "success");
-                      } catch (e) {
-                        const err = e?.message ?? "Could not delete note.";
-                        setNoteDeleteError(err);
-                        showToast(err);
-                        console.error(e);
-                      } finally {
-                        setDeletingNoteId(null);
-                      }
+                      setDeleteNoteTarget(n);
                     }}
                     style={{
                       padding: "6px 10px",
@@ -831,9 +831,22 @@ export default function ClinicalNotes() {
                     {deletingNoteId === n.id ? "Deleting…" : "Delete note"}
                   </button>
                 ) : null}
+                {Array.isArray(n.versions) && n.versions.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setHistoryNote(n)}
+                    style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #cbd5e1", background: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+                  >
+                    View history
+                  </button>
+                ) : null}
               </div>
-              {n.status === "approved" ? (
+              {noteStatusLabel(n.status) === "final" || noteStatusLabel(n.status) === "approved" ? (
                 <>
+                  <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #e2e8f0" }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: "#0f172a", marginBottom: 6 }}>— Original note —</div>
+                    <p style={{ margin: 0, color: "#334155", fontSize: "0.9rem", whiteSpace: "pre-wrap" }}>{n.content}</p>
+                  </div>
                   <div style={{ marginTop: 8 }}>
                     <textarea
                       rows={2}
@@ -842,7 +855,7 @@ export default function ClinicalNotes() {
                         const value = e.target.value;
                         setAddendumDrafts((prev) => ({ ...prev, [n.id]: value }));
                       }}
-                      placeholder="Add addendum (main note is locked)"
+                      placeholder="Add addendum (does not change the original)"
                       style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1", boxSizing: "border-box" }}
                     />
                     <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -865,10 +878,31 @@ export default function ClinicalNotes() {
                                   id: created.id,
                                   text,
                                   authorEmail: createdBy,
+                                  role: userProfile?.mdtRole ?? role ?? "",
                                   createdAt: new Date(),
                                 },
                               ],
                             }));
+                            setNotes((prev) =>
+                              prev.map((x) =>
+                                x.id === n.id
+                                  ? {
+                                      ...x,
+                                      addendums: [
+                                        ...(Array.isArray(x.addendums) ? x.addendums : []),
+                                        {
+                                          id: created.id,
+                                          content: text,
+                                          createdBy: user?.uid ?? "",
+                                          role: (userProfile?.mdtRole ?? role ?? "").toString(),
+                                          createdAt: new Date(),
+                                        },
+                                      ],
+                                    }
+                                  : x
+                              )
+                            );
+                            showToast("Addendum saved", "success");
                           } catch (e) {
                             const em = e?.message ?? "Failed to add addendum.";
                             setAddendumError((prev) => ({ ...prev, [n.id]: em }));
@@ -887,16 +921,29 @@ export default function ClinicalNotes() {
                       ) : null}
                     </div>
                   </div>
-                  {(addendumsByNote[n.id] ?? []).length > 0 ? (
+                  {((addendumsByNote[n.id] ?? []).length > 0 || (Array.isArray(n.addendums) && n.addendums.length > 0)) ? (
                     <div style={{ marginTop: 8, padding: "8px 10px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8 }}>
-                      {(addendumsByNote[n.id] ?? []).map((a) => (
-                        <div key={a.id} style={{ marginBottom: 6 }}>
-                          <div style={{ fontSize: 12, color: "#64748b" }}>
-                            {formatDate(a.createdAt)} · {a.authorEmail || "—"}
-                          </div>
-                          <div style={{ fontSize: 13, color: "#334155", whiteSpace: "pre-wrap" }}>{a.text}</div>
-                        </div>
-                      ))}
+                      {(addendumsByNote[n.id] ?? []).length > 0
+                        ? (addendumsByNote[n.id] ?? []).map((a) => (
+                            <div key={a.id} style={{ marginBottom: 10 }}>
+                              <div style={{ fontSize: 12, fontWeight: 800, color: "#334155" }}>— Addendum —</div>
+                              <div style={{ fontSize: 12, color: "#64748b" }}>
+                                {formatDate(a.createdAt)} · {a.authorEmail || "—"}
+                                {a.role ? ` · ${a.role}` : ""}
+                              </div>
+                              <div style={{ fontSize: 13, color: "#334155", whiteSpace: "pre-wrap" }}>{a.text}</div>
+                            </div>
+                          ))
+                        : (n.addendums ?? []).map((a) => (
+                            <div key={a.id} style={{ marginBottom: 10 }}>
+                              <div style={{ fontSize: 12, fontWeight: 800, color: "#334155" }}>— Addendum —</div>
+                              <div style={{ fontSize: 12, color: "#64748b" }}>
+                                {formatDate(a.createdAt)} · {a.createdBy || "—"}
+                                {a.role ? ` · ${a.role}` : ""}
+                              </div>
+                              <div style={{ fontSize: 13, color: "#334155", whiteSpace: "pre-wrap" }}>{a.content}</div>
+                            </div>
+                          ))}
                     </div>
                   ) : null}
                 </>
@@ -959,22 +1006,20 @@ export default function ClinicalNotes() {
             setCreateError(null);
 
             let aiResult = null;
-            if (hasFeature("ai")) {
-              setAnalysing(true);
+            setAnalysing(true);
+            try {
               try {
-                try {
-                  aiResult = await analyseClinicalNote({
-                    content,
-                    authorRole: resolvedDiscipline,
-                    patientId,
-                  });
-                } catch (aiErr) {
-                  console.error("AI failed:", aiErr);
-                  aiResult = null;
-                }
-              } finally {
-                setAnalysing(false);
+                aiResult = await analyseClinicalNote({
+                  content,
+                  authorRole: resolvedDiscipline,
+                  patientId,
+                });
+              } catch (aiErr) {
+                console.error("AI ERROR:", aiErr);
+                aiResult = null;
               }
+            } finally {
+              setAnalysing(false);
             }
 
             try {
@@ -1067,6 +1112,81 @@ export default function ClinicalNotes() {
           error={createError}
         />
       )}
+
+      {historyNote ? (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 70,
+          }}
+        >
+          <div style={{ background: "#fff", borderRadius: 12, padding: "1.25rem 1.5rem", maxWidth: 560, width: "100%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 12px 40px rgba(0,0,0,0.2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h2 style={{ margin: 0, fontSize: "1.05rem" }}>Version history (pre-approval)</h2>
+              <button type="button" onClick={() => setHistoryNote(null)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "1.25rem" }} aria-label="Close">
+                ×
+              </button>
+            </div>
+            <ol style={{ margin: 0, paddingLeft: 20 }}>
+              {(historyNote.versions ?? []).map((v, idx) => (
+                <li key={idx} style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 12, color: "#64748b" }}>
+                    {formatDate(v.updatedAt)} · {v.updatedBy || "—"}
+                  </div>
+                  <div style={{ fontSize: 13, color: "#334155", whiteSpace: "pre-wrap" }}>{v.content}</div>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </div>
+      ) : null}
+
+      {deleteNoteTarget ? (
+        <ConfirmDialog
+          title="Archive this note?"
+          body="This will archive the record. It can be restored later."
+          confirmLabel="Archive"
+          danger
+          onCancel={() => setDeleteNoteTarget(null)}
+          onConfirm={async () => {
+            const n = deleteNoteTarget;
+            setDeleteNoteTarget(null);
+            if (!n?.id) return;
+            setDeletingNoteId(n.id);
+            try {
+              if (canDeleteNotes() && noteStatusLabel(n.status) !== "approved") {
+                await deleteClinicalNote(n.id);
+              } else {
+                await softDeleteClinicalNoteAsAuthor(n.id);
+              }
+              setNotes((prev) => prev.filter((x) => x.id !== n.id));
+              setAddendumsByNote((prev) => {
+                const next = { ...prev };
+                delete next[n.id];
+                return next;
+              });
+              setAddendumDrafts((prev) => {
+                const next = { ...prev };
+                delete next[n.id];
+                return next;
+              });
+              showToast("Note archived", "success");
+            } catch (e) {
+              const err = e?.message ?? "Could not delete note.";
+              setNoteDeleteError(err);
+              showToast(err);
+              console.error(e);
+            } finally {
+              setDeletingNoteId(null);
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 }

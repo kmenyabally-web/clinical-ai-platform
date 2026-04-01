@@ -35,6 +35,7 @@ import {
   listInspectionScores,
   saveInspectionScore,
 } from "../services/inspectionScoreService";
+import { getInspectionSimulationSnapshot } from "../services/inspectionSimulationService";
 import { collection, getDocs, limit, orderBy, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 
@@ -84,6 +85,39 @@ export default function Dashboard() {
   useEffect(() => {
     logAuditEventNonBlocking({ action: "DASHBOARD_REPORTS_GENERATED" }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadInspectionReadiness() {
+      if (!organisationId) {
+        setInspectionReadiness(null);
+        setInspectionReadinessLoading(false);
+        return;
+      }
+      setInspectionReadinessLoading(true);
+      try {
+        const snap = await getInspectionSimulationSnapshot(organisationId);
+        if (!cancelled) setInspectionReadiness(snap);
+      } catch {
+        if (!cancelled) setInspectionReadiness(null);
+      } finally {
+        if (!cancelled) setInspectionReadinessLoading(false);
+      }
+    }
+
+    void loadInspectionReadiness();
+    const t = window.setInterval(() => void loadInspectionReadiness(), 90_000);
+    function onVisibility() {
+      if (document.visibilityState === "visible" && organisationId) void loadInspectionReadiness();
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [organisationId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -497,6 +531,51 @@ export default function Dashboard() {
         <span style={systemSecureDotStyle} aria-hidden="true" />
         System Secure
       </div>
+
+      <section
+        style={{
+          marginBottom: "1.25rem",
+          padding: "1rem 1.25rem",
+          borderRadius: 12,
+          border: "1px solid #e2e8f0",
+          background: "#fafafa",
+        }}
+      >
+        <h2 style={{ marginTop: 0, marginBottom: "0.75rem", fontSize: "1.1rem", fontWeight: 900, color: "#0f172a" }}>
+          Inspection readiness (CQC engine)
+        </h2>
+        {inspectionReadinessLoading ? (
+          <p style={{ margin: 0, color: "#64748b" }}>Calculating live simulation…</p>
+        ) : inspectionReadiness ? (
+          <>
+            <p style={{ margin: "0 0 10px 0", fontSize: 15, fontWeight: 800, color: "#0f172a" }}>
+              Overall: {Math.round(inspectionReadiness.overallScore)} → {inspectionReadiness.rating}
+            </p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 10, fontSize: 13, fontWeight: 700, color: "#334155" }}>
+              {Object.entries(inspectionReadiness.domains ?? {}).map(([k, v]) => (
+                <span key={k} style={{ padding: "4px 8px", background: "#fff", borderRadius: 6, border: "1px solid #e2e8f0" }}>
+                  {k}: {Math.round(v)}
+                </span>
+              ))}
+            </div>
+            {(inspectionReadiness.warnings ?? []).length > 0 ? (
+              <ul style={{ margin: 0, paddingLeft: "1.25rem", color: "#9a3412", fontWeight: 600, fontSize: 14 }}>
+                {(inspectionReadiness.warnings ?? []).map((w, i) => (
+                  <li key={i}>{w}</li>
+                ))}
+              </ul>
+            ) : (
+              <p style={{ margin: 0, fontSize: 13, color: "#166534", fontWeight: 600 }}>No critical warnings from this ruleset.</p>
+            )}
+            <p style={{ margin: "10px 0 0 0", fontSize: 12, color: "#64748b" }}>
+              Trend: coming soon · Refreshes every 90s and when you navigate back to this page.
+            </p>
+          </>
+        ) : (
+          <p style={{ margin: 0, color: "#64748b" }}>Simulation unavailable.</p>
+        )}
+      </section>
+
       <h2 style={{ marginTop: 0, marginBottom: "0.9rem" }}>
         CQC Readiness: {inspectionDataLoading ? "..." : `${overallScore}%`}
       </h2>

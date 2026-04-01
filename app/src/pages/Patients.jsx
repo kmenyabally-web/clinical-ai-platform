@@ -82,11 +82,15 @@ export default function Patients() {
         </div>
       )}
 
-      {loading && <p style={{ color: "#666" }}>Loading patients…</p>}
+      {!organisationId ? (
+        <p style={{ color: "#64748b" }}>Loading organisation…</p>
+      ) : null}
 
-      {!loading && !error && patients.length === 0 && (
+      {organisationId && loading ? <p style={{ color: "#666" }}>Loading patients…</p> : null}
+
+      {organisationId && !loading && !error && patients.length === 0 && (
         <div style={styles.emptyState}>
-          <p style={{ marginTop: 0 }}>No patients yet.</p>
+          <p style={{ marginTop: 0 }}>No patients registered yet</p>
           <button
             type="button"
             onClick={() => {

@@ -213,6 +213,24 @@ service cloud.firestore {
     }
 
     // =========
+    // Saved clinical reports (AI Reports export / audit)
+    // =========
+    match /reports/{reportId} {
+      allow read: if isAuthenticated() && canAccessTenantData(resource.data.organisationId);
+
+      allow create: if isAuthenticated()
+        && request.resource.data.organisationId != null
+        && sameOrganisation(request.resource.data.organisationId);
+
+      allow update: if false;
+
+      allow delete: if isAuthenticated()
+        && resource.data.organisationId != null
+        && canAccessTenantData(resource.data.organisationId)
+        && isAdmin();
+    }
+
+    // =========
     // Notes (immutable; delete only for admins — governance / duplicate cleanup)
     // =========
     match /notes/{noteId} {

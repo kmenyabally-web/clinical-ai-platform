@@ -1,11 +1,24 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchClinicalNotesForPatient } from "../services/noteService";
-import { generateClinicalReportSection } from "../services/aiService";
 import { useOrganisation } from "../context/OrganisationContext";
+import { useAuth } from "../context/AuthContext";
 import ActionBar from "../components/ActionBar";
-import { generateMDTReview } from "../services/mdtService";
-import { generateManagementReport } from "../services/managementService";
+import { buildStandardClinicalReport } from "../utils/buildStandardClinicalReport";
+import { exportToPDF } from "../utils/exportPdf";
+import { saveClinicalReportDocument } from "../services/savedClinicalReportsService";
+import {
+  generateReport,
+  generateFallbackReport,
+  mapDropdownToPipelineType,
+  pipelineTypeToDropdown,
+} from "../services/clinicalReportPipeline";
+import { REPORT_TYPES } from "../config/reportConfig";
+import {
+  REPORT_DISCIPLINE_OPTIONS,
+  isPrivilegedReportRole,
+  normalizeUserDiscipline,
+} from "../utils/reportDiscipline";
 import { usePatients } from "../hooks/usePatients";
 
 function toIsoMillis(value) {
@@ -15,17 +28,29 @@ function toIsoMillis(value) {
   return new Date(ms).toISOString();
 }
 
-const REPORT_TYPES = [
+const DROPDOWN_OPTIONS = [
   { value: "CPA", label: "CPA Report" },
-  { value: "TRIBUNAL", label: "Tribunal Report" },
-  { value: "MDT", label: "MDT Review" },
-  { value: "MANAGEMENT", label: "Management Hearing Report" },
-  { value: "MDT_WARD", label: "MDT Ward Round" },
+  { value: "Tribunal", label: "Tribunal Report" },
+  { value: "Management_Hearing", label: "Management Hearing" },
+  { value: "MDT", label: "MDT — ward round" },
+  { value: "MDT_CLINICAL", label: "MDT — clinical review" },
+  { value: "Summary", label: "Notes summary (all)" },
+  { value: "WEEKLY", label: "Weekly summary (7 days)" },
+  { value: "MONTHLY", label: "Monthly summary (30 days)" },
 ];
 
+const cardStyle = {
+  background: "#fff",
+  border: "1px solid #e2e8f0",
+  borderRadius: 12,
+  padding: "1rem 1.1rem",
+  marginBottom: 12,
+  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.06)",
+};
+
 export default function ClinicalAiReports() {
-  const { organisationId, hasFeature } = useOrganisation();
-  const immutableClinicalRecords = true;
+  const { user } = useAuth();
+  const { organisationId, organisationName, organisation, userProfile, isPlatformAdmin } = useOrganisation();
 
   const { data: patients = [], loading: patientsLoading, error: patientsError } = usePatients();
 
@@ -37,8 +62,28 @@ export default function ClinicalAiReports() {
   const [reportType, setReportType] = useState("CPA");
   const [generating, setGenerating] = useState(false);
   const [reportError, setReportError] = useState(null);
+  const [reportWarning, setReportWarning] = useState(null);
   const [lastGenerated, setLastGenerated] = useState(null);
   const [report, setReport] = useState(null);
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [saveMessage, setSaveMessage] = useState(null);
+  const [saveError, setSaveError] = useState(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [selectedDiscipline, setSelectedDiscipline] = useState("ALL");
+  const reportRunLock = useRef(false);
+
+  const showDisciplineSelect = useMemo(
+    () =>
+      isPrivilegedReportRole(userProfile?.role) ||
+      isPrivilegedReportRole(userProfile?.systemRole) ||
+      Boolean(isPlatformAdmin),
+    [userProfile?.role, userProfile?.systemRole, isPlatformAdmin]
+  );
+
+  const userDiscipline = useMemo(
+    () => normalizeUserDiscipline(userProfile?.mdtRole, userProfile?.role),
+    [userProfile?.mdtRole, userProfile?.role]
+  );
 
   const patientOptions = useMemo(
     () =>
@@ -80,6 +125,33 @@ export default function ClinicalAiReports() {
     };
   }, [selectedPatientId]);
 
+  const selectedPatientLabel = useMemo(() => {
+    const p = patientOptions.find((x) => x.id === selectedPatientId);
+    return p?.label ?? "Patient";
+  }, [patientOptions, selectedPatientId]);
+
+  const selectedPatient = useMemo(
+    () => patients.find((p) => String(p?.id ?? "") === String(selectedPatientId)),
+    [patients, selectedPatientId]
+  );
+
+  const orgTypeLabel = organisation?.type ? String(organisation.type) : "—";
+
+  const standardDocument = useMemo(() => {
+    if (!report) return null;
+    return buildStandardClinicalReport({
+      report,
+      notes,
+      meta: {
+        patient: selectedPatientLabel,
+        hospital: selectedPatient?.hospitalName || organisationName || "—",
+        ward: selectedPatient?.wardName || "—",
+        author: user?.displayName || user?.email || "—",
+        pipelineType: lastGenerated?.reportType ?? null,
+      },
+    });
+  }, [report, notes, selectedPatientLabel, selectedPatient, organisationName, user, lastGenerated?.reportType]);
+
   const latestNote = useMemo(() => {
     const rows = (notes ?? []).slice();
     rows.sort((a, b) => {
@@ -90,113 +162,107 @@ export default function ClinicalAiReports() {
     return rows[0] ?? null;
   }, [notes]);
 
-  function generateWeeklySummary() {
-    if (import.meta.env.DEV) {
-      console.log("Debug:", { report: "weekly" });
+  /** @param {string} type Pipeline type: weekly | monthly | summary | tribunal | cpa | mdtReview | mdt | hearing */
+  async function handleGenerateReport(type) {
+    if (reportRunLock.current) return;
+    if (!selectedPatientId) {
+      window.alert("Select a patient first");
+      return;
     }
-  }
-
-  function generateMonthlySummary() {
-    if (import.meta.env.DEV) {
-      console.log("Debug:", { report: "monthly" });
+    if (!organisationId) {
+      setReportError("Organisation context is missing.");
+      setReport(null);
+      setReportWarning(null);
+      return;
     }
-  }
 
-  function generateTribunal() {
-    if (import.meta.env.DEV) {
-      console.log("Debug:", { report: "tribunal" });
-    }
-  }
-
-  function generateCPA() {
-    if (import.meta.env.DEV) {
-      console.log("Debug:", { report: "cpa" });
-    }
-  }
-
-  async function handleGenerate() {
+    reportRunLock.current = true;
     setReportError(null);
+    setReportWarning(null);
+    setSaveMessage(null);
+    setSaveError(null);
     setReport(null);
     setGenerating(true);
     setLastGenerated(null);
+    setReportType(pipelineTypeToDropdown(String(type)));
+
+    if (import.meta.env.DEV) {
+      console.log("Generating report type:", type);
+      console.log("Patient:", selectedPatientId);
+      console.log("Notes count:", notes?.length ?? 0);
+    }
+
     try {
-      if (!organisationId) throw new Error("Organisation context is missing.");
-      if (!hasFeature("ai")) throw new Error("AI features are disabled on this plan.");
-
-      if (!selectedPatientId) throw new Error("No patient selected.");
-
-      const context = { organisationId };
-
-      if (reportType === "MANAGEMENT") {
-        const result = await generateManagementReport(selectedPatientId, context);
-        setReport(result);
-        setLastGenerated({ reportType, noteId: latestNote?.id ?? null, savedToNote: false });
-        return;
-      }
-
-      if (reportType === "MDT_WARD") {
-        const result = await generateMDTReview(selectedPatientId, context);
-        setReport(result);
-        setLastGenerated({ reportType, noteId: latestNote?.id ?? null, savedToNote: false });
-        return;
-      }
-
-      // Clinical notes are immutable: generate preview output only.
-      if (!latestNote?.id) throw new Error("No latest clinical note available for this patient.");
-
-      const contextNotes = (notes ?? [])
-        .slice()
-        .sort(
-          (a, b) =>
-            (b?.createdAt?.toMillis?.() ?? 0) - (a?.createdAt?.toMillis?.() ?? 0)
-        )
-        .slice(0, 20)
-        .map((n) => ({
-          rawNote: String(n?.content ?? ""),
-          correctedNote: n?.correctedNote ?? null,
-          structuredSummary: n?.structured?.summary ?? null,
-        }))
-        .filter((x) => x.rawNote.trim());
-
-      if (!contextNotes.length) throw new Error("No notes available to build the report context.");
-
-      const discipline = String(latestNote?.discipline ?? "Clinical");
-
-      const aiReportType =
-        reportType === "CPA" ? "cpa" : reportType === "TRIBUNAL" ? "tribunal" : "mdtReview";
-      const section = await generateClinicalReportSection({
-        reportType: aiReportType,
+      const result = await generateReport({
         patientId: selectedPatientId,
-        discipline,
-        contextNotes,
+        organisationId,
+        type,
+        notes: notes?.length ? notes : undefined,
+        organisation,
+        userRole: userProfile?.role ?? userProfile?.systemRole ?? "staff",
+        userDiscipline,
+        selectedDiscipline: showDisciplineSelect ? selectedDiscipline : undefined,
       });
-
-      if (reportType === "MDT") {
-        // Persist the existing MDT Review core-flow, but render in MDT Ward Round-style grouping for consistency.
-        const grouped = {};
-        (notes ?? []).forEach((n) => {
-          const role =
-            typeof n?.mdtRole === "string" && n.mdtRole.trim() ? n.mdtRole.trim() : "General";
-          if (!grouped[role]) grouped[role] = [];
-          const text = n?.aiSummary || n?.correctedText || n?.content;
-          if (typeof text === "string" && text.trim()) grouped[role].push(text.trim());
-        });
-        setReport(grouped);
-      } else {
-        setReport(section);
-      }
-      setLastGenerated({ reportType, noteId: latestNote.id, savedToNote: false });
-    } catch (e) {
-      setReportError(e?.message ?? "Clinical report generation failed.");
+      setReport(result);
+      setLastGenerated({ reportType: String(type), noteId: latestNote?.id ?? null, savedToNote: false });
+    } catch (err) {
+      console.error("Report error:", err);
+      const fallback = generateFallbackReport(type, notes ?? []);
+      setReport(fallback);
+      setLastGenerated({ reportType: String(type), noteId: latestNote?.id ?? null, savedToNote: false });
+      setReportWarning(
+        err?.message
+          ? `Report generation issue — showing fallback. (${err.message})`
+          : "Report generation issue — showing fallback output."
+      );
     } finally {
       setGenerating(false);
+      reportRunLock.current = false;
     }
   }
 
+  async function handleSaveReport() {
+    if (!standardDocument || !organisationId || !selectedPatientId || !lastGenerated?.reportType) return;
+    setSaveLoading(true);
+    setSaveMessage(null);
+    setSaveError(null);
+    try {
+      await saveClinicalReportDocument({
+        organisationId,
+        patientId: selectedPatientId,
+        type: lastGenerated.reportType,
+        document: standardDocument,
+      });
+      setSaveMessage("Report saved to organisation records.");
+    } catch (e) {
+      console.error("Save report failed:", e);
+      setSaveError(e?.message ?? "Could not save report.");
+    } finally {
+      setSaveLoading(false);
+    }
+  }
+
+  async function handleDownloadPdf() {
+    setPdfBusy(true);
+    try {
+      const base = `${selectedPatientLabel}_${lastGenerated?.reportType ?? reportType}`.replace(/[^a-z0-9-_]/gi, "_");
+      await exportToPDF("clinical-ai-report-export", `${base}.pdf`);
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
+  const unified = report?.kind === "unified" ? report : null;
+
   return (
-    <div style={{ padding: "2rem", width: "100%", fontFamily: "sans-serif" }}>
+    <div style={{ padding: "2rem", width: "100%", fontFamily: "sans-serif" }} className="clinical-ai-reports-page">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
-        <h1 style={{ margin: 0 }}>AI Reports</h1>
+        <div>
+          <h1 style={{ margin: 0 }}>AI Reports</h1>
+          <p style={{ margin: "6px 0 0", color: "#64748b", fontSize: 14 }}>
+            Organisation mode: <strong>{orgTypeLabel}</strong> · Supported types: {REPORT_TYPES.join(", ")}
+          </p>
+        </div>
         <Link to="/patients" style={{ color: "#005eb8", fontWeight: 800, textDecoration: "none" }}>
           Patients
         </Link>
@@ -207,32 +273,32 @@ export default function ClinicalAiReports() {
           {
             label: "⚡ Weekly Summary",
             type: "generate",
-            onClick: () => generateWeeklySummary(),
+            onClick: () => void handleGenerateReport("weekly"),
           },
           {
             label: "⚡ Monthly Summary",
             type: "generate",
-            onClick: () => generateMonthlySummary(),
+            onClick: () => void handleGenerateReport("monthly"),
           },
           {
             label: "⚡ Tribunal Report",
             type: "generate",
-            onClick: () => generateTribunal(),
+            onClick: () => void handleGenerateReport("tribunal"),
           },
           {
             label: "⚡ CPA Report",
             type: "generate",
-            onClick: () => generateCPA(),
+            onClick: () => void handleGenerateReport("cpa"),
           },
           {
             label: "⚡ MDT Ward Round",
-            type: "set",
-            onClick: () => setReportType("MDT_WARD"),
+            type: "generate",
+            onClick: () => void handleGenerateReport("mdt"),
           },
           {
             label: "⚡ Management Hearing",
-            type: "set",
-            onClick: () => setReportType("MANAGEMENT"),
+            type: "generate",
+            onClick: () => void handleGenerateReport("hearing"),
           },
         ]}
       />
@@ -252,14 +318,16 @@ export default function ClinicalAiReports() {
             disabled={patientsLoading || patientOptions.length === 0}
             style={{ marginLeft: 10, padding: "6px 10px" }}
           >
-            {patientOptions.length ? (
+            {!organisationId ? (
+              <option value="">Loading organisation...</option>
+            ) : patientOptions.length ? (
               patientOptions.map((opt) => (
                 <option key={opt.id} value={opt.id}>
                   {opt.label}
                 </option>
               ))
             ) : (
-              <option value="">No patients found for this organisation</option>
+              <option value="">No patients registered yet</option>
             )}
           </select>
         </label>
@@ -271,7 +339,7 @@ export default function ClinicalAiReports() {
             onChange={(e) => setReportType(e.target.value)}
             style={{ marginLeft: 10, padding: "6px 10px" }}
           >
-            {REPORT_TYPES.map((r) => (
+            {DROPDOWN_OPTIONS.map((r) => (
               <option key={r.value} value={r.value}>
                 {r.label}
               </option>
@@ -279,10 +347,31 @@ export default function ClinicalAiReports() {
           </select>
         </label>
 
+        {showDisciplineSelect ? (
+          <label style={{ fontWeight: 900 }}>
+            Discipline scope:
+            <select
+              value={selectedDiscipline}
+              onChange={(e) => setSelectedDiscipline(e.target.value)}
+              style={{ marginLeft: 10, padding: "6px 10px" }}
+            >
+              {REPORT_DISCIPLINE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <span style={{ color: "#64748b", fontSize: 14 }}>
+            Your report scope: <strong>{userDiscipline}</strong> (role-based)
+          </span>
+        )}
+
         <button
           type="button"
-          onClick={handleGenerate}
-          disabled={generating || !selectedPatientId || notesLoading}
+          onClick={() => void handleGenerateReport(mapDropdownToPipelineType(reportType))}
+          disabled={generating || !selectedPatientId}
           style={{
             padding: "10px 16px",
             background: "#1976d2",
@@ -296,10 +385,11 @@ export default function ClinicalAiReports() {
           {generating ? "Generating…" : "Generate report"}
         </button>
       </div>
-      {immutableClinicalRecords ? (
-        <div style={{ background: "#fffbeb", border: "1px solid #fde68a", padding: 12, borderRadius: 10, color: "#92400e", marginTop: 14, fontWeight: 800 }}>
-          This record cannot be edited. Add addendum instead.
-        </div>
+
+      {generating ? (
+        <p style={{ marginTop: 16, fontWeight: 700, color: "#1e40af" }} role="status">
+          Generating report…
+        </p>
       ) : null}
 
       {patientsError ? (
@@ -307,9 +397,9 @@ export default function ClinicalAiReports() {
           {patientsError}
         </div>
       ) : null}
-      {!patientsLoading && patientOptions.length === 0 ? (
+      {!patientsLoading && patientOptions.length === 0 && organisationId ? (
         <div style={{ color: "#64748b", marginTop: 14, fontSize: "0.95rem" }}>
-          No patients found for this organisation
+          No patients registered yet
         </div>
       ) : null}
 
@@ -317,6 +407,12 @@ export default function ClinicalAiReports() {
         <div style={{ background: "#fef2f2", border: "1px solid #fecaca", padding: 12, borderRadius: 10, color: "#991b1b", marginTop: 14 }}>
           {notesError}
         </div>
+      ) : null}
+
+      {notesLoading ? (
+        <p style={{ marginTop: 12, color: "#64748b", fontSize: 14 }} role="status">
+          Loading notes for this patient…
+        </p>
       ) : null}
 
       {lastGenerated ? (
@@ -338,45 +434,123 @@ export default function ClinicalAiReports() {
         </div>
       ) : null}
 
-      {reportType === "MDT" || reportType === "MDT_WARD" ? (
-        report ? (
-          <div style={{ marginTop: 22 }}>
-            <h2 style={{ fontSize: 14, marginBottom: 10 }}>MDT Output</h2>
-            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
-              {Object.entries(report || {}).map(([role, notes]) => (
-                <div key={role} style={{ marginBottom: 14 }}>
-                  <h3 style={{ margin: "0 0 6px 0", fontSize: 13 }}>{role}</h3>
-                  <ul style={{ margin: 0, paddingLeft: 18 }}>
-                    {(notes ?? []).map((n, i) => (
-                      <li key={i} style={{ marginBottom: 6 }}>{String(n ?? "")}</li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null
-      ) : (
-        report ? (
-          <div style={{ marginTop: 22 }}>
-            <h2 style={{ fontSize: 14, marginBottom: 10 }}>Report Output</h2>
-            <pre
+      {reportWarning ? (
+        <p style={{ color: "#c2410c", marginTop: 14, fontWeight: 600 }}>{reportWarning}</p>
+      ) : null}
+
+      {saveMessage ? (
+        <div style={{ background: "#ecfdf5", border: "1px solid #bbf7d0", padding: 12, borderRadius: 10, color: "#166534", marginTop: 14 }}>
+          {saveMessage}
+        </div>
+      ) : null}
+
+      {saveError ? (
+        <div style={{ background: "#fef2f2", border: "1px solid #fecaca", padding: 12, borderRadius: 10, color: "#991b1b", marginTop: 14 }}>
+          {saveError}
+        </div>
+      ) : null}
+
+      {unified ? (
+        <div style={{ marginTop: 24 }}>
+          <div
+            className="clinical-ai-report-toolbar-no-print"
+            style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 14, alignItems: "center" }}
+          >
+            <button
+              type="button"
+              onClick={() => void handleDownloadPdf()}
+              disabled={pdfBusy}
               style={{
-                background: "#f8fafc",
-                border: "1px solid #e2e8f0",
-                borderRadius: 12,
-                padding: 14,
-                margin: 0,
-                fontSize: 12,
-                whiteSpace: "pre-wrap",
-                color: "#0f172a",
+                padding: "10px 16px",
+                background: "#0f172a",
+                color: "#fff",
+                border: "none",
+                borderRadius: 10,
+                fontWeight: 800,
+                cursor: pdfBusy ? "wait" : "pointer",
               }}
             >
-              {JSON.stringify(report, null, 2)}
-            </pre>
+              {pdfBusy ? "Preparing PDF…" : "Download PDF"}
+            </button>
+            <button
+              type="button"
+              onClick={() => window.print()}
+              style={{
+                padding: "10px 16px",
+                borderRadius: 10,
+                border: "1px solid #cbd5e1",
+                background: "#f8fafc",
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              Print
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSaveReport()}
+              disabled={saveLoading || !lastGenerated?.reportType || !standardDocument}
+              style={{
+                padding: "10px 16px",
+                borderRadius: 10,
+                border: "1px solid #1976d2",
+                background: "#1976d2",
+                color: "#fff",
+                fontWeight: 800,
+                cursor: saveLoading ? "wait" : "pointer",
+              }}
+            >
+              {saveLoading ? "Saving…" : "Save to records"}
+            </button>
           </div>
-        ) : null
-      )}
+
+          <div id="clinical-ai-report-export" style={{ background: "#f8fafc", padding: 20, borderRadius: 12, border: "1px solid #e2e8f0" }}>
+            <h2 style={{ marginTop: 0, color: "#0f172a" }}>{unified.title || "Report"}</h2>
+            {unified.summary ? (
+              <div style={{ marginBottom: 16, color: "#334155", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                <strong>Summary</strong>
+                <p style={{ margin: "8px 0 0" }}>{unified.summary}</p>
+              </div>
+            ) : null}
+
+            {unified.sections.map((section) => (
+              <div key={`${section.heading}-${section.content?.slice(0, 24)}`} style={cardStyle}>
+                <h3 style={{ margin: "0 0 8px", fontSize: "1.05rem", color: "#0f172a" }}>{section.heading}</h3>
+                <p style={{ margin: 0, color: "#334155", whiteSpace: "pre-wrap", lineHeight: 1.55 }}>{section.content}</p>
+              </div>
+            ))}
+
+            {unified.recommendations?.length ? (
+              <div style={{ ...cardStyle, borderLeft: "4px solid #1976d2" }}>
+                <h3 style={{ margin: "0 0 8px", fontSize: "1.05rem" }}>Recommendations</h3>
+                <ul style={{ margin: 0, paddingLeft: "1.2rem", color: "#334155" }}>
+                  {unified.recommendations.map((line) => (
+                    <li key={line} style={{ marginBottom: 6 }}>
+                      {line}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      <style>{`
+        @media print {
+          .clinical-ai-report-toolbar-no-print { display: none !important; }
+          body * { visibility: hidden; }
+          #clinical-ai-report-export,
+          #clinical-ai-report-export * { visibility: visible; }
+          #clinical-ai-report-export {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            background: #fff !important;
+          }
+        }
+      `}</style>
 
       <div style={{ marginTop: 22 }}>
         <h2 style={{ fontSize: 14, marginBottom: 10 }}>Latest note context</h2>
@@ -398,4 +572,3 @@ export default function ClinicalAiReports() {
     </div>
   );
 }
-

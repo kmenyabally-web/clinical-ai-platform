@@ -40,6 +40,57 @@ export type ClinicalReportSection = {
   content: string;
 };
 
+/** AI Reports (CPA / Tribunal / MDT) — nine narrative sections, no raw JSON in UI. */
+export type StructuredClinicalReportSections = {
+  patientOverview: string;
+  currentPresentation: string;
+  riskAssessment: string;
+  incidentsSummary: string;
+  behaviourAnalysis: string;
+  medicationCompliance: string;
+  MDTObservations: string;
+  legalContext: string;
+  recommendation: string;
+};
+
+export type StructuredClinicalReport = {
+  title: string;
+  summary: string;
+  sections: StructuredClinicalReportSections;
+  recommendations: string[];
+};
+
+/** MDT Ward Round — discipline summaries + plan (AI Reports / Patient detail). */
+export type MdtWardRoundReport = {
+  kind: "mdtWardRound";
+  title: string;
+  sections: {
+    nursingSummary: string;
+    psychiatrySummary: string;
+    psychologySummary: string;
+    otSummary: string;
+    saltSummary: string;
+    supportSummary: string;
+    overallSummary: string;
+    riskLevel: string;
+    plan: string;
+  };
+};
+
+/** Management hearing — governance-facing sections. */
+export type ManagementHearingReport = {
+  kind: "managementHearing";
+  title: string;
+  sections: {
+    patientBackground: string;
+    currentConcerns: string;
+    incidentSummary: string;
+    riskAssessment: string;
+    legalStatus: string;
+    recommendation: string;
+  };
+};
+
 export type ClinicalReports = {
   cpa?: ClinicalReportSection;
   tribunal?: ClinicalReportSection;
@@ -57,6 +108,27 @@ export type ClinicalCareFolder = {
 
 export type ClinicalStructuredData = ClinicalStructuredFields & {
   discipline?: string;
+};
+
+/** Snapshot of note body before a draft edit (pre-approval audit trail). */
+export type ClinicalNoteVersionEntry = {
+  content: string;
+  updatedBy: string;
+  updatedAt: unknown;
+};
+
+/** Legal addendum appended after finalisation; never replaces original note text. */
+export type ClinicalNoteAddendumEntry = {
+  id: string;
+  content: string;
+  createdBy: string;
+  role: string;
+  createdAt: unknown;
+  /** Denormalised from parent note for audit / consistency (not session-derived). */
+  organisationId?: string;
+  hospitalId?: string;
+  wardId?: string;
+  patientId?: string;
 };
 
 export type ClinicalNote = {
@@ -136,4 +208,10 @@ export type ClinicalNote = {
 
   /** Soft-delete flag (from Firestore). */
   isDeleted?: boolean;
+
+  /** Pre-approval edit history (previous `content` values). */
+  versions?: ClinicalNoteVersionEntry[];
+
+  /** Addenda appended after finalisation / approval (embedded on note document). */
+  addendums?: ClinicalNoteAddendumEntry[];
 };

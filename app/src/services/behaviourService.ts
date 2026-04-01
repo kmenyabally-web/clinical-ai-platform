@@ -19,19 +19,15 @@ import { getUserContext } from "./authService";
 import { assertSameOrganisationData, GENERIC_USER_ERROR_MESSAGE } from "../utils/tenantContext";
 import { isDocumentActive } from "../utils/auditSchema";
 import { logEntityAudit } from "./auditService";
+import { BEHAVIOUR_TYPES, normalizeLegacyBehaviourType } from "../constants/behaviours";
+import { sortBehavioursByClinicalTimeDesc } from "../utils/behaviourClinicalTime";
 
 export const BEHAVIOURS_COLLECTION = "behaviours";
 
-/** Structured behaviour types (CQC-aligned capture). Legacy rows may use older labels. */
-export const behaviourTypes = [
-  "Aggression",
-  "Self-harm",
-  "Absconding",
-  "Medication refusal",
-  "Property damage",
-] as const;
+/** Canonical behaviour types (see `../constants/behaviours`). */
+export const behaviourTypes = BEHAVIOUR_TYPES;
 
-const ALLOWED_BEHAVIOUR_TYPES = new Set<string>(behaviourTypes as unknown as string[]);
+const ALLOWED_BEHAVIOUR_TYPES = new Set<string>(BEHAVIOUR_TYPES);
 
 export type BehaviourExtraction = {
   riskLevel: string;
@@ -53,14 +49,23 @@ export type StructuredBehaviourLog = {
   id: string;
   patientId: string;
   organisationId: string;
+  /** When the behaviour occurred (ISO 8601). Primary timeline field. */
+  clinicalTime: string | null;
   behaviourType: string;
+  /** Present when `behaviourType` is `"Other"` (or legacy free-text capture). */
+  behaviourCustom: string | null;
   severity: string;
   trigger: string;
   action: string;
   stompRelated: boolean;
   medicationRefused: boolean;
+  /** Same as `recordedBy` on new writes; preferred field for new code. */
+  createdBy: string;
   recordedBy: string;
+  hospitalId: string | null;
+  wardId: string | null;
   createdAt: unknown;
+  /** Legacy duplicate of clinical instant; prefer `clinicalTime` for display. */
   eventAt: unknown;
 };
 
@@ -73,24 +78,54 @@ type LegacyBehaviourRow = {
 };
 
 /** Entries without a real behaviour type are legacy/bad rows — exclude from UI and analytics. */
-export function isValidStructuredBehaviourLog(b: { behaviourType?: unknown }): boolean {
+export function isValidStructuredBehaviourLog(b: {
+  behaviourType?: unknown;
+  behaviourCustom?: unknown;
+}): boolean {
   const t = typeof b?.behaviourType === "string" ? b.behaviourType.trim() : "";
-  return Boolean(t);
+  if (!t) return false;
+  if (t === "Other") {
+    const c = typeof b?.behaviourCustom === "string" ? b.behaviourCustom.trim() : "";
+    return Boolean(c);
+  }
+  return true;
+}
+
+function coerceId(value: unknown): string | null {
+  if (value == null || value === "") return null;
+  if (typeof value === "string") {
+    const t = value.trim();
+    return t || null;
+  }
+  return null;
 }
 
 function mapBehaviourDoc(d: QueryDocumentSnapshot): StructuredBehaviourLog {
   const x = d.data() ?? {};
+  const rawType = typeof x.behaviourType === "string" ? x.behaviourType : "";
+  const normalizedType = normalizeLegacyBehaviourType(rawType);
+  const rawCustom = typeof x.behaviourCustom === "string" ? x.behaviourCustom.trim() : "";
+  const clinicalTime =
+    typeof x.clinicalTime === "string" && x.clinicalTime.trim() ? x.clinicalTime.trim() : null;
+  const uid =
+    (typeof x.createdBy === "string" && x.createdBy.trim() ? x.createdBy.trim() : "") ||
+    (typeof x.recordedBy === "string" && x.recordedBy.trim() ? x.recordedBy.trim() : "");
   return {
     id: d.id,
     patientId: typeof x.patientId === "string" ? x.patientId : "",
     organisationId: typeof x.organisationId === "string" ? x.organisationId : "",
-    behaviourType: typeof x.behaviourType === "string" ? x.behaviourType : "",
+    clinicalTime,
+    behaviourType: normalizedType,
+    behaviourCustom: rawCustom ? rawCustom : null,
     severity: typeof x.severity === "string" ? x.severity : "",
     trigger: typeof x.trigger === "string" ? x.trigger : "",
     action: typeof x.action === "string" ? x.action : "",
     stompRelated: x.stompRelated === true,
     medicationRefused: x.medicationRefused === true,
-    recordedBy: typeof x.recordedBy === "string" ? x.recordedBy : "",
+    createdBy: uid,
+    recordedBy: typeof x.recordedBy === "string" ? x.recordedBy : uid,
+    hospitalId: coerceId(x.hospitalId),
+    wardId: coerceId(x.wardId),
     createdAt: x.createdAt ?? null,
     eventAt: x.eventAt ?? x.createdAt ?? null,
   };
@@ -102,15 +137,18 @@ function mapBehaviourDoc(d: QueryDocumentSnapshot): StructuredBehaviourLog {
 export async function createBehaviourLog(params: {
   patientId: string;
   organisationId: string;
+  /** When the behaviour occurred (ISO 8601), from auto or manual entry. */
+  clinicalTimeIso: string;
+  hospitalId?: string | null;
+  wardId?: string | null;
   behaviourType: string;
+  /** Required when `behaviourType` is `"Other"`. */
+  behaviourCustom?: string | null;
   severity: string;
   trigger: string;
   action: string;
   stompRelated: boolean;
   medicationRefused: boolean;
-  /** When false, `eventAt` is set to server time at write. */
-  useManualEventTime: boolean;
-  manualEventAt: Date | null;
 }): Promise<{ id: string }> {
   const patientId = (params.patientId ?? "").toString().trim();
   const organisationId = (params.organisationId ?? "").toString().trim();
@@ -123,6 +161,7 @@ export async function createBehaviourLog(params: {
   if (!uid) throw new Error(GENERIC_USER_ERROR_MESSAGE);
 
   const bt = (params.behaviourType ?? "").toString().trim();
+  const customRaw = (params.behaviourCustom ?? "").toString().trim();
   const sev = (params.severity ?? "").toString().trim();
   const tr = (params.trigger ?? "").toString().trim();
   const act = (params.action ?? "").toString().trim();
@@ -132,37 +171,56 @@ export async function createBehaviourLog(params: {
   if (!ALLOWED_BEHAVIOUR_TYPES.has(bt)) {
     throw new Error("Select a valid behaviour type.");
   }
+  if (bt === "Other" && !customRaw) {
+    throw new Error("Specify the behaviour when type is Other.");
+  }
   if (!tr || !act) {
     throw new Error("Trigger and action taken are required.");
   }
 
-  let eventAt: ReturnType<typeof serverTimestamp> | Timestamp;
-  if (params.useManualEventTime && params.manualEventAt && !Number.isNaN(params.manualEventAt.getTime())) {
-    eventAt = Timestamp.fromDate(params.manualEventAt);
-  } else {
-    eventAt = serverTimestamp();
+  const clinicalRaw = (params.clinicalTimeIso ?? "").toString().trim();
+  if (!clinicalRaw) {
+    throw new Error("Clinical time is required.");
   }
+  const clinicalDate = new Date(clinicalRaw);
+  if (Number.isNaN(clinicalDate.getTime())) {
+    throw new Error("Invalid clinical time.");
+  }
+  const clinicalIso = clinicalDate.toISOString();
+
+  const hospitalId = coerceId(params.hospitalId);
+  const wardId = coerceId(params.wardId);
+
+  const eventAt = Timestamp.fromDate(clinicalDate);
 
   const payload: Record<string, unknown> = {
     patientId,
     organisationId,
+    clinicalTime: clinicalIso,
     behaviourType: bt,
     severity: sev,
     trigger: tr,
     action: act,
     stompRelated: Boolean(params.stompRelated),
     medicationRefused: Boolean(params.medicationRefused),
+    createdBy: uid,
     recordedBy: uid,
     eventAt,
     createdAt: serverTimestamp(),
   };
+  if (hospitalId) payload.hospitalId = hospitalId;
+  if (wardId) payload.wardId = wardId;
+  if (bt === "Other" && customRaw) {
+    payload.behaviourCustom = customRaw;
+  }
 
   const ref = await addDoc(collection(db, BEHAVIOURS_COLLECTION), payload);
   return { id: ref.id };
 }
 
 /**
- * Structured behaviour rows for a patient, newest first (Firestore `orderBy` on `createdAt`).
+ * Structured behaviour rows for a patient, newest by **clinical** time (falls back for legacy rows).
+ * Fetches by `createdAt` so documents without `clinicalTime` are included, then sorts in memory.
  */
 export async function fetchStructuredBehaviourLogsForPatient(
   patientId: string,
@@ -185,10 +243,11 @@ export async function fetchStructuredBehaviourLogsForPatient(
   );
 
   const snap = await getDocs(q);
-  return (snap.docs ?? [])
+  const rows = (snap.docs ?? [])
     .map((doc) => mapBehaviourDoc(doc))
     .filter((row) => isValidStructuredBehaviourLog(row))
     .filter((row) => isDocumentActive(row as Record<string, unknown>));
+  return sortBehavioursByClinicalTimeDesc(rows);
 }
 
 /**
@@ -204,7 +263,10 @@ export async function fetchBehaviourForPatient(
     noteId: "",
     patientId: b.patientId,
     discipline: "",
-    behaviour: b.behaviourType,
+    behaviour:
+      b.behaviourType === "Other" && b.behaviourCustom
+        ? `Other (${b.behaviourCustom})`
+        : b.behaviourType,
     createdAt: b.createdAt,
   }));
 }

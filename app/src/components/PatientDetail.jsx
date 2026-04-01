@@ -14,8 +14,10 @@ import { useOrganisation } from "../context/OrganisationContext";
 import { logAuditEvent } from "../services/auditService";
 import { generateDailySummary } from "../services/summaryService";
 import { generateCPAReport, generateTribunalReport } from "../services/reportService";
-import { generateMDTReview } from "../services/mdtService";
+import { generateMdtWardRoundReport } from "../services/enterpriseReportsService";
 import { generateManagementReport } from "../services/managementService";
+import GenericSectionedReport from "./GenericSectionedReport";
+import { MDT_WARD_SECTION_ORDER, MANAGEMENT_HEARING_SECTION_ORDER } from "../config/enterpriseReportSections";
 import { getStompAlerts } from "../utils/stompAlerts";
 import { getCqcInsight } from "../utils/cqcInsights";
 import { getInspectionInsights } from "../engine/inspectionInsights";
@@ -251,7 +253,11 @@ export default function PatientDetail() {
     setMdtWardRoundLoading(true);
     setMdtWardRoundError(null);
     try {
-      const result = await generateMDTReview(patientId, reportContext);
+      const result = await generateMdtWardRoundReport({
+        patientId,
+        organisationId: reportContext.organisationId,
+        notes,
+      });
       setMdtData(result || null);
     } catch (e) {
       setMdtWardRoundError(e?.message ?? "Failed to generate MDT Ward Round.");
@@ -399,7 +405,7 @@ export default function PatientDetail() {
     setManagementReportLoading(true);
     setManagementReportError(null);
     try {
-      const result = await generateManagementReport(patientId, reportContext);
+      const result = await generateManagementReport(patientId, reportContext, notes);
       setManagementReport(result || null);
     } catch (e) {
       setManagementReportError(e?.message ?? "Failed to generate Management Hearing Report.");
@@ -747,24 +753,14 @@ export default function PatientDetail() {
                   {mdtWardRoundError}
                 </div>
               ) : null}
-              {mdtData ? (
-                <div style={styles.aiSummaryBox}>
-                  <h4 style={styles.aiSummaryTitle}>MDT Ward Round</h4>
-                  {Object.entries(mdtData).map(([role, notes]) => (
-                    <div key={role}>
-                      <h4 style={{ margin: "8px 0 6px 0", fontSize: 13, color: "#0f172a", fontWeight: 900 }}>
-                        {role}
-                      </h4>
-                      <ul style={{ margin: "0 0 0 18px", padding: 0 }}>
-                        {(notes ?? []).map((n, i) => (
-                          <li key={i} style={{ marginBottom: 6 }}>
-                            {String(n ?? "")}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
-                </div>
+              {mdtData && mdtData.kind === "mdtWardRound" && mdtData.sections ? (
+                <GenericSectionedReport
+                  report={mdtData}
+                  sectionOrder={MDT_WARD_SECTION_ORDER}
+                  filenameBase={`Patient_${patient?.id ?? id}_MDT_Ward_Round`}
+                  containerId="patient-detail-mdt-ward-container"
+                  printRootClassName="patient-detail-mdt-ward-print"
+                />
               ) : null}
             </div>
           </div>
@@ -821,13 +817,14 @@ export default function PatientDetail() {
                   {managementReportError}
                 </div>
               ) : null}
-              {managementReport ? (
-                <div style={styles.reportBox}>
-                  <h3 style={styles.aiSummaryTitle}>Management Hearing Report</h3>
-                  <pre style={styles.reportPre}>
-                    {JSON.stringify(managementReport, null, 2)}
-                  </pre>
-                </div>
+              {managementReport && managementReport.kind === "managementHearing" && managementReport.sections ? (
+                <GenericSectionedReport
+                  report={managementReport}
+                  sectionOrder={MANAGEMENT_HEARING_SECTION_ORDER}
+                  filenameBase={`Patient_${patient?.id ?? id}_Management_Hearing`}
+                  containerId="patient-detail-management-hearing-container"
+                  printRootClassName="patient-detail-management-hearing-print"
+                />
               ) : null}
           </div>
         </div>

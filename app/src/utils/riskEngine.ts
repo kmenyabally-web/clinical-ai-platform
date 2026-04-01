@@ -4,6 +4,11 @@
  */
 
 import type { ClinicalNote } from "../types/clinical";
+import {
+  BEHAVIOUR_TYPES_HIGH_RISK,
+  BEHAVIOUR_TYPES_MEDIUM_RISK,
+  normalizeLegacyBehaviourType,
+} from "../constants/behaviours";
 
 export type RiskLevel = "low" | "medium" | "high";
 
@@ -40,13 +45,22 @@ export type BehaviourLogLike = {
   behaviourType?: string;
   stompRelated?: boolean;
   medicationRefused?: boolean;
+  /** ISO string — used by analytics / timelines; scoring ignores time. */
+  clinicalTime?: string;
+  eventAt?: unknown;
+  createdAt?: unknown;
 };
 
 /**
  * Risk from structured behaviour events (used with clinical note risk for dashboards).
  */
+const HIGH_RISK_TYPE_SET = new Set<string>(BEHAVIOUR_TYPES_HIGH_RISK);
+const MEDIUM_RISK_TYPE_SET = new Set<string>(BEHAVIOUR_TYPES_MEDIUM_RISK);
+
 export function calculateBehaviourRiskFromLogs(logs: BehaviourLogLike[]): RiskAssessment {
   let score = 0;
+  let hasHighRiskBehaviourType = false;
+  let hasMediumRiskBehaviourType = false;
 
   (logs ?? []).forEach((log) => {
     const sev = String(log?.severity ?? "").toLowerCase();
@@ -57,13 +71,22 @@ export function calculateBehaviourRiskFromLogs(logs: BehaviourLogLike[]): RiskAs
     if (log?.stompRelated === true) score += 10;
     if (log?.medicationRefused === true) score += 15;
 
-    const t = String(log?.behaviourType ?? "");
-    if (/self-harm|aggression/i.test(t)) score += 12;
+    const canonical = normalizeLegacyBehaviourType(String(log?.behaviourType ?? ""));
+    if (HIGH_RISK_TYPE_SET.has(canonical)) {
+      score += 35;
+      hasHighRiskBehaviourType = true;
+    } else if (MEDIUM_RISK_TYPE_SET.has(canonical)) {
+      score += 18;
+      hasMediumRiskBehaviourType = true;
+    }
   });
 
   let level: RiskLevel = "low";
   if (score > 60) level = "high";
   else if (score > 30) level = "medium";
+
+  if (hasHighRiskBehaviourType) level = "high";
+  else if (hasMediumRiskBehaviourType && level === "low") level = "medium";
 
   return { score: Math.min(score, 100), level };
 }

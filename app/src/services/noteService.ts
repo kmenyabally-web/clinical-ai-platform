@@ -17,7 +17,7 @@ import { db, auth } from "../firebase";
 import { logAction, logAudit, logAuditEvent, logEntityAudit } from "./auditService";
 import { isDocumentActive } from "../utils/auditSchema";
 import { canDeleteClinicalNotesAccess } from "../utils/rbac";
-import { canApproveNote, isSystemApproverRole } from "../utils/clinicalNoteApproval";
+import { canApproveNote, getNormalizedNoteStatus, isSystemApproverRole } from "../utils/clinicalNoteApproval";
 import { safeModeFields } from "../utils/safeMode";
 import { getUserContext } from "./authService";
 import { addTimelineEntry, PATIENT_TIMELINE_COLLECTION } from "./patientTimelineService";
@@ -27,6 +27,7 @@ import { BEHAVIOURS_COLLECTION, extractBehaviourFromNote } from "./behaviourServ
 import { processClinicalNote } from "./geminiAiService.js";
 import { evaluateRisk } from "./riskEngine.js";
 import { assertTenantContext, normalizeHospitalScopeId } from "../utils/tenantContext.js";
+import type { ClinicalNoteAddendumEntry, ClinicalNoteVersionEntry } from "../types/clinical";
 import type {
   ClinicalCareFolder,
   ClinicalMdtReview,
@@ -114,6 +115,50 @@ function safeString(raw: unknown): string | undefined {
   if (typeof raw !== "string") return undefined;
   const s = raw.trim();
   return s ? s : undefined;
+}
+
+function safeVersionEntries(raw: unknown): ClinicalNoteVersionEntry[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: ClinicalNoteVersionEntry[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const content = typeof o.content === "string" ? o.content : "";
+    const updatedBy = typeof o.updatedBy === "string" ? o.updatedBy : "";
+    if (!content && !updatedBy) continue;
+    out.push({
+      content,
+      updatedBy,
+      updatedAt: o.updatedAt ?? null,
+    });
+  }
+  return out.length ? out : undefined;
+}
+
+function safeAddendumEntries(raw: unknown): ClinicalNoteAddendumEntry[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: ClinicalNoteAddendumEntry[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const id = typeof o.id === "string" ? o.id : "";
+    const content = typeof o.content === "string" ? o.content : typeof (o as { text?: string }).text === "string" ? (o as { text: string }).text : "";
+    const createdBy = typeof o.createdBy === "string" ? o.createdBy : "";
+    const role = typeof o.role === "string" ? o.role : "";
+    if (!id || !content) continue;
+    out.push({
+      id,
+      content,
+      createdBy,
+      role,
+      createdAt: o.createdAt ?? null,
+      organisationId: typeof o.organisationId === "string" ? o.organisationId : undefined,
+      hospitalId: typeof o.hospitalId === "string" ? o.hospitalId : undefined,
+      wardId: typeof o.wardId === "string" ? o.wardId : undefined,
+      patientId: typeof o.patientId === "string" ? o.patientId : undefined,
+    });
+  }
+  return out.length ? out : undefined;
 }
 
 /**
@@ -232,11 +277,7 @@ export function mapFirestoreClinicalNote(
       ? x.discipline.trim()
       : category?.trim() || "Clinical";
 
-  const rawStatus = typeof x.status === "string" ? x.status.trim().toLowerCase() : "";
-  let status: "draft" | "final" | "approved" | undefined;
-  if (rawStatus === "approved") status = "approved";
-  else if (rawStatus === "final") status = "final";
-  else if (rawStatus === "draft") status = "draft";
+  const status = getNormalizedNoteStatus(x as Record<string, unknown>);
 
   return {
     id,
@@ -262,7 +303,7 @@ export function mapFirestoreClinicalNote(
     reports: safeReports(x.reports) ?? null,
     careFolder: safeCareFolder(x.careFolder) ?? null,
     createdAt: x.createdAt ?? null,
-    status: (status ?? "draft") as "draft" | "final" | "approved",
+    status: status as "draft" | "final" | "approved",
     authorEmail: typeof x.authorEmail === "string" ? x.authorEmail : undefined,
     mood: legacyMood,
     authorId: typeof x.authorId === "string" ? x.authorId : undefined,
@@ -282,6 +323,8 @@ export function mapFirestoreClinicalNote(
     updatedBy: typeof x.updatedBy === "string" ? x.updatedBy : undefined,
     updatedByEmail: typeof x.updatedByEmail === "string" ? x.updatedByEmail : undefined,
     isDeleted: x.isDeleted === true,
+    versions: safeVersionEntries(x.versions),
+    addendums: safeAddendumEntries(x.addendums),
   };
 }
 
@@ -395,6 +438,8 @@ export async function addClinicalNote(
     isDeleted: false,
     deletedAt: null,
     deletedBy: null,
+    versions: [],
+    addendums: [],
     ...(userId ? { authorId: userId, createdBy: userId, updatedBy: userId } : {}),
     ...(mdtRole ? { createdByRole: mdtRole } : {}),
   };
@@ -526,7 +571,7 @@ export async function deleteClinicalNote(noteId: string): Promise<void> {
   const noteOrg = typeof note.organisationId === "string" ? note.organisationId : "";
   if (noteOrg !== organisationId) throw new Error("Organisation scope mismatch.");
 
-  const st = typeof note.status === "string" ? note.status.trim().toLowerCase() : "";
+  const st = getNormalizedNoteStatus(note);
   if (st === "approved") {
     throw new Error("Approved notes cannot be deleted.");
   }
@@ -589,8 +634,8 @@ export async function softDeleteClinicalNoteAsAuthor(noteId: string): Promise<vo
 
   if (note.isDeleted === true) throw new Error("Note already removed.");
 
-  const rawStatus = typeof note.status === "string" ? note.status.trim().toLowerCase() : "";
-  if (rawStatus !== "draft") {
+  const stAuthor = getNormalizedNoteStatus(note);
+  if (stAuthor !== "draft") {
     throw new Error("Only draft notes can be deleted by the author.");
   }
 
@@ -662,8 +707,8 @@ export async function finalizeClinicalNote(noteId: string): Promise<void> {
 
   if (note.isDeleted === true) throw new Error("This note cannot be finalised.");
 
-  const rawStatus = typeof note.status === "string" ? note.status.trim().toLowerCase() : "";
-  if (rawStatus !== "draft") {
+  const st = getNormalizedNoteStatus(note);
+  if (st !== "draft") {
     throw new Error("Only draft notes can be finalised.");
   }
 
@@ -746,8 +791,8 @@ export async function updateDraftClinicalNoteContent(noteId: string, content: st
 
   if (note.isDeleted === true) throw new Error("This note cannot be edited.");
 
-  const rawStatus = typeof note.status === "string" ? note.status.trim().toLowerCase() : "";
-  if (rawStatus !== "draft") {
+  const stEdit = getNormalizedNoteStatus(note);
+  if (stEdit !== "draft") {
     throw new Error("This record cannot be edited. Add addendum instead.");
   }
 
@@ -766,8 +811,32 @@ export async function updateDraftClinicalNoteContent(noteId: string, content: st
   const noteWardId = typeof note.wardId === "string" ? note.wardId : "";
   const userEmail = auth.currentUser?.email ?? null;
 
+  const previousContent = typeof note.content === "string" ? note.content : "";
+  const priorVersions = safeVersionEntries(note.versions) ?? [];
+  // Firestore forbids FieldValue.serverTimestamp() inside array elements — use ISO strings.
+  const nextVersions =
+    previousContent !== updatedContent
+      ? [
+          ...priorVersions.map((v) => ({
+            content: v.content,
+            updatedBy: v.updatedBy,
+            updatedAt: v.updatedAt,
+          })),
+          {
+            content: previousContent,
+            updatedBy: uid,
+            updatedAt: new Date().toISOString(),
+          },
+        ]
+      : priorVersions.map((v) => ({
+          content: v.content,
+          updatedBy: v.updatedBy,
+          updatedAt: v.updatedAt,
+        }));
+
   await updateDoc(noteRef, {
     content: updatedContent,
+    ...(nextVersions.length ? { versions: nextVersions } : {}),
     updatedAt: serverTimestamp(),
     updatedBy: uid,
     updatedByEmail: userEmail ?? null,
@@ -1160,6 +1229,8 @@ export async function saveClinicalNote(note: ClinicalNote): Promise<{ id: string
     incidents: null,
     risks: null,
     engagement: null,
+    versions: [],
+    addendums: [],
   };
 
   const noteId = (note.id ?? "").toString().trim();
@@ -1220,7 +1291,6 @@ export async function saveClinicalNote(note: ClinicalNote): Promise<{ id: string
       patientId,
       hospitalId,
       wardId,
-      serviceId: null,
       eventType: "clinical_note",
       eventTitle: `${category} clinical note`,
       eventDescription: content,
@@ -1275,14 +1345,11 @@ export async function addAddendum(noteId: string, text: string): Promise<{ id: s
   if (!id) throw new Error("noteId is required.");
   if (!addendumText) throw new Error("addendum text is required.");
 
-  const { organisationId, hospitalId: ctxHospitalId, wardId: ctxWardId, role } = await getUserContext();
+  const { organisationId, role } = await getUserContext();
   const userId = auth.currentUser?.uid ?? null;
   const userEmail = auth.currentUser?.email ?? null;
-  assertRequiredWriteContext({
-    organisationId: organisationId ? String(organisationId) : null,
-    hospitalId: ctxHospitalId ? String(ctxHospitalId) : null,
-    userId,
-  });
+  if (!organisationId) throw new Error("Missing organisation");
+  if (!userId) throw new Error("Missing user");
 
   const noteRef = doc(db, NOTES_COLLECTION, id);
   const noteSnap = await getDoc(noteRef);
@@ -1290,30 +1357,91 @@ export async function addAddendum(noteId: string, text: string): Promise<{ id: s
   const note = noteSnap.data() as Record<string, unknown>;
 
   const noteOrgId = typeof note.organisationId === "string" ? note.organisationId : "";
-  const noteHospitalId = typeof note.hospitalId === "string" ? note.hospitalId : "";
+  const noteHospitalId = typeof note.hospitalId === "string" ? note.hospitalId.trim() : "";
   const noteWardId = typeof note.wardId === "string" ? note.wardId : "";
   const patientId = typeof note.patientId === "string" ? note.patientId : "";
-  if (!noteOrgId || noteOrgId !== organisationId) throw new Error("403 Forbidden: organisation scope mismatch");
-  if (!noteHospitalId || noteHospitalId !== ctxHospitalId) throw new Error("403 Forbidden: hospital scope mismatch");
+  if (!noteOrgId || noteOrgId !== organisationId) {
+    throw new Error("403 Forbidden: organisation scope mismatch");
+  }
+  if (!noteHospitalId) {
+    throw new Error("Note is missing hospital scope; cannot add addendum.");
+  }
 
-  const noteStatus = typeof note.status === "string" ? note.status.trim().toLowerCase() : "";
-  if (noteStatus !== "approved" && noteStatus !== "final") {
+  const stAdd = getNormalizedNoteStatus(note);
+  if (stAdd !== "approved" && stAdd !== "final") {
     throw new Error("Add addendum is only available after the note is finalised or approved.");
   }
 
-  const addendum = await addDoc(collection(db, NOTE_ADDENDUMS_COLLECTION), {
-    organisationId,
+  const addendumId = doc(collection(db, NOTE_ADDENDUMS_COLLECTION)).id;
+  const roleLabel = (role ?? "").toString().trim();
+
+  const existingEmbedded = safeAddendumEntries(note.addendums) ?? [];
+  // Embedded addendum objects cannot use serverTimestamp() — Firestore rejects it in arrays.
+  // Scope is always inherited from the parent note (not the user session) for consistency with Firestore rules.
+  const newEntry: ClinicalNoteAddendumEntry = {
+    id: addendumId,
+    content: addendumText,
+    createdBy: userId ?? "",
+    role: roleLabel,
+    createdAt: new Date().toISOString(),
+    organisationId: noteOrgId,
     hospitalId: noteHospitalId,
-    wardId: noteWardId || (ctxWardId ? String(ctxWardId) : ""),
-    noteId: id,
-    patientId,
-    text: addendumText,
-    authorId: userId,
-    createdBy: userId,
-    authorEmail: userEmail,
-    authorRole: role ?? null,
-    createdAt: serverTimestamp(),
+    wardId: noteWardId || undefined,
+    patientId: patientId || undefined,
+  };
+
+  const embeddedScopeFields = (a: ClinicalNoteAddendumEntry): Record<string, unknown> => {
+    const org = a.organisationId ?? noteOrgId;
+    const hosp = a.hospitalId ?? noteHospitalId;
+    const w = (a.wardId ?? noteWardId)?.toString().trim();
+    const p = (a.patientId ?? patientId)?.toString().trim();
+    const o: Record<string, unknown> = { organisationId: org, hospitalId: hosp };
+    if (w) o.wardId = w;
+    if (p) o.patientId = p;
+    return o;
+  };
+
+  await updateDoc(noteRef, {
+    addendums: [
+      ...existingEmbedded.map((a) => ({
+        id: a.id,
+        content: a.content,
+        createdBy: a.createdBy,
+        role: a.role,
+        createdAt: a.createdAt,
+        ...embeddedScopeFields(a),
+      })),
+      {
+        id: newEntry.id,
+        content: newEntry.content,
+        createdBy: newEntry.createdBy,
+        role: newEntry.role,
+        createdAt: newEntry.createdAt,
+        ...embeddedScopeFields(newEntry),
+      },
+    ],
+    updatedAt: serverTimestamp(),
+    updatedBy: userId,
   });
+
+  try {
+    await addDoc(collection(db, NOTE_ADDENDUMS_COLLECTION), {
+      organisationId: noteOrgId,
+      hospitalId: noteHospitalId,
+      wardId: noteWardId || "",
+      noteId: id,
+      patientId,
+      text: addendumText,
+      authorId: userId,
+      createdBy: userId,
+      authorEmail: userEmail,
+      authorRole: role ?? null,
+      createdAt: serverTimestamp(),
+      embeddedId: addendumId,
+    });
+  } catch (e) {
+    console.warn("note_addendums mirror write failed (non-fatal).", e);
+  }
 
   void logAuditEvent({
     action: "ADD_NOTE_ADDENDUM",
@@ -1328,12 +1456,12 @@ export async function addAddendum(noteId: string, text: string): Promise<{ id: s
     patientId,
     metadata: {
       noteId: id,
-      addendumId: addendum.id,
+      addendumId: addendumId,
       preview: addendumText.slice(0, 100),
     },
   });
 
-  return { id: addendum.id };
+  return { id: addendumId };
 }
 
 export async function fetchAddendumsForNote(noteId: string): Promise<
@@ -1341,29 +1469,87 @@ export async function fetchAddendumsForNote(noteId: string): Promise<
     id: string;
     text: string;
     authorEmail: string | null;
+    role: string | null;
     createdAt: unknown;
   }>
 > {
   const id = (noteId ?? "").toString().trim();
   if (!id) return [];
   const { organisationId, hospitalId } = await getUserContext();
-  if (!organisationId || !hospitalId) return [];
+  if (!organisationId) return [];
 
-  const q = query(
-    collection(db, NOTE_ADDENDUMS_COLLECTION),
-    where("organisationId", "==", organisationId),
-    where("hospitalId", "==", hospitalId),
-    where("noteId", "==", id),
-    orderBy("createdAt", "asc")
-  );
-  const snap = await getDocs(q);
-  return (snap.docs ?? []).map((d) => {
-    const x = d.data() as Record<string, unknown>;
-    return {
-      id: d.id,
-      text: typeof x.text === "string" ? x.text : "",
-      authorEmail: typeof x.authorEmail === "string" ? x.authorEmail : null,
-      createdAt: x.createdAt ?? null,
-    };
-  });
+  const noteRef = doc(db, NOTES_COLLECTION, id);
+  const noteSnap = await getDoc(noteRef);
+  const embedded: Array<{
+    id: string;
+    text: string;
+    authorEmail: string | null;
+    role: string | null;
+    createdAt: unknown;
+  }> = [];
+  if (noteSnap.exists()) {
+    const nd = noteSnap.data() as Record<string, unknown>;
+    const noteOrg = typeof nd.organisationId === "string" ? nd.organisationId : "";
+    if (noteOrg === organisationId) {
+      const addendums = safeAddendumEntries(nd.addendums) ?? [];
+      for (const a of addendums) {
+        embedded.push({
+          id: a.id,
+          text: a.content,
+          authorEmail: null,
+          role: a.role || null,
+          createdAt: a.createdAt ?? null,
+        });
+      }
+    }
+  }
+
+  if (!hospitalId) {
+    return embedded.sort((x, y) => createdAtMillis(x.createdAt) - createdAtMillis(y.createdAt));
+  }
+
+  let legacy: Array<{
+    id: string;
+    text: string;
+    authorEmail: string | null;
+    role: string | null;
+    createdAt: unknown;
+    embeddedId?: string;
+  }> = [];
+  try {
+    const q = query(
+      collection(db, NOTE_ADDENDUMS_COLLECTION),
+      where("organisationId", "==", organisationId),
+      where("hospitalId", "==", hospitalId),
+      where("noteId", "==", id),
+      orderBy("createdAt", "asc")
+    );
+    const snap = await getDocs(q);
+    legacy = (snap.docs ?? []).map((d) => {
+      const x = d.data() as Record<string, unknown>;
+      return {
+        id: d.id,
+        text: typeof x.text === "string" ? x.text : "",
+        authorEmail: typeof x.authorEmail === "string" ? x.authorEmail : null,
+        role: typeof x.authorRole === "string" ? x.authorRole : null,
+        createdAt: x.createdAt ?? null,
+        embeddedId: typeof x.embeddedId === "string" ? x.embeddedId : undefined,
+      };
+    });
+  } catch {
+    legacy = [];
+  }
+
+  const embeddedIds = new Set(embedded.map((e) => e.id));
+  const merged = [...embedded];
+  for (const row of legacy) {
+    if (row.embeddedId && embeddedIds.has(row.embeddedId)) continue;
+    const { embeddedId: _e, ...rest } = row;
+    void _e;
+    if (!embeddedIds.has(rest.id)) {
+      merged.push(rest);
+    }
+  }
+  merged.sort((x, y) => createdAtMillis(x.createdAt) - createdAtMillis(y.createdAt));
+  return merged;
 }

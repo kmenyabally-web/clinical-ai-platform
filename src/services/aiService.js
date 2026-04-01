@@ -13,7 +13,7 @@ export const generateCarePlanDraft = async (patientName, observations) => {
     const model = genAI.getGenerativeModel({
       model:
         (import.meta.env.VITE_GEMINI_MODEL && String(import.meta.env.VITE_GEMINI_MODEL).trim()) ||
-        "gemini-2.5-flash",
+        "gemini-1.5-flash",
     });
 
     const prompt = `Draft a CQC Regulation 9 compliant care plan for ${patientName}. Risks: ${observations}`;
@@ -73,7 +73,7 @@ Write the full letter in plain text.
     const model = genAI.getGenerativeModel({
       model:
         (import.meta.env.VITE_GEMINI_MODEL && String(import.meta.env.VITE_GEMINI_MODEL).trim()) ||
-        "gemini-2.5-flash",
+        "gemini-1.5-flash",
     });
     const result = await model.generateContent(prompt);
     const response = await result.response;
@@ -93,7 +93,7 @@ export const generateIncidentLessons = async (incident) => {
     const model = genAI.getGenerativeModel({
       model:
         (import.meta.env.VITE_GEMINI_MODEL && String(import.meta.env.VITE_GEMINI_MODEL).trim()) ||
-        "gemini-2.5-flash",
+        "gemini-1.5-flash",
     });
 
     const prompt = `
