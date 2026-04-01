@@ -117,7 +117,10 @@ export function buildSimulationInputFromMapped(mapped) {
   const responsive = mapped?.RESPONSIVE ?? {};
   const well = mapped?.WELL_LED ?? {};
 
-  const risk = [...(safe.riskNotes ?? []), ...(safe.behaviours ?? [])];
+  const physHigh = (safe.physicalObservations ?? []).filter(
+    (o) => String(o?.riskLevel ?? "").toLowerCase() === "high"
+  );
+  const risk = [...(safe.riskNotes ?? []), ...(safe.behaviours ?? []), ...physHigh];
 
   return {
     incidents: safe.incidents ?? [],

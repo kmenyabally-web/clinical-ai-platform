@@ -90,3 +90,42 @@ export function calculateBehaviourRiskFromLogs(logs: BehaviourLogLike[]): RiskAs
 
   return { score: Math.min(score, 100), level };
 }
+
+/** Latest physical observation row shape (Firestore `physical_observations`). */
+export type PhysicalObservationRiskLike = {
+  riskLevel?: string;
+  newsScore?: number;
+};
+
+/**
+ * Extra risk weight from physical health monitoring (NEWS2-style).
+ */
+export function physicalHealthRiskAdjustment(
+  observations: PhysicalObservationRiskLike[]
+): { addScore: number; escalateToHigh: boolean } {
+  if (!observations?.length) return { addScore: 0, escalateToHigh: false };
+  const latest = observations[0];
+  const rl = String(latest?.riskLevel ?? "").toLowerCase();
+  const news = typeof latest?.newsScore === "number" ? latest.newsScore : null;
+
+  if (rl === "high" || (news !== null && news >= 5)) {
+    return { addScore: 35, escalateToHigh: true };
+  }
+  if (rl === "medium" || (news !== null && news >= 3)) {
+    return { addScore: 18, escalateToHigh: false };
+  }
+  return { addScore: 0, escalateToHigh: false };
+}
+
+export function combineRiskWithPhysicalHealth(
+  base: RiskAssessment,
+  physical: ReturnType<typeof physicalHealthRiskAdjustment>
+): RiskAssessment {
+  let score = base.score + physical.addScore;
+  let level: RiskLevel = base.level;
+  if (physical.escalateToHigh) level = "high";
+  else if (score > 60) level = "high";
+  else if (score > 30) level = "medium";
+  else level = "low";
+  return { score: Math.min(score, 100), level };
+}

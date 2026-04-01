@@ -18,6 +18,7 @@ export const DEV_ORG_FEATURES_OVERRIDE = {
   medication: true,
   carePlans: true,
   tasks: true,
+  vitals: true,
 };
 
 /**

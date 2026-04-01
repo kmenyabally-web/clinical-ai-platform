@@ -32,6 +32,7 @@ import OrganisationDashboard from "./pages/OrganisationDashboard";
 import Reports from "./pages/Reports";
 import BehaviourTracking from "./pages/BehaviourTracking";
 import MdtReviews from "./pages/MdtReviews";
+import PhysicalHealth from "./pages/PhysicalHealth";
 import ClinicalAiReports from "./pages/ClinicalAiReports";
 import Billing from "./pages/Billing";
 import Organisations from "./pages/management/Organisations";
@@ -120,6 +121,14 @@ export default function App() {
             element={
               <FeatureGate feature="mdt">
                 <MdtReviews />
+              </FeatureGate>
+            }
+          />
+          <Route
+            path="/physical-health"
+            element={
+              <FeatureGate feature="vitals">
+                <PhysicalHealth />
               </FeatureGate>
             }
           />

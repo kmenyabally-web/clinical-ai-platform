@@ -5,6 +5,10 @@ import { fetchClinicalNotesForPatient } from "./noteService";
 import { listCarePlansForPatient, listCarePlansForOrganisation } from "./carePlanManagementService";
 import { fetchDocuments } from "./documentService";
 import { fetchIncidents } from "./incidentService";
+import {
+  listPhysicalObservationsForPatient,
+  listPhysicalObservationsForOrganisation,
+} from "./physicalObservationsService";
 import { listStaffTraining } from "./staffTrainingService";
 import { getStompAlerts } from "../utils/stompAlerts";
 import { getInspectionAlerts } from "../utils/inspectionAlerts";
@@ -97,10 +101,11 @@ export async function buildEvidencePackZip({ organisationId, patientId, patientN
 
   const zip = new JSZip();
 
-  const [notes, carePlans, docResult] = await Promise.all([
+  const [notes, carePlans, docResult, physicalObs] = await Promise.all([
     fetchClinicalNotesForPatient(pid, { limitCount: 500 }),
     listCarePlansForPatient(org, pid),
     fetchDocuments(org, { limitCount: 150 }),
+    listPhysicalObservationsForPatient(org, pid, { limitCount: 200 }).catch(() => []),
   ]);
 
   const documents = docResult?.documents ?? [];
@@ -115,6 +120,7 @@ export async function buildEvidencePackZip({ organisationId, patientId, patientN
     "Contents:",
     `- notes/ (clinical notes): ${notes.length} text export(s)`,
     `- care_plans/: ${carePlans.length} text export(s)`,
+    `- physical_observations/: ${physicalObs.length} vital signs record(s) (SAFE domain)`,
     `- organisation_documents/: up to ${documents.length} file(s) from organisation evidence/policy stores`,
     "",
     "This pack is generated for inspection readiness. Ensure governance and confidentiality policies are followed when sharing.",
@@ -137,6 +143,31 @@ export async function buildEvidencePackZip({ organisationId, patientId, patientN
       .filter(Boolean)
       .join("\n");
     notesFolder.file(`note_${safeFilename(n.id)}.txt`, body);
+  }
+
+  const physFolder = zip.folder(`${root}/physical_observations`);
+  for (const row of physicalObs) {
+    const body = [
+      `Physical observation`,
+      `ID: ${row.id}`,
+      `Recorded: ${formatTs(row.createdAt)}`,
+      `Recorded by: ${row.recordedBy ?? "—"}`,
+      `NEWS score: ${row.newsScore ?? "—"}`,
+      `Risk: ${row.riskLevel ?? "—"}`,
+      "",
+      `Temp °C: ${row.temperature ?? "—"}`,
+      `Pulse: ${row.pulse ?? "—"}`,
+      `BP: ${row.systolicBP ?? "—"} / ${row.diastolicBP ?? "—"}`,
+      `RR: ${row.respiratoryRate ?? "—"}`,
+      `SpO2 %: ${row.oxygenSaturation ?? "—"}`,
+      `Glucose: ${row.bloodGlucose ?? "—"}`,
+      `Weight kg: ${row.weight ?? "—"}`,
+      "",
+      row.notes ? `Notes:\n${row.notes}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    physFolder.file(`observation_${safeFilename(row.id)}.txt`, body);
   }
 
   const cpFolder = zip.folder(`${root}/care_plans`);
@@ -178,7 +209,16 @@ export async function buildEvidencePackZip({ organisationId, patientId, patientN
   docFolder.file("_manifest.txt", manifestLines.join("\n"));
 
   const blob = await zip.generateAsync({ type: "blob" });
-  return { blob, rootFolderName: root, counts: { notes: notes.length, carePlans: carePlans.length, documents: documents.length } };
+  return {
+    blob,
+    rootFolderName: root,
+    counts: {
+      notes: notes.length,
+      carePlans: carePlans.length,
+      documents: documents.length,
+      physicalObservations: physicalObs.length,
+    },
+  };
 }
 
 /**
@@ -279,6 +319,10 @@ export async function generateInspectionEnginePack({ organisationId, patientId =
     }
   }
 
+  const physicalObsForPack = pid
+    ? await listPhysicalObservationsForPatient(org, pid, { limitCount: 200 }).catch(() => [])
+    : await listPhysicalObservationsForOrganisation(org, { limitCount: 200 }).catch(() => []);
+
   const audits = (auditSnap?.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
   const inspections = (inspectionSnap?.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
   const inspectionScores = (inspectionScoreSnap?.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
@@ -310,6 +354,7 @@ export async function generateInspectionEnginePack({ organisationId, patientId =
     training,
     policies: documents,
     audits,
+    physicalObservations: physicalObsForPack,
   });
 
   const simulationInput = buildSimulationInputFromMapped(mapped);
@@ -322,10 +367,11 @@ export async function generateInspectionEnginePack({ organisationId, patientId =
     policies: policyDocs,
     incidents,
     notes,
+    physicalObservations: physicalObsForPack,
   });
 
   return {
-    summary: `Inspection engine — notes: ${notes.length}, incidents: ${incidents.length}, care plans: ${carePlans.length}, training records: ${training.length}, policy docs: ${policyDocs.length}`,
+    summary: `Inspection engine — notes: ${notes.length}, incidents: ${incidents.length}, care plans: ${carePlans.length}, physical observations: ${physicalObsForPack.length}, training records: ${training.length}, policy docs: ${policyDocs.length}`,
     patientId: pid,
     notes,
     audits,
@@ -354,6 +400,7 @@ export async function generateInspectionEnginePack({ organisationId, patientId =
         notes: notes.length,
         incidents: incidents.length,
         carePlans: carePlans.length,
+        physicalObservations: physicalObsForPack.length,
         training: training.length,
         policies: policyDocs.length,
         audits: audits.length,
@@ -370,13 +417,14 @@ export async function fetchEvidenceForCqcSimulation(organisationId) {
   const org = String(organisationId ?? "").trim();
   if (!org) throw new Error("organisationId is required");
 
-  const [notesSnap, auditSnap, docResult, incidents, training, carePlans] = await Promise.all([
+  const [notesSnap, auditSnap, docResult, incidents, training, carePlans, physicalObs] = await Promise.all([
     getDocs(query(collection(db, "notes"), where("organisationId", "==", org))),
     getDocs(query(collection(db, "audit_logs"), where("organisationId", "==", org))),
     fetchDocuments(org, { limitCount: 150 }),
     fetchIncidents(org, {}).catch(() => []),
     listStaffTraining(org).catch(() => []),
     listCarePlansForOrganisation(org, { limitCount: 300 }).catch(() => []),
+    listPhysicalObservationsForOrganisation(org, { limitCount: 300 }).catch(() => []),
   ]);
 
   const notes = (notesSnap?.docs ?? []).map((d) => ({ id: d.id, ...(d.data() ?? {}) }));
@@ -390,5 +438,6 @@ export async function fetchEvidenceForCqcSimulation(organisationId) {
     training,
     policies: documents,
     audits,
+    physicalObservations: physicalObs,
   });
 }

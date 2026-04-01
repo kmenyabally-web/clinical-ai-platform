@@ -30,6 +30,7 @@ export default function Sidebar() {
     "/organisation/policies": "policies",
     "/care-plans": "medication",
     "/mdt": "mdt",
+    "/physical-health": "vitals",
     "/behaviour": "risk",
     "/compliance": "risk",
     "/evidence-pack": "evidencePack",

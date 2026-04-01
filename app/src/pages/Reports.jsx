@@ -116,6 +116,15 @@ export default function Reports() {
         </p>
       )}
 
+      {hasFeature("vitals") && (
+        <p style={{ color: "#64748b", marginBottom: "1rem" }}>
+          Physical health vitals and NEWS history:{" "}
+          <Link to="/physical-health" style={{ color: "#1976d2", fontWeight: 600 }}>
+            Open physical health monitoring
+          </Link>
+        </p>
+      )}
+
       {error && (
         <div role="alert" style={{ marginBottom: "1rem", padding: "0.75rem 1rem", borderRadius: 12, border: "1px solid #fecaca", background: "#fef2f2", color: "#b91c1c" }}>
           {error}

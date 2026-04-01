@@ -19,6 +19,7 @@ export const NAV_ITEMS = [
   { path: "/clinical-notes", label: "Clinical Notes", ariaLabel: "Clinical notes by service", allowedRoles: undefined },
   { path: "/behaviour", label: "Behaviour Tracking", ariaLabel: "Behaviour tracking from clinical notes", allowedRoles: undefined },
   { path: "/mdt", label: "MDT Reviews", ariaLabel: "MDT review information", allowedRoles: undefined },
+  { path: "/physical-health", label: "Physical Health", ariaLabel: "Physical health and vital signs", allowedRoles: undefined },
   { path: "/incidents", label: "Incidents & Safeguarding", ariaLabel: "Incidents and safeguarding", allowedRoles: undefined },
   { path: "/documents", label: "Documents", ariaLabel: "Evidence and policy documents", allowedRoles: undefined },
   { path: "/organisation/policies", label: "Policies", ariaLabel: "Organisation policy library", allowedRoles: undefined },

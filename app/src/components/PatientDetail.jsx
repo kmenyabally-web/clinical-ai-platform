@@ -6,7 +6,11 @@ import { getPatientById, updatePatientStomp } from "../services/patientService";
 import { fetchIncidentsForPatient } from "../services/incidentService";
 import { fetchClinicalNotesForPatient } from "../services/noteService";
 import PatientClinicalIntelligenceTabs from "./PatientClinicalIntelligenceTabs";
-import { calculateRisk } from "../utils/riskEngine";
+import {
+  calculateRisk,
+  combineRiskWithPhysicalHealth,
+  physicalHealthRiskAdjustment,
+} from "../utils/riskEngine";
 import { formatUkDateTime } from "../utils/dateFormat";
 import { useRole } from "../context/RoleContext";
 import { requireAdminRole } from "../lib/requireAdminAction";
@@ -23,6 +27,10 @@ import { getCqcInsight } from "../utils/cqcInsights";
 import { getInspectionInsights } from "../engine/inspectionInsights";
 import PatientTasks from "./PatientTasks";
 import { getTasksByPatient } from "../services/taskService";
+import { listPhysicalObservationsForPatient } from "../services/physicalObservationsService";
+import HealthTrendChart from "./HealthTrendChart";
+import { buildTrendData, sortObservationsByCreatedAtDesc } from "../utils/healthTrends";
+import { detectDeterioration } from "../utils/deterioration";
 
 const openedAuditKeys = new Set();
 
@@ -34,6 +42,7 @@ export default function PatientDetail() {
   const showRiskUi = hasFeature("risk");
   const showStompUi = hasFeature("stomp");
   const showTasksUi = hasFeature("tasks");
+  const showVitalsUi = hasFeature("vitals");
   const [isLoading, setIsLoading] = useState(true);
   const [patient, setPatient] = useState(null);
   const [error, setError] = useState(null);
@@ -65,6 +74,8 @@ export default function PatientDetail() {
   const [stompError, setStompError] = useState(null);
   const [stompSaved, setStompSaved] = useState(false);
   const [patientTasks, setPatientTasks] = useState([]);
+  const [physicalObservations, setPhysicalObservations] = useState([]);
+  const [physicalObsLoading, setPhysicalObsLoading] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -188,10 +199,55 @@ export default function PatientDetail() {
     void reloadPatientTasks();
   }, [reloadPatientTasks]);
 
+  useEffect(() => {
+    let mounted = true;
+    if (!id || !organisationId || !showVitalsUi) {
+      setPhysicalObservations([]);
+      setPhysicalObsLoading(false);
+      return () => {
+        mounted = false;
+      };
+    }
+    setPhysicalObsLoading(true);
+    listPhysicalObservationsForPatient(organisationId, id, { limitCount: 50 })
+      .then((list) => {
+        if (!mounted) return;
+        setPhysicalObservations(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setPhysicalObservations([]);
+      })
+      .finally(() => {
+        if (!mounted) return;
+        setPhysicalObsLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [id, organisationId, showVitalsUi]);
+
+  /** Newest first (createdAt DESC) for risk engine, deterioration, and tables. */
+  const physicalObsDesc = useMemo(
+    () => sortObservationsByCreatedAtDesc(physicalObservations),
+    [physicalObservations]
+  );
+
   const risk = useMemo(() => {
     if (!showRiskUi) return { level: "low", score: 0 };
-    return calculateRisk(notes || []);
-  }, [notes, showRiskUi]);
+    const base = calculateRisk(notes || []);
+    if (!showVitalsUi || !physicalObsDesc?.length) return base;
+    const phys = physicalHealthRiskAdjustment(physicalObsDesc);
+    return combineRiskWithPhysicalHealth(base, phys);
+  }, [notes, showRiskUi, showVitalsUi, physicalObsDesc]);
+
+  const physicalTrendData = useMemo(() => buildTrendData(physicalObsDesc), [physicalObsDesc]);
+  const physicalDeteriorationStatus = useMemo(() => detectDeterioration(physicalObsDesc), [physicalObsDesc]);
+  const latestPhysical = physicalObsDesc[0] ?? null;
+
+  const latestPhysicalRisk = latestPhysical?.riskLevel;
+  const showHighNewsPhysicalBanner =
+    showVitalsUi && !redactSensitive && String(latestPhysicalRisk).toLowerCase() === "high" && !physicalObsLoading;
 
   const reportContext = useMemo(() => {
     const oid = organisationId ?? patient?.organisationId ?? null;
@@ -475,6 +531,12 @@ export default function PatientDetail() {
         </div>
       ) : null}
 
+      {showHighNewsPhysicalBanner ? (
+        <div role="alert" style={styles.highRiskBanner}>
+          ⚠️ High NEWS score — immediate clinical review required
+        </div>
+      ) : null}
+
       <div style={styles.hubCard}>
         <div style={styles.hubTitle}>Patient Hub</div>
         <p style={styles.hubText}>Use quick actions to document care and generate MDT outputs from one place.</p>
@@ -482,6 +544,11 @@ export default function PatientDetail() {
           <Link to="/clinical-notes" style={styles.primaryAction}>
             Add Note
           </Link>
+          {showVitalsUi ? (
+            <Link to={`/physical-health?patient=${id}`} style={styles.secondaryAction}>
+              Physical health
+            </Link>
+          ) : null}
           <Link to={`/incidents/new/${id}`} style={styles.secondaryAction}>
             Add Incident
           </Link>
@@ -495,6 +562,53 @@ export default function PatientDetail() {
           <a href="#timeline" style={styles.hubLink}>Timeline</a>
         </div>
       </div>
+
+      {showVitalsUi && !redactSensitive ? (
+        <div style={{ marginBottom: 12, backgroundColor: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 14px" }}>
+          <div style={styles.hubTitle}>Physical health</div>
+          {physicalObsLoading ? (
+            <p style={{ margin: 0, color: "#64748b", fontSize: 13 }}>Loading vitals…</p>
+          ) : !physicalObsDesc.length ? (
+            <p style={{ margin: "0 0 8px", color: "#64748b", fontSize: 13 }}>
+              No observations yet.{" "}
+              <Link to={`/physical-health?patient=${id}`} style={styles.backLink}>
+                Record vitals
+              </Link>
+            </p>
+          ) : (
+            <>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginBottom: 12, alignItems: "center" }}>
+                <span style={{ fontSize: 13, color: "#475569" }}>
+                  Latest NEWS: <strong>{latestPhysical?.newsScore ?? "—"}</strong>
+                </span>
+                <span style={{ fontSize: 13, color: "#475569" }}>
+                  Risk:{" "}
+                  <span
+                    style={{
+                      ...styles.riskScore,
+                      ...(String(latestPhysical?.riskLevel).toLowerCase() === "high"
+                        ? styles.riskScoreHigh
+                        : String(latestPhysical?.riskLevel).toLowerCase() === "medium"
+                          ? styles.riskScoreMedium
+                          : styles.riskScoreLow),
+                    }}
+                  >
+                    {String(latestPhysical?.riskLevel ?? "—").toUpperCase()}
+                  </span>
+                </span>
+              </div>
+              {physicalTrendData.length > 0 ? (
+                <HealthTrendChart data={physicalTrendData} status={physicalDeteriorationStatus} showPulse />
+              ) : null}
+              <p style={{ margin: "10px 0 0", fontSize: 12 }}>
+                <Link to={`/physical-health?patient=${id}`} style={styles.backLink}>
+                  Full physical health module →
+                </Link>
+              </p>
+            </>
+          )}
+        </div>
+      ) : null}
 
       {latestNote && !redactSensitive ? (
         <div style={styles.insightStrip}>

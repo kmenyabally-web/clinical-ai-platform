@@ -436,6 +436,32 @@ service cloud.firestore {
     }
 
     // =========
+    // Physical health / vital signs (NEWS2-style scoring in app)
+    // =========
+    match /physical_observations/{observationId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if isAuthenticated()
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data);
+    }
+
+    // =========
+    // Care monitoring logs (fluid / food / stool / urine)
+    // =========
+    match /care_logs/{logId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if isAuthenticated()
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data);
+    }
+
+    // =========
     // Risk alerts (derived from notes / risk engine)
     // =========
     match /risk_alerts/{alertId} {

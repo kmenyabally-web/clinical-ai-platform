@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import PatientTimeline from "./PatientTimeline";
 import { generateClinicalReportSection } from "../services/aiService";
+import { analyzeCareMonitoringFromNotes } from "../utils/careMonitoringAnalysis";
 
 function toMillis(value) {
   if (!value) return 0;
@@ -31,7 +32,7 @@ export default function PatientClinicalIntelligenceTabs({
   refreshNotes,
 }) {
   const immutableClinicalRecords = true;
-  const [activeTab, setActiveTab] = useState("notes"); // notes | timeline | summaries | mdt | reports | care
+  const [activeTab, setActiveTab] = useState("notes"); // notes | timeline | summaries | mdt | reports | care | monitoring
 
   // MDT filtering (discipline + date range) applies to Summaries/MDT/Reports/Care Folder tabs.
   const [disciplineFilter, setDisciplineFilter] = useState("all");
@@ -112,6 +113,7 @@ export default function PatientClinicalIntelligenceTabs({
           ["mdt", "MDT Reviews"],
           ["reports", "Reports"],
           ["care", "Care Folder"],
+          ["monitoring", "Care monitoring"],
         ].map(([key, label]) => (
           <button
             key={key}
@@ -225,6 +227,57 @@ export default function PatientClinicalIntelligenceTabs({
         )}
 
         {activeTab === "care" && <CareFolderPanel notes={filteredAiNotes} redactSensitive={redactSensitive} />}
+
+        {activeTab === "monitoring" && (
+          <div>
+            <div style={styles.filterBox}>
+              <div style={styles.filterTitleRow}>
+                <h2 style={styles.filterTitle}>Care monitoring scope</h2>
+                <span style={styles.filterHelp}>Same filters as MDT — applied to notes used for analysis.</span>
+              </div>
+
+              <div style={styles.filterGrid}>
+                <div>
+                  <label style={styles.filterLabel}>Discipline</label>
+                  <select style={styles.filterInput} value={disciplineFilter} onChange={(e) => setDisciplineFilter(e.target.value)}>
+                    <option value="all">All</option>
+                    {disciplineOptions.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={styles.filterLabel}>Date from</label>
+                  <input type="date" style={styles.filterInput} value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+                </div>
+
+                <div>
+                  <label style={styles.filterLabel}>Date to</label>
+                  <input type="date" style={styles.filterInput} value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+                </div>
+
+                <div style={{ display: "flex", alignItems: "flex-end" }}>
+                  <button
+                    type="button"
+                    style={styles.clearBtn}
+                    onClick={() => {
+                      setDisciplineFilter("all");
+                      setDateFrom("");
+                      setDateTo("");
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <CareMonitoringPanel notes={filteredAiNotes} redactSensitive={redactSensitive} />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -371,6 +424,76 @@ function ReportCard({ title, section }) {
       <div style={styles.cardBody}>
         <div style={styles.summaryTitle}>{section?.title || title}</div>
         <div style={styles.reportContent}>{section?.content || "Not documented"}</div>
+      </div>
+    </div>
+  );
+}
+
+function CareMonitoringPanel({ notes, redactSensitive }) {
+  const analysis = useMemo(() => analyzeCareMonitoringFromNotes(notes ?? []), [notes]);
+
+  if (redactSensitive) {
+    return <div style={styles.empty}>Care monitoring analysis is not shown in this view.</div>;
+  }
+
+  if (!notes?.length) {
+    return <div style={styles.empty}>No notes in scope for care monitoring analysis.</div>;
+  }
+
+  const hasSignal =
+    analysis.hydrationRisk !== "none" ||
+    analysis.poorNutrition ||
+    analysis.bowelIssues.constipation ||
+    analysis.bowelIssues.diarrhoea;
+
+  return (
+    <div style={styles.sectionList}>
+      <div style={styles.card}>
+        <div style={styles.cardHeader}>
+          <span style={styles.cardTitle}>Analysis summary</span>
+          <span style={styles.cardMeta}>{hasSignal ? "Signals detected" : "No strong signals"}</span>
+        </div>
+        <div style={styles.cardBody}>
+          <p style={{ marginTop: 0, marginBottom: 12, color: "#1e293b", lineHeight: 1.55, fontSize: 14 }}>
+            {analysis.narrative}
+          </p>
+          <div style={{ fontSize: 12, fontWeight: 800, color: "#64748b", marginBottom: 6 }}>Checks</div>
+          <ul style={{ margin: 0, paddingLeft: 18, color: "#334155", fontSize: 13, lineHeight: 1.45 }}>
+            <li>
+              Hydration risk: <strong>{analysis.hydrationRisk}</strong>
+              {analysis.hydrationDetail ? ` — ${analysis.hydrationDetail}` : ""}
+            </li>
+            <li>
+              Nutrition: <strong>{analysis.poorNutrition ? "Concern documented" : "No clear concern"}</strong>
+              {analysis.nutritionDetail ? ` — ${analysis.nutritionDetail}` : ""}
+            </li>
+            <li>
+              Bowel:{" "}
+              <strong>
+                {analysis.bowelIssues.constipation && analysis.bowelIssues.diarrhoea
+                  ? "Mixed / altered pattern"
+                  : analysis.bowelIssues.constipation
+                    ? "Possible constipation"
+                    : analysis.bowelIssues.diarrhoea
+                      ? "Possible diarrhoea"
+                      : "No clear issue"}
+              </strong>
+              {analysis.bowelDetail ? ` — ${analysis.bowelDetail}` : ""}
+            </li>
+          </ul>
+          {analysis.clinicalConcerns.length > 0 ? (
+            <>
+              <div style={{ fontSize: 12, fontWeight: 800, color: "#92400e", marginTop: 12, marginBottom: 6 }}>
+                Clinical concerns to highlight
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 18, color: "#78350f", fontSize: 13, lineHeight: 1.45 }}>
+                {analysis.clinicalConcerns.map((c, i) => (
+                  <li key={i}>{c}</li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </div>
       </div>
     </div>
   );

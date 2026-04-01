@@ -88,6 +88,7 @@ function auditToLine(a) {
  *   training?: unknown[],
  *   policies?: unknown[],
  *   audits?: unknown[],
+ *   physicalObservations?: unknown[],
  * }} input
  */
 export function mapEvidenceToDomains(input) {
@@ -97,6 +98,7 @@ export function mapEvidenceToDomains(input) {
   const training = Array.isArray(input.training) ? input.training : [];
   const policies = Array.isArray(input.policies) ? input.policies : [];
   const audits = Array.isArray(input.audits) ? input.audits : [];
+  const physicalObservations = Array.isArray(input.physicalObservations) ? input.physicalObservations : [];
 
   return {
     SAFE: {
@@ -104,6 +106,7 @@ export function mapEvidenceToDomains(input) {
       riskNotes: notes.filter((n) => isHighRiskNote(n)),
       medicationIssues: notes.filter((n) => isMedicationNote(n)),
       behaviours: notes.filter((n) => isBehaviourNote(n)),
+      physicalObservations,
     },
     EFFECTIVE: {
       carePlans,
@@ -156,15 +159,20 @@ export function generateDomainSummary(domain, data) {
   if (domain === "SAFE") {
     const inc = /** @type {unknown[]} */ (data.incidents ?? []);
     const risks = /** @type {unknown[]} */ (data.riskNotes ?? []);
-    if (inc.length > 0 || risks.length > 0) {
+    const phys = /** @type {unknown[]} */ (data.physicalObservations ?? []);
+    const highNews = phys.filter((p) => String(p?.riskLevel ?? "").toLowerCase() === "high");
+    if (inc.length > 0 || risks.length > 0 || highNews.length > 0) {
       return {
         status: "⚠️ Risk signals present",
-        message: `Incidents (${inc.length}) and/or elevated-risk notes (${risks.length}) identified. Ensure reviews, observations, and MAR checks are contemporaneous.`,
+        message: `Incidents (${inc.length}), elevated-risk notes (${risks.length}), and high NEWS physical observations (${highNews.length}). Ensure reviews, vitals escalation, and MAR checks are contemporaneous.`,
       };
     }
     return {
       status: "✅ Evidence present",
-      message: "Safety-related documentation located. Verify completeness at inspection.",
+      message:
+        phys.length > 0
+          ? `Safety-related documentation located including ${phys.length} physical observation record(s).`
+          : "Safety-related documentation located. Verify completeness at inspection.",
     };
   }
 
@@ -254,6 +262,7 @@ export function buildCqcInspectionSections(mapped) {
  *   policies?: unknown[],
  *   incidents?: unknown[],
  *   notes?: unknown[],
+ *   physicalObservations?: unknown[],
  * }} data
  */
 export function detectCriticalIssues(data) {
@@ -262,6 +271,7 @@ export function detectCriticalIssues(data) {
   const policies = data.policies ?? [];
   const incidents = data.incidents ?? [];
   const notes = data.notes ?? [];
+  const physicalObservations = Array.isArray(data.physicalObservations) ? data.physicalObservations : [];
 
   if (!training.length) {
     issues.push("❌ No staff training records found for this organisation scope");
@@ -279,6 +289,15 @@ export function detectCriticalIssues(data) {
   const expiredTraining = training.filter((t) => t?.status === "Expired");
   if (expiredTraining.length > 0) {
     issues.push(`⚠️ ${expiredTraining.length} training record(s) expired`);
+  }
+
+  const highNewsPhys = physicalObservations.filter(
+    (o) => String(o?.riskLevel ?? "").toLowerCase() === "high"
+  );
+  if (highNewsPhys.length > 0) {
+    issues.push(
+      `⚠️ ${highNewsPhys.length} physical observation(s) with high NEWS — immediate clinical review required`
+    );
   }
 
   return issues;

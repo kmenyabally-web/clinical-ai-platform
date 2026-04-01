@@ -50,7 +50,14 @@ const cardStyle = {
 
 export default function ClinicalAiReports() {
   const { user } = useAuth();
-  const { organisationId, organisationName, organisation, userProfile, isPlatformAdmin } = useOrganisation();
+  const {
+    organisationId,
+    organisationName,
+    organisation,
+    userProfile,
+    isPlatformAdmin,
+    hasFeature,
+  } = useOrganisation();
 
   const { data: patients = [], loading: patientsLoading, error: patientsError } = usePatients();
 
@@ -263,9 +270,19 @@ export default function ClinicalAiReports() {
             Organisation mode: <strong>{orgTypeLabel}</strong> · Supported types: {REPORT_TYPES.join(", ")}
           </p>
         </div>
-        <Link to="/patients" style={{ color: "#005eb8", fontWeight: 800, textDecoration: "none" }}>
-          Patients
-        </Link>
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
+          {hasFeature("vitals") ? (
+            <Link
+              to={selectedPatientId ? `/physical-health?patient=${selectedPatientId}` : "/physical-health"}
+              style={{ color: "#005eb8", fontWeight: 700, textDecoration: "none" }}
+            >
+              Physical health
+            </Link>
+          ) : null}
+          <Link to="/patients" style={{ color: "#005eb8", fontWeight: 800, textDecoration: "none" }}>
+            Patients
+          </Link>
+        </div>
       </div>
 
       <ActionBar
