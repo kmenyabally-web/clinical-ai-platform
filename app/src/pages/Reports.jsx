@@ -106,6 +106,9 @@ export default function Reports() {
   return (
     <div style={{ padding: "24px", width: "100%" }}>
       <h1 style={{ marginTop: 0 }}>SanctumCare Clinical Report</h1>
+      <p style={{ color: "#64748b", marginBottom: "1rem", marginTop: 6 }}>
+        Supports decision-making only
+      </p>
 
       {!hasFeature("reports") && (
           <p style={{ color: "#64748b", marginBottom: "1rem" }}>
@@ -173,7 +176,7 @@ export default function Reports() {
               cursor: loading ? "not-allowed" : "pointer",
             }}
           >
-            {loading ? "Generating…" : "Generate report"}
+            {loading ? "Generating…" : "Generate Report"}
           </button>
         </div>
       )}

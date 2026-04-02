@@ -20,6 +20,8 @@ import {
   normalizeUserDiscipline,
 } from "../utils/reportDiscipline";
 import { usePatients } from "../hooks/usePatients";
+import { isCareSetting } from "../utils/orgHelpers";
+import { getReportTemplate } from "../utils/reportTemplates";
 
 function toIsoMillis(value) {
   if (!value) return "";
@@ -59,6 +61,9 @@ export default function ClinicalAiReports() {
     hasFeature,
   } = useOrganisation();
 
+  const careSetting = isCareSetting(organisation?.type);
+  const orgType = organisation?.type ?? "hospital";
+
   const { data: patients = [], loading: patientsLoading, error: patientsError } = usePatients();
 
   const [selectedPatientId, setSelectedPatientId] = useState("");
@@ -67,6 +72,18 @@ export default function ClinicalAiReports() {
   const [notesError, setNotesError] = useState(null);
 
   const [reportType, setReportType] = useState("CPA");
+  const dropdownOptions = useMemo(() => {
+    if (!careSetting) return DROPDOWN_OPTIONS;
+    // Care settings: discipline-based outputs removed; keep management + general summaries.
+    const allowed = new Set(["Management_Hearing"]);
+    return DROPDOWN_OPTIONS.filter((o) => allowed.has(o.value));
+  }, [careSetting]);
+
+  useEffect(() => {
+    if (!careSetting) return;
+    const allowed = ["Management_Hearing"];
+    if (!allowed.includes(reportType)) setReportType("Management_Hearing");
+  }, [careSetting, reportType]);
   const [generating, setGenerating] = useState(false);
   const [reportError, setReportError] = useState(null);
   const [reportWarning, setReportWarning] = useState(null);
@@ -91,6 +108,11 @@ export default function ClinicalAiReports() {
     () => normalizeUserDiscipline(userProfile?.mdtRole, userProfile?.role),
     [userProfile?.mdtRole, userProfile?.role]
   );
+
+  const shouldShowDisciplineScope = !careSetting && ["CPA", "Tribunal", "Management_Hearing"].includes(reportType);
+  const effectiveDisciplineForUI = showDisciplineSelect ? selectedDiscipline : userDiscipline;
+  const disciplineForTemplate = ["MDT", "MDT_CLINICAL"].includes(reportType) ? null : effectiveDisciplineForUI;
+  const templateSections = getReportTemplate(reportType, disciplineForTemplate, orgType);
 
   const patientOptions = useMemo(
     () =>
@@ -261,6 +283,66 @@ export default function ClinicalAiReports() {
 
   const unified = report?.kind === "unified" ? report : null;
 
+  const unifiedSectionsForRender = Array.isArray(unified?.sections) ? unified.sections : [];
+  const unifiedRecommendationsForRender = Array.isArray(unified?.recommendations) ? unified.recommendations : [];
+  const stripTemplateNumber = (s) => String(s ?? "").replace(/^\s*\d+\.\s*/u, "").trim().toLowerCase();
+
+  const getByHeadingNeedles = (needles) => {
+    const list = Array.isArray(needles) ? needles : [];
+    const lowerNeedles = list.map((n) => String(n ?? "").toLowerCase()).filter(Boolean);
+    if (!lowerNeedles.length) return null;
+    const found = unifiedSectionsForRender.find((sec) => {
+      const h = String(sec?.heading ?? "").toLowerCase();
+      return lowerNeedles.some((needle) => h.includes(needle));
+    });
+    return found?.content ?? null;
+  };
+
+  const unifiedRecommendationsText =
+    unifiedRecommendationsForRender.map((x) => String(x ?? "").trim()).filter(Boolean).join("\n\n") || "";
+
+  const resolveTemplateSectionContent = (sectionTitle) => {
+    if (!unified) return "Pending...";
+
+    const key = stripTemplateNumber(sectionTitle);
+
+    // Care templates
+    if (careSetting) {
+      if (key.includes("daily care summary")) return getByHeadingNeedles(["notes summary", "clinical summary"]) ?? unified.summary ?? "Pending...";
+      if (key.includes("recommendations")) return unifiedRecommendationsText || getByHeadingNeedles(["recommendation"]) || "Pending...";
+      const bestEffort =
+        getByHeadingNeedles(["physical", "nutrition", "hydration", "behaviour", "behavior", "risk", "action"]) ?? null;
+      return bestEffort ?? "Pending...";
+    }
+
+    // MDT templates
+    if (["mdt", "mdt_clinical"].includes(String(reportType ?? "").toLowerCase())) {
+      if (key.includes("overall summary")) return unified.summary ?? "Pending...";
+      if (key.includes("nursing")) return getByHeadingNeedles(["nursing"]) ?? "Pending...";
+      if (key.includes("medical")) return getByHeadingNeedles(["psychiatry", "medical"]) ?? "Pending...";
+      if (key.includes("psychology")) return getByHeadingNeedles(["psychology"]) ?? "Pending...";
+      if (key.includes("occupational therapy")) return getByHeadingNeedles(["occupational therapy", "occupational"]) ?? "Pending...";
+      if (key.includes("speech & language") || key.includes("speech and language")) return getByHeadingNeedles(["speech"]) ?? "Pending...";
+      if (key.includes("risk summary")) return unifiedRecommendationsText || "Pending...";
+      if (key.includes("plan")) return getByHeadingNeedles(["mdt plan", "plan"]) ?? "Pending...";
+      return "Pending...";
+    }
+
+    // Discipline templates
+    if (key.includes("patient overview")) return getByHeadingNeedles(["patient overview"]) ?? "Pending...";
+    if (key.includes("current presentation")) return getByHeadingNeedles(["current presentation"]) ?? "Pending...";
+    if (key.includes("key risks")) return getByHeadingNeedles(["risk assessment"]) ?? "Pending...";
+    if (key.includes("interventions")) return getByHeadingNeedles(["medication compliance"]) ?? "Pending...";
+    if (key.includes("progress")) return getByHeadingNeedles(["mdt observations"]) ?? "Pending...";
+    if (key.includes("recommendations")) {
+      const clinicalRec = getByHeadingNeedles(["clinical recommendation"]) ?? null;
+      return [clinicalRec, unifiedRecommendationsText].filter(Boolean).join("\n\n") || "Pending...";
+    }
+    if (key.includes("plan")) return getByHeadingNeedles(["legal context"]) ?? "Pending...";
+
+    return "Pending...";
+  };
+
   return (
     <div style={{ padding: "2rem", width: "100%", fontFamily: "sans-serif" }} className="clinical-ai-reports-page">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
@@ -268,6 +350,9 @@ export default function ClinicalAiReports() {
           <h1 style={{ margin: 0 }}>AI Reports</h1>
           <p style={{ margin: "6px 0 0", color: "#64748b", fontSize: 14 }}>
             Organisation mode: <strong>{orgTypeLabel}</strong> · Supported types: {REPORT_TYPES.join(", ")}
+          </p>
+          <p style={{ margin: "8px 0 0", color: "#64748b", fontSize: 14 }}>
+            Supports decision-making only
           </p>
         </div>
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
@@ -356,7 +441,7 @@ export default function ClinicalAiReports() {
             onChange={(e) => setReportType(e.target.value)}
             style={{ marginLeft: 10, padding: "6px 10px" }}
           >
-            {DROPDOWN_OPTIONS.map((r) => (
+            {dropdownOptions.map((r) => (
               <option key={r.value} value={r.value}>
                 {r.label}
               </option>
@@ -364,26 +449,28 @@ export default function ClinicalAiReports() {
           </select>
         </label>
 
-        {showDisciplineSelect ? (
-          <label style={{ fontWeight: 900 }}>
-            Discipline scope:
-            <select
-              value={selectedDiscipline}
-              onChange={(e) => setSelectedDiscipline(e.target.value)}
-              style={{ marginLeft: 10, padding: "6px 10px" }}
-            >
-              {REPORT_DISCIPLINE_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : (
-          <span style={{ color: "#64748b", fontSize: 14 }}>
-            Your report scope: <strong>{userDiscipline}</strong> (role-based)
-          </span>
-        )}
+        {shouldShowDisciplineScope ? (
+          showDisciplineSelect ? (
+            <label style={{ fontWeight: 900 }}>
+              Discipline scope:
+              <select
+                value={selectedDiscipline}
+                onChange={(e) => setSelectedDiscipline(e.target.value)}
+                style={{ marginLeft: 10, padding: "6px 10px" }}
+              >
+                {REPORT_DISCIPLINE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <span style={{ color: "#64748b", fontSize: 14 }}>
+              Your report scope: <strong>{userDiscipline}</strong> (role-based)
+            </span>
+          )
+        ) : null}
 
         <button
           type="button"
@@ -399,7 +486,7 @@ export default function ClinicalAiReports() {
             fontWeight: 800,
           }}
         >
-          {generating ? "Generating…" : "Generate report"}
+          {generating ? "Generating…" : "Generate Report"}
         </button>
       </div>
 
@@ -416,7 +503,7 @@ export default function ClinicalAiReports() {
       ) : null}
       {!patientsLoading && patientOptions.length === 0 && organisationId ? (
         <div style={{ color: "#64748b", marginTop: 14, fontSize: "0.95rem" }}>
-          No patients registered yet
+          No patients registered yet. Add a patient first.
         </div>
       ) : null}
 
@@ -487,7 +574,7 @@ export default function ClinicalAiReports() {
                 cursor: pdfBusy ? "wait" : "pointer",
               }}
             >
-              {pdfBusy ? "Preparing PDF…" : "Download PDF"}
+              {pdfBusy ? "Preparing PDF…" : "Export to PDF"}
             </button>
             <button
               type="button"
@@ -530,12 +617,15 @@ export default function ClinicalAiReports() {
               </div>
             ) : null}
 
-            {unified.sections.map((section) => (
-              <div key={`${section.heading}-${section.content?.slice(0, 24)}`} style={cardStyle}>
-                <h3 style={{ margin: "0 0 8px", fontSize: "1.05rem", color: "#0f172a" }}>{section.heading}</h3>
-                <p style={{ margin: 0, color: "#334155", whiteSpace: "pre-wrap", lineHeight: 1.55 }}>{section.content}</p>
-              </div>
-            ))}
+            {templateSections.map((sectionTitle, idx) => {
+              const content = resolveTemplateSectionContent(sectionTitle);
+              return (
+                <div key={`${sectionTitle}-${idx}`} style={cardStyle} className="report-section">
+                  <h3 style={{ margin: "0 0 8px", fontSize: "1.05rem", color: "#0f172a" }}>{sectionTitle}</h3>
+                  <p style={{ margin: 0, color: "#334155", whiteSpace: "pre-wrap", lineHeight: 1.55 }}>{content}</p>
+                </div>
+              );
+            })}
 
             {unified.recommendations?.length ? (
               <div style={{ ...cardStyle, borderLeft: "4px solid #1976d2" }}>

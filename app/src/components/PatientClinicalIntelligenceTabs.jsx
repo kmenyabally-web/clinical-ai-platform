@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import PatientTimeline from "./PatientTimeline";
 import { generateClinicalReportSection } from "../services/aiService";
 import { analyzeCareMonitoringFromNotes } from "../utils/careMonitoringAnalysis";
+import { isCareSetting, isClinicalSetting } from "../utils/orgHelpers";
 
 function toMillis(value) {
   if (!value) return 0;
@@ -30,9 +31,21 @@ export default function PatientClinicalIntelligenceTabs({
   redactSensitive,
   formatWhen,
   refreshNotes,
+  organisationType,
 }) {
   const immutableClinicalRecords = true;
   const [activeTab, setActiveTab] = useState("notes"); // notes | timeline | summaries | mdt | reports | care | monitoring
+
+  const orgType = organisationType ?? "hospital";
+  const careSetting = isCareSetting(orgType);
+  const clinicalSetting = isClinicalSetting(orgType);
+
+  // If organisation switches (or type missing), ensure the active tab is allowed.
+  React.useEffect(() => {
+    if (careSetting && (activeTab === "mdt" || activeTab === "reports")) {
+      setActiveTab("monitoring");
+    }
+  }, [careSetting, activeTab]);
 
   // MDT filtering (discipline + date range) applies to Summaries/MDT/Reports/Care Folder tabs.
   const [disciplineFilter, setDisciplineFilter] = useState("all");
@@ -110,8 +123,7 @@ export default function PatientClinicalIntelligenceTabs({
           ["notes", "Notes (corrected)"],
           ["timeline", "Timeline"],
           ["summaries", "Summaries"],
-          ["mdt", "MDT Reviews"],
-          ["reports", "Reports"],
+          ...(clinicalSetting ? [["mdt", "MDT Reviews"], ["reports", "Reports"]] : []),
           ["care", "Care Folder"],
           ["monitoring", "Care monitoring"],
         ].map(([key, label]) => (

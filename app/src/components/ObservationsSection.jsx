@@ -348,7 +348,7 @@ export default function ObservationsSection({ organisationId, selectedPatientId,
             cursor: submitting ? "not-allowed" : "pointer",
           }}
         >
-          {submitting ? "Saving…" : "Submit observation"}
+          {submitting ? "Saving…" : "Add Observation"}
         </button>
       </form>
 
@@ -364,7 +364,7 @@ export default function ObservationsSection({ organisationId, selectedPatientId,
         {historyLoading ? <p aria-live="polite">Loading…</p> : null}
         {historyError ? <p style={{ color: "#b91c1c" }}>{historyError}</p> : null}
         {!historyLoading && !history.length ? (
-          <p style={{ color: "#64748b" }}>No observations yet for this patient.</p>
+          <p style={{ color: "#64748b" }}>No observations yet for this patient. Click Add Observation to record the first entry.</p>
         ) : null}
 
         {historySortedDesc.length > 0 ? (

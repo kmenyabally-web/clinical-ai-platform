@@ -66,6 +66,8 @@ export default function Dashboard() {
   const [complianceError, setComplianceError] = useState(null);
   const [inspectionRiskLevel, setInspectionRiskLevel] = useState(null);
   const [inspectionDataLoading, setInspectionDataLoading] = useState(true);
+  const [inspectionReadiness, setInspectionReadiness] = useState(null);
+  const [inspectionReadinessLoading, setInspectionReadinessLoading] = useState(true);
   const [inspectionData, setInspectionData] = useState({
     patient: null,
     notes: [],

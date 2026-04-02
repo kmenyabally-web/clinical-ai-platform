@@ -98,6 +98,17 @@ function noteStatusLabel(status) {
   return "draft";
 }
 
+function noteCreatedByLabel(n) {
+  if (!n || typeof n !== "object") return "—";
+  // Prefer authorEmail for display; fall back to createdBy/authorId when present.
+  return n.authorEmail || n.createdBy || n.authorId || n.createdByRole || "—";
+}
+
+function noteRoleLabel(n) {
+  if (!n || typeof n !== "object") return "—";
+  return n.role || n.discipline || "—";
+}
+
 function NoteStatusBadge({ status }) {
   const label = noteStatusLabel(status);
   if (label === "approved") {
@@ -350,6 +361,7 @@ export default function ClinicalNotes() {
       <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
         <div>
           <h1 style={{ marginTop: 0 }}>Clinical Notes</h1>
+          <h3 style={{ margin: "6px 0 0", fontSize: "0.95rem", color: "#334155" }}>Create → Final → Approve</h3>
           <p style={{ margin: 0, color: "#64748b", fontSize: "0.95rem" }}>
             {organisation?.name ? `${organisation.name}${currentServiceId ? ` · ${currentServiceName}` : ""}` : "Manage clinical notes for this organisation."}
           </p>
@@ -471,7 +483,7 @@ export default function ClinicalNotes() {
             >
               <div style={{ marginBottom: 4, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                 <strong>{n.category || "Clinical note"}</strong>
-                {n.discipline ? (
+                {noteRoleLabel(n) !== "—" ? (
                   <span
                     style={{
                       fontSize: "0.75rem",
@@ -484,7 +496,7 @@ export default function ClinicalNotes() {
                     }}
                     title="MDT role"
                   >
-                    [{n.discipline}]
+                    Role: {noteRoleLabel(n)}
                   </span>
                 ) : null}
                 {n.mood && (
@@ -492,8 +504,8 @@ export default function ClinicalNotes() {
                     {n.mood}
                   </span>
                 )}
-                <span style={{ marginLeft: 8, color: "#64748b", fontSize: "0.875rem" }}>
-                  {formatDate(n.createdAt)} · by {n.authorEmail || "—"}
+                <span style={{ marginLeft: 8, color: "#64748b", fontSize: "0.875rem", whiteSpace: "nowrap" }}>
+                  {formatDate(n.createdAt)} · Created by {noteCreatedByLabel(n)}
                 </span>
                 <NoteStatusBadge status={n.status} />
               </div>

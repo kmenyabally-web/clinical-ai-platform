@@ -7,9 +7,10 @@ import { inferRoleString } from "./mdtNoteGrouping.js";
 export const REPORT_DISCIPLINE_OPTIONS = [
   { value: "ALL", label: "All disciplines" },
   { value: "nurse", label: "Nursing" },
+  { value: "doctor", label: "Doctor" },
   { value: "psychologist", label: "Psychology" },
   { value: "ot", label: "Occupational Therapy" },
-  { value: "speech", label: "Speech & Language" },
+  { value: "salt", label: "Speech & Language" },
   { value: "psychiatrist", label: "Psychiatry" },
 ] as const;
 
@@ -47,9 +48,10 @@ export function normalizeUserDiscipline(
 ): string {
   const m = `${mdtRole ?? ""} ${role ?? ""}`.toLowerCase();
   if (m.includes("psychiatr")) return "psychiatrist";
+  if (m.includes("doctor") || m.includes("medical")) return "doctor";
   if (m.includes("psycholog")) return "psychologist";
   if (m.includes("occupational") || /\bot\b/.test(m)) return "ot";
-  if (m.includes("speech") || m.includes("salt") || m.includes("slt")) return "speech";
+  if (m.includes("salt") || m.includes("slt") || m.includes("speech")) return "salt";
   if (m.includes("nurse") || m.includes("nursing") || m.includes("hca")) return "nurse";
   if (m.includes("support")) return "support_worker";
   return "nurse";
@@ -66,9 +68,12 @@ export function noteMatchesDiscipline(note: unknown, discipline: string): boolea
   const r = inferRoleString(note && typeof note === "object" ? (note as Record<string, unknown>) : {});
 
   if (t === "nurse") return r.includes("nurse") || r.includes("nursing") || r.includes("hca");
+  if (t === "doctor") return r.includes("doctor") || r.includes("medical");
   if (t === "psychologist") return r.includes("psycholog") && !r.includes("psychiatr");
   if (t === "psychiatrist") return r.includes("psychiatr");
   if (t === "ot") return r.includes("occupational") || /\bot\b/.test(r);
+  if (t === "salt") return r.includes("speech") || r.includes("salt") || r.includes("slt");
+  // Back-compat: older code may use "speech" as the discipline key.
   if (t === "speech") return r.includes("speech") || r.includes("salt") || r.includes("slt");
   if (t === "support_worker") return r.includes("support") || r.includes("carer");
   return r.includes(t);

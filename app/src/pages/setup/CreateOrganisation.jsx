@@ -7,7 +7,6 @@ import { useOrganisation } from "../../context/OrganisationContext";
 import { useRole } from "../../context/RoleContext";
 import { createOrganisationUserAccount } from "../../services/userManagementService";
 import { APP_CONFIG } from "../../config/appConfig";
-import { CARE_TYPES } from "../../config/careTypes";
 import {
   getFeaturesForOrganisationType,
   getRolesForOrganisationType,
@@ -22,7 +21,7 @@ export default function CreateOrganisation() {
   const { isSuperAdmin } = useRole();
   const [name, setName] = useState("");
   const [orgId, setOrgId] = useState("");
-  const [type, setType] = useState("MENTAL_HEALTH");
+  const [type, setType] = useState("hospital");
   const [adminEmail, setAdminEmail] = useState("");
   const [tempPassword, setTempPassword] = useState("");
   const [creating, setCreating] = useState(false);
@@ -138,17 +137,17 @@ export default function CreateOrganisation() {
             spellCheck={false}
           />
 
-          <label style={styles.label}>Organisation type</label>
+          <label style={styles.label}>Organisation Type</label>
           <select
             value={type}
             onChange={(e) => setType(e.target.value)}
             style={styles.select}
           >
-            {CARE_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t.replace(/_/g, " ")}
-              </option>
-            ))}
+            <option value="hospital">Hospital</option>
+            <option value="mental_health_unit">Mental Health Unit</option>
+            <option value="care_home">Care Home</option>
+            <option value="nursing_home">Nursing Home</option>
+            <option value="supported_living">Supported Living</option>
           </select>
 
           {isSuperAdmin ? (

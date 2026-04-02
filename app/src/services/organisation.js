@@ -68,7 +68,7 @@ export async function getOrganisation(organisationId) {
   const data = orgSnap.data?.() ?? {};
   if (data.isDeleted === true) return null;
   const rawPlan = data.plan ?? data.subscriptionPlan ?? null;
-  const orgType = data.type ?? data.organisationType ?? data.orgType ?? null;
+  const orgType = data.type ?? data.organisationType ?? data.orgType ?? "hospital";
   const featuresFromDoc = data.features && typeof data.features === "object" ? data.features : null;
   const baseFromType = getFeaturesForOrganisationType(orgType);
   const effectiveFeatures = {

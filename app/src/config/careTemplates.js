@@ -5,6 +5,34 @@ import { CARE_TYPES } from "./careTypes";
  * Merged with {@link DEFAULT_ORG_FEATURES} in organisationTemplates.
  */
 export const CARE_TEMPLATES = {
+  HOSPITAL: {
+    features: {
+      clinicalNotes: true,
+      mdt: true,
+      risk: true,
+      medication: true,
+      tasks: true,
+      stomp: true,
+      vitals: true,
+    },
+    roles: ["Doctor", "Nurse", "Psychologist", "Support Worker"],
+    uiMode: "CLINICAL",
+  },
+
+  MENTAL_HEALTH_UNIT: {
+    features: {
+      clinicalNotes: true,
+      mdt: true,
+      risk: true,
+      medication: true,
+      tasks: true,
+      stomp: true,
+      vitals: true,
+    },
+    roles: ["Doctor", "Nurse", "Psychologist", "Support Worker"],
+    uiMode: "CLINICAL",
+  },
+
   MENTAL_HEALTH: {
     features: {
       clinicalNotes: true,
@@ -38,6 +66,7 @@ export const CARE_TEMPLATES = {
       tasks: true,
       clinicalNotes: false,
       mdt: false,
+      vitals: true,
     },
     roles: ["Carer", "Senior Carer", "Manager"],
     uiMode: "CARER",
@@ -59,6 +88,7 @@ export const CARE_TEMPLATES = {
       careLogs: true,
       medication: true,
       risk: true,
+      vitals: true,
     },
     roles: ["Support Worker", "Manager"],
     uiMode: "CARER",
@@ -70,6 +100,7 @@ export const CARE_TEMPLATES = {
       medication: true,
       vitals: true,
       tasks: true,
+      careLogs: true,
     },
     roles: ["Nurse", "Care Assistant"],
     uiMode: "HYBRID",

@@ -402,7 +402,7 @@ export default function BehaviourTracking() {
       >
         <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Log Behaviour</h2>
         {!selectedPatientId ? (
-          <p style={{ color: "#64748b" }}>Select a patient above to log behaviour.</p>
+          <p style={{ color: "#64748b" }}>Select a patient above to record behaviour.</p>
         ) : (
           <form onSubmit={handleSubmitBehaviour}>
             <div style={{ marginBottom: 12 }}>
@@ -555,7 +555,7 @@ export default function BehaviourTracking() {
                 cursor: saving ? "not-allowed" : "pointer",
               }}
             >
-              {saving ? "Saving…" : "Save behaviour log"}
+              {saving ? "Saving…" : "Record Behaviour"}
             </button>
           </form>
         )}
@@ -649,7 +649,9 @@ export default function BehaviourTracking() {
         ) : !selectedPatientId ? (
           <div style={{ color: "#64748b" }}>Select a patient to view logs.</div>
         ) : validBehaviours.length === 0 ? (
-          <div style={{ color: "#64748b" }}>No valid structured behaviour entries yet. Use Log Behaviour above.</div>
+          <div style={{ color: "#64748b" }}>
+            No valid structured behaviour entries yet. Click Record Behaviour above to log the first entry.
+          </div>
         ) : (
           validBehaviours.map((entry) => {
             const displayTime = formatBehaviourLogTimestamp(entry);

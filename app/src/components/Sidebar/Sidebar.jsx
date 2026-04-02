@@ -29,6 +29,7 @@ export default function Sidebar() {
     "/clinical-notes": "clinicalNotes",
     "/organisation/policies": "policies",
     "/care-plans": "medication",
+    "/care-plan": "medication",
     "/mdt": "mdt",
     "/physical-health": "vitals",
     "/behaviour": "risk",
@@ -36,6 +37,7 @@ export default function Sidebar() {
     "/evidence-pack": "evidencePack",
     "/inspection-simulator": "inspection",
     "/command-centre": "inspection",
+    "/inspection-defence": "inspection",
   };
 
   const visibleItems = useMemo(

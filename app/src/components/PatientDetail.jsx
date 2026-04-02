@@ -31,6 +31,7 @@ import { listPhysicalObservationsForPatient } from "../services/physicalObservat
 import HealthTrendChart from "./HealthTrendChart";
 import { buildTrendData, sortObservationsByCreatedAtDesc } from "../utils/healthTrends";
 import { detectDeterioration } from "../utils/deterioration";
+import { isCareSetting, isClinicalSetting } from "../utils/orgHelpers";
 
 const openedAuditKeys = new Set();
 
@@ -43,6 +44,10 @@ export default function PatientDetail() {
   const showStompUi = hasFeature("stomp");
   const showTasksUi = hasFeature("tasks");
   const showVitalsUi = hasFeature("vitals");
+
+  const orgType = organisation?.type ?? "hospital";
+  const careSetting = isCareSetting(orgType);
+  const clinicalSetting = isClinicalSetting(orgType);
   const [isLoading, setIsLoading] = useState(true);
   const [patient, setPatient] = useState(null);
   const [error, setError] = useState(null);
@@ -247,7 +252,11 @@ export default function PatientDetail() {
 
   const latestPhysicalRisk = latestPhysical?.riskLevel;
   const showHighNewsPhysicalBanner =
-    showVitalsUi && !redactSensitive && String(latestPhysicalRisk).toLowerCase() === "high" && !physicalObsLoading;
+    clinicalSetting &&
+    showVitalsUi &&
+    !redactSensitive &&
+    String(latestPhysicalRisk).toLowerCase() === "high" &&
+    !physicalObsLoading;
 
   const reportContext = useMemo(() => {
     const oid = organisationId ?? patient?.organisationId ?? null;
@@ -552,9 +561,11 @@ export default function PatientDetail() {
           <Link to={`/incidents/new/${id}`} style={styles.secondaryAction}>
             Add Incident
           </Link>
-          <button type="button" onClick={handleMDT} disabled={mdtWardRoundLoading} style={styles.secondaryActionBtn}>
-            {mdtWardRoundLoading ? "Generating MDT…" : "MDT"}
-          </button>
+          {!careSetting ? (
+            <button type="button" onClick={handleMDT} disabled={mdtWardRoundLoading} style={styles.secondaryActionBtn}>
+              {mdtWardRoundLoading ? "Generating MDT…" : "MDT"}
+            </button>
+          ) : null}
         </div>
         <div style={styles.hubLinksRow}>
           <a href="#clinical-intelligence" style={styles.hubLink}>Clinical Intelligence</a>
@@ -565,8 +576,19 @@ export default function PatientDetail() {
 
       {showVitalsUi && !redactSensitive ? (
         <div style={{ marginBottom: 12, backgroundColor: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 14px" }}>
-          <div style={styles.hubTitle}>Physical health</div>
-          {physicalObsLoading ? (
+          <div style={styles.hubTitle}>{careSetting ? "Care monitoring" : "Physical health"}</div>
+          {careSetting ? (
+            <>
+              <p style={{ margin: 0, color: "#475569", fontSize: 13, lineHeight: 1.45 }}>
+                Log fluids, food, stool, and urine to build care monitoring evidence for this patient.
+              </p>
+              <p style={{ margin: "10px 0 0", fontSize: 12 }}>
+                <Link to={`/physical-health?patient=${id}`} style={styles.backLink}>
+                  Open care monitoring →
+                </Link>
+              </p>
+            </>
+          ) : physicalObsLoading ? (
             <p style={{ margin: 0, color: "#64748b", fontSize: 13 }}>Loading vitals…</p>
           ) : !physicalObsDesc.length ? (
             <p style={{ margin: "0 0 8px", color: "#64748b", fontSize: 13 }}>
@@ -835,80 +857,88 @@ export default function PatientDetail() {
               ) : null}
             </div>
 
-            <div style={styles.clinicalIntelCard}>
-              <h3 style={styles.clinicalIntelCardTitle}>MDT summary</h3>
-              <p style={styles.clinicalIntelHint}>Group note text by author MDT role (mdtRole).</p>
-              <button
-                type="button"
-                style={styles.clinicalIntelBtnSecondary}
-                onClick={handleMDTSummary}
-                disabled={mdtSummaryLoading || !(notes?.length)}
-              >
-                {mdtSummaryLoading ? "Building…" : "Generate MDT Summary"}
-              </button>
-              {mdtSummary ? (
-                <div style={styles.aiSummaryBox}>
-                  <h4 style={styles.aiSummaryTitle}>MDT roll-up</h4>
-                  <pre style={styles.mdtPre}>{mdtSummary}</pre>
-                </div>
-              ) : null}
+            {!careSetting ? (
+              <div style={styles.clinicalIntelCard}>
+                <h3 style={styles.clinicalIntelCardTitle}>MDT summary</h3>
+                <p style={styles.clinicalIntelHint}>Group note text by author MDT role (mdtRole).</p>
+                <button
+                  type="button"
+                  style={styles.clinicalIntelBtnSecondary}
+                  onClick={handleMDTSummary}
+                  disabled={mdtSummaryLoading || !(notes?.length)}
+                >
+                  {mdtSummaryLoading ? "Building…" : "Generate MDT Summary"}
+                </button>
+                {mdtSummary ? (
+                  <div style={styles.aiSummaryBox}>
+                    <h4 style={styles.aiSummaryTitle}>MDT roll-up</h4>
+                    <pre style={styles.mdtPre}>{mdtSummary}</pre>
+                  </div>
+                ) : null}
 
-              <div style={{ height: 12 }} />
-              <button
-                type="button"
-                style={styles.clinicalIntelBtn}
-                onClick={handleMDT}
-                disabled={mdtWardRoundLoading || !reportContext.organisationId}
-              >
-                {mdtWardRoundLoading ? "Generating…" : "Generate MDT Ward Round"}
-              </button>
-              {mdtWardRoundError ? (
-                <div role="alert" style={styles.clinicalIntelError}>
-                  {mdtWardRoundError}
-                </div>
-              ) : null}
-              {mdtData && mdtData.kind === "mdtWardRound" && mdtData.sections ? (
-                <GenericSectionedReport
-                  report={mdtData}
-                  sectionOrder={MDT_WARD_SECTION_ORDER}
-                  filenameBase={`Patient_${patient?.id ?? id}_MDT_Ward_Round`}
-                  containerId="patient-detail-mdt-ward-container"
-                  printRootClassName="patient-detail-mdt-ward-print"
-                />
-              ) : null}
-            </div>
+                <div style={{ height: 12 }} />
+                <button
+                  type="button"
+                  style={styles.clinicalIntelBtn}
+                  onClick={handleMDT}
+                  disabled={mdtWardRoundLoading || !reportContext.organisationId}
+                >
+                  {mdtWardRoundLoading ? "Generating…" : "Generate MDT Ward Round"}
+                </button>
+                {mdtWardRoundError ? (
+                  <div role="alert" style={styles.clinicalIntelError}>
+                    {mdtWardRoundError}
+                  </div>
+                ) : null}
+                {mdtData && mdtData.kind === "mdtWardRound" && mdtData.sections ? (
+                  <GenericSectionedReport
+                    report={mdtData}
+                    sectionOrder={MDT_WARD_SECTION_ORDER}
+                    filenameBase={`Patient_${patient?.id ?? id}_MDT_Ward_Round`}
+                    containerId="patient-detail-mdt-ward-container"
+                    printRootClassName="patient-detail-mdt-ward-print"
+                  />
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           <div id="reports-preview" style={styles.reportGeneratorCard}>
             <h3 style={styles.clinicalIntelCardTitle}>Clinical reports</h3>
             <p style={styles.clinicalIntelHint}>
-              CPA and Tribunal outputs from aggregated notes (organisation + hospital scoped).
+              {careSetting
+                ? "Management hearing output (care setting)."
+                : "CPA and Tribunal outputs from aggregated notes (organisation + hospital scoped)."}
             </p>
             <div style={styles.reportButtonRow}>
-              <button
-                type="button"
-                style={styles.clinicalIntelBtn}
-                onClick={handleCPA}
-                disabled={reportGenLoading || !reportContextReady}
-              >
-                {reportGenLoading ? "Generating…" : "Generate CPA Report"}
-              </button>
+              {clinicalSetting ? (
+                <>
+                  <button
+                    type="button"
+                    style={styles.clinicalIntelBtn}
+                    onClick={handleCPA}
+                    disabled={reportGenLoading || !reportContextReady}
+                  >
+                    {reportGenLoading ? "Generating…" : "Generate CPA Report"}
+                  </button>
+                  <button
+                    type="button"
+                    style={styles.clinicalIntelBtnSecondary}
+                    onClick={handleTribunal}
+                    disabled={reportGenLoading || !reportContextReady}
+                  >
+                    {reportGenLoading ? "Generating…" : "Generate Tribunal Report"}
+                  </button>
+                </>
+              ) : null}
               <button
                 type="button"
                 style={styles.clinicalIntelBtnSecondary}
-                onClick={handleTribunal}
-                disabled={reportGenLoading || !reportContextReady}
+                onClick={handleManagement}
+                disabled={managementReportLoading || !reportContext.organisationId}
               >
-                {reportGenLoading ? "Generating…" : "Generate Tribunal Report"}
+                {managementReportLoading ? "Generating…" : "Generate Management Hearing Report"}
               </button>
-                <button
-                  type="button"
-                  style={styles.clinicalIntelBtnSecondary}
-                  onClick={handleManagement}
-                  disabled={managementReportLoading || !reportContext.organisationId}
-                >
-                  {managementReportLoading ? "Generating…" : "Generate Management Hearing Report"}
-                </button>
             </div>
             {reportGenError ? (
               <div role="alert" style={styles.clinicalIntelError}>
@@ -958,6 +988,7 @@ export default function PatientDetail() {
           redactSensitive={redactSensitive}
           formatWhen={formatWhen}
           refreshNotes={refreshNotes}
+          organisationType={organisation?.type ?? null}
         />
       </div>
     </div>

@@ -23,9 +23,11 @@ import EvidencePack from "./pages/EvidencePack";
 import ClinicalNotes from "./pages/ClinicalNotes";
 import Documents from "./pages/Documents";
 import CarePlans from "./pages/CarePlans";
+import CarePlan from "./pages/CarePlan";
 import Incidents from "./pages/Incidents";
 import ComplianceOverview from "./pages/ComplianceOverview";
 import InspectionSimulator from "./pages/InspectionSimulator";
+import InspectionDefence from "./pages/InspectionDefence";
 import StaffTraining from "./pages/StaffTraining";
 import AdminPanel from "./pages/AdminPanel";
 import OrganisationDashboard from "./pages/OrganisationDashboard";
@@ -151,6 +153,14 @@ export default function App() {
             }
           />
           <Route
+            path="/care-plan"
+            element={
+              <FeatureGate feature="medication">
+                <CarePlan />
+              </FeatureGate>
+            }
+          />
+          <Route
             path="/compliance"
             element={
               <FeatureGate feature="risk">
@@ -163,6 +173,14 @@ export default function App() {
             element={
               <FeatureGate feature="inspection">
                 <InspectionSimulator />
+              </FeatureGate>
+            }
+          />
+          <Route
+            path="/inspection-defence"
+            element={
+              <FeatureGate feature="inspection">
+                <InspectionDefence />
               </FeatureGate>
             }
           />

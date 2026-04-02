@@ -322,9 +322,11 @@ const NO_DATA_DISCIPLINE: UnifiedReport = {
 function disciplineDisplayName(key: string): string {
   const map: Record<string, string> = {
     nurse: "Nursing",
+    doctor: "Doctor",
     psychologist: "Psychology",
     ot: "Occupational Therapy",
     speech: "Speech & Language Therapy",
+    salt: "Speech & Language Therapy",
     psychiatrist: "Psychiatry",
     support_worker: "Support",
     unknown: "Clinical",

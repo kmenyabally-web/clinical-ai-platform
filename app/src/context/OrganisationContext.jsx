@@ -79,9 +79,9 @@ export function OrganisationProvider({ children }) {
         name: "Dev Organisation",
         status: "active",
         plan: "BASIC",
-        type: "GENERAL",
+        type: "hospital",
         uiMode: "CLINICAL",
-        features: getFeaturesForOrganisationType("GENERAL"),
+        features: getFeaturesForOrganisationType("hospital"),
       };
       const devProfile = {
         orgId: devOrgId,
@@ -474,6 +474,9 @@ export function OrganisationProvider({ children }) {
     [organisation?.plan, subscription?.planName]
   );
 
+  // Default type behaviour: if missing, treat as clinical "hospital".
+  const orgType = organisation?.type ?? "hospital";
+
   const hasFeature = useCallback(
     (feature) => {
       if (feature === "ai" && isDevAiFeatureOverride()) {
@@ -496,6 +499,8 @@ export function OrganisationProvider({ children }) {
     hospitalId: userProfile?.hospitalId ?? null,
     wardId: userProfile?.wardId ?? null,
     organisation: organisation ?? null,
+    organisationType: orgType,
+    orgType,
     subscription: subscription ?? null,
     effectivePlanKey,
     hasFeature,

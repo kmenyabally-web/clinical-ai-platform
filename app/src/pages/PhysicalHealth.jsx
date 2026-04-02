@@ -7,6 +7,7 @@ import { useAuth } from "../context/AuthContext";
 import { usePatients } from "../hooks/usePatients";
 import ObservationsSection from "../components/ObservationsSection";
 import CareMonitoringSection from "../components/CareMonitoringSection";
+import { isCareSetting, isClinicalSetting } from "../utils/orgHelpers";
 
 const card = {
   background: "#fff",
@@ -35,12 +36,16 @@ const tabBtnActive = {
 };
 
 export default function PhysicalHealth() {
-  const { organisationId } = useOrganisation();
+  const { organisationId, organisation } = useOrganisation();
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: patients = [], loading: patientsLoading, error: patientsError } = usePatients();
 
   const [activeTab, setActiveTab] = useState("observations");
+
+  const orgType = organisation?.type ?? "hospital";
+  const careSetting = isCareSetting(orgType);
+  const clinicalSetting = isClinicalSetting(orgType);
 
   const patientFromQuery = (searchParams.get("patient") ?? "").trim();
   const [selectedPatientId, setSelectedPatientId] = useState(patientFromQuery);
@@ -48,6 +53,11 @@ export default function PhysicalHealth() {
   useEffect(() => {
     if (patientFromQuery) setSelectedPatientId(patientFromQuery);
   }, [patientFromQuery]);
+
+  useEffect(() => {
+    // Care settings should focus on care monitoring, not NEWS observations.
+    if (careSetting) setActiveTab("care");
+  }, [careSetting]);
 
   const selectedPatient = useMemo(
     () => patients.find((p) => p.id === selectedPatientId) ?? null,
@@ -121,15 +131,17 @@ export default function PhysicalHealth() {
         role="tablist"
         aria-label="Physical health sections"
       >
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "observations"}
-          onClick={() => setActiveTab("observations")}
-          style={activeTab === "observations" ? tabBtnActive : tabBtn}
-        >
-          Observations
-        </button>
+        {clinicalSetting ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "observations"}
+            onClick={() => setActiveTab("observations")}
+            style={activeTab === "observations" ? tabBtnActive : tabBtn}
+          >
+            Observations
+          </button>
+        ) : null}
         <button
           type="button"
           role="tab"
@@ -141,7 +153,7 @@ export default function PhysicalHealth() {
         </button>
       </div>
 
-      {activeTab === "observations" && (
+      {activeTab === "observations" && clinicalSetting && (
         <ObservationsSection
           organisationId={organisationId}
           selectedPatientId={selectedPatientId}

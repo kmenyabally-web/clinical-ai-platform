@@ -132,11 +132,30 @@ export default function AuditLog() {
           <tbody>
             {rows.map((row) => {
               const badgeStyle = getBadgeStyle(row.action, row.metadata);
+              const keyAction = keyActionFromAuditRow(row.action, row.metadata);
               return (
                 <tr key={row.id}>
                   <td style={styles.td}>{formatWhen(row.timestamp) || "—"}</td>
                   <td style={styles.td}>
-                    <span style={badgeStyle}>{row.action || "—"}</span>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                      <span style={badgeStyle}>{row.action || "—"}</span>
+                      {keyAction ? (
+                        <span
+                          style={{
+                            display: "inline-block",
+                            padding: "2px 8px",
+                            borderRadius: 999,
+                            fontSize: "0.75rem",
+                            fontWeight: 900,
+                            border: "1px solid #e2e8f0",
+                            color: "#334155",
+                            backgroundColor: "#f8fafc",
+                          }}
+                        >
+                          {keyAction}
+                        </span>
+                      ) : null}
+                    </div>
                   </td>
                   <td style={styles.td}>{row.userEmail || "—"}</td>
                   <td style={styles.td}>{renderMetadata(row.metadata)}</td>
@@ -168,6 +187,22 @@ function renderMetadata(meta) {
   return entries
     .map(([key, value]) => `${key}: ${String(value)}`)
     .join(" · ");
+}
+
+function keyActionFromAuditRow(action, metadata) {
+  const a = (action || "").toString().toUpperCase();
+  const m = JSON.stringify(metadata ?? {}).toLowerCase();
+
+  // created
+  if (a.includes("CREATE") || a.includes("CREATED") || m.includes(": created") || m.includes("created")) return "created";
+
+  // updated
+  if (a.includes("UPDATE") || a.includes("UPDATED") || m.includes("updated")) return "updated";
+
+  // approved
+  if (a.includes("APPROVE") || a.includes("APPROVED") || a.includes("APPROVAL") || m.includes("approved")) return "approved";
+
+  return null;
 }
 
 function getBadgeStyle(action, metadata) {
