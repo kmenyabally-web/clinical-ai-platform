@@ -243,7 +243,7 @@ export default function Billing() {
           {(Object.keys(PLAN_DEFS) as Array<keyof typeof PLAN_DEFS>).map((key) => {
             const def = PLAN_DEFS[key];
             const isCurrent = currentKey === key;
-            const priceLabel = def.price === 0 ? "Free" : `£${def.price}/mo`;
+            const priceLabel = `£${def.price}/mo`;
             return (
               <div
                 key={key}
@@ -278,7 +278,7 @@ export default function Billing() {
                       fontWeight: 600,
                     }}
                   >
-                    {key === PLANS.BASIC ? "Switch to Basic" : `Upgrade to ${def.name}`}
+                    {key === PLANS.BASIC ? "Switch to Starter" : `Upgrade to ${def.name}`}
                   </button>
                 )}
                 {isCurrent && (
@@ -291,8 +291,8 @@ export default function Billing() {
           })}
         </div>
         <p style={{ fontSize: "0.8rem", color: "#888", marginTop: 12, marginBottom: 0 }}>
-          Paid upgrades use Stripe Checkout (configure Cloud Functions and <code>VITE_FIREBASE_FUNCTIONS_URL</code>).
-          Basic can be selected without payment.
+          Paid tiers use Stripe Checkout where configured (Cloud Functions and <code>VITE_FIREBASE_FUNCTIONS_URL</code>).
+          Switching to Starter without checkout is available for manual plan assignment.
         </p>
       </div>
 

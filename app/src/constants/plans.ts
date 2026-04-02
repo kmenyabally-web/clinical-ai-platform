@@ -8,18 +8,18 @@ export type FeatureId = "notes" | "ai" | "risk" | "reports" | "audit" | "tasks";
 
 export const PLANS = {
   BASIC: {
-    name: "Basic",
-    price: 0,
+    name: "Starter",
+    price: 59,
     features: ["notes"] as const,
   },
   PRO: {
-    name: "Pro",
-    price: 49,
+    name: "Professional",
+    price: 99,
     features: ["notes", "ai", "risk", "tasks"] as const,
   },
   ENTERPRISE: {
     name: "Enterprise",
-    price: 199,
+    price: 249,
     features: ["notes", "ai", "risk", "reports", "audit", "tasks"] as const,
   },
 } as const;

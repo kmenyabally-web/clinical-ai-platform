@@ -74,7 +74,10 @@ export default function LandingPage() {
         </p>
 
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-          <ButtonPrimary onClick={() => navigate("/signup")}>Start Free Trial</ButtonPrimary>
+          <ButtonPrimary onClick={() => navigate("/signup")}>Start Trial</ButtonPrimary>
+          <ButtonSecondary onClick={() => window.location.assign("mailto:sales@sanctumcare.app?subject=SanctumCare%20Demo")}>
+            Request Demo
+          </ButtonSecondary>
           <ButtonSecondary onClick={() => navigate("/login")}>Login</ButtonSecondary>
         </div>
       </section>
@@ -168,9 +171,9 @@ export default function LandingPage() {
       <section style={{ maxWidth: 1100, margin: "0 auto", padding: "56px 20px" }}>
         <h3 style={{ margin: 0, fontSize: 24, fontWeight: 900 }}>Pricing</h3>
         <p style={{ margin: "14px 0 0 0", maxWidth: 640, color: "var(--text-muted)", fontSize: 15, lineHeight: 1.65 }}>
-          <strong style={{ color: "var(--text-primary)", fontWeight: 800 }}>Starter</strong> is free for core notes and workflows.{" "}
-          <strong style={{ color: "var(--text-primary)", fontWeight: 800 }}>Professional</strong> adds AI, risk insight, and inspection tooling from £49/month.{" "}
-          <strong style={{ color: "var(--text-primary)", fontWeight: 800 }}>Enterprise</strong> is tailored for multi-site groups — contact sales for a quote.
+          <strong style={{ color: "var(--text-primary)", fontWeight: 800 }}>Starter</strong> from £59/month.{" "}
+          <strong style={{ color: "var(--text-primary)", fontWeight: 800 }}>Professional</strong> £99/month.{" "}
+          <strong style={{ color: "var(--text-primary)", fontWeight: 800 }}>Enterprise</strong> from £249/month+.
         </p>
         <div style={{ marginTop: 20 }}>
           <ButtonSecondary onClick={() => navigate("/pricing")}>View Full Pricing</ButtonSecondary>
@@ -180,10 +183,10 @@ export default function LandingPage() {
       {/* CTA */}
       <section style={{ background: "var(--primary)", color: "#fff", textAlign: "center", padding: "56px 20px" }}>
         <h3 style={{ margin: 0, fontSize: 28, fontWeight: 900 }}>Be inspection-ready — without the stress.</h3>
-        <div style={{ marginTop: 18 }}>
+        <div style={{ marginTop: 18, display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
           <button
             type="button"
-            onClick={() => alert("Demo booking is not wired yet.")}
+            onClick={() => navigate("/signup")}
             style={{
               background: "#fff",
               color: "var(--primary)",
@@ -195,8 +198,24 @@ export default function LandingPage() {
               fontSize: 14,
             }}
           >
-            Book Demo
+            Start Trial
           </button>
+          <a
+            href="mailto:sales@sanctumcare.app?subject=SanctumCare%20Demo"
+            style={{
+              background: "transparent",
+              color: "#fff",
+              border: "2px solid #fff",
+              borderRadius: 8,
+              padding: "8px 18px",
+              fontWeight: 900,
+              fontSize: 14,
+              textDecoration: "none",
+              display: "inline-block",
+            }}
+          >
+            Request Demo
+          </a>
         </div>
       </section>
 
