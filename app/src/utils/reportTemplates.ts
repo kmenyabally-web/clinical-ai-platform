@@ -1,17 +1,70 @@
 /**
- * Report templates to drive consistent section rendering.
- *
- * These are UI/render templates; the AI engine may still generate different section
- * headings. We map/transform available report content to these template sections
- * in the report pages.
+ * Report templates to drive consistent section rendering in AI Reports.
  */
-export function getReportTemplate(type, discipline, orgType) {
+
+import { getCpaTemplateForDiscipline, type CpaDisciplineKey } from "../templates/cpa";
+import { tribunalTemplate } from "../templates/tribunalNursingReport";
+import { rcTemplate } from "../templates/rcTribunalTemplate";
+
+const MDT_SUMMARY_SECTIONS = [
+  "1. Overall Clinical Summary",
+  "2. Nursing Summary",
+  "3. Psychiatry Summary",
+  "4. Psychology Summary",
+  "5. Occupational Therapy Summary",
+  "6. Speech & Language Summary",
+  "7. Key Risks",
+  "8. Risk Trend",
+  "9. MDT Recommendations",
+  "10. Care Plan Adjustments",
+];
+
+const MANAGEMENT_HEARING_SECTIONS = [
+  "1. Patient background",
+  "2. Current concerns",
+  "3. Incident summary",
+  "4. Risk assessment",
+  "5. Legal status",
+  "6. Recommendation",
+];
+
+export function getReportTemplate(
+  type: string,
+  discipline: string | null | undefined,
+  orgType: string,
+  reportWorkflowDiscipline?: string | null
+) {
   const org = (orgType ?? "hospital")?.toString?.().trim?.().toLowerCase?.() ?? "hospital";
   const isCare = ["care_home", "nursing_home", "supported_living"].includes(org);
 
-  //-----------------------------------
-  // CARE SETTINGS (NO MDT)
-  //-----------------------------------
+  if (String(type ?? "").toUpperCase() === "MDT_SUMMARY") {
+    return [...MDT_SUMMARY_SECTIONS];
+  }
+
+  if (String(type ?? "") === "Tribunal") {
+    const w = String(reportWorkflowDiscipline ?? "")
+      .trim()
+      .toLowerCase();
+    if (w === "responsible_clinician") {
+      const rows = rcTemplate.filter((r): r is { id: number; title: string; type: string } => r.id !== "header");
+      return ["1. Patient header (Responsible Clinician)", ...rows.map((r) => `${r.id + 1}. ${r.title}`)];
+    }
+    return tribunalTemplate.map((r) => `${r.id}. ${r.title}`);
+  }
+
+  if (String(type ?? "") === "Management_Hearing") {
+    return [...MANAGEMENT_HEARING_SECTIONS];
+  }
+
+  if (String(type ?? "").toUpperCase() === "CPA" && discipline) {
+    const d = String(discipline).trim();
+    const key = (["nurse", "psychiatrist", "psychologist", "occupational_therapist", "speech_language_therapist"].includes(d)
+      ? d
+      : "nurse") as CpaDisciplineKey;
+    const tpl = getCpaTemplateForDiscipline(key);
+    return tpl.map((r) => `${r.id}. ${r.title}`);
+  }
+
   if (isCare) {
     return [
       "1. Daily Care Summary",
@@ -24,9 +77,6 @@ export function getReportTemplate(type, discipline, orgType) {
     ];
   }
 
-  //-----------------------------------
-  // DISCIPLINE REPORT
-  //-----------------------------------
   if (discipline) {
     return [
       "1. Patient Overview",
@@ -39,9 +89,6 @@ export function getReportTemplate(type, discipline, orgType) {
     ];
   }
 
-  //-----------------------------------
-  // MDT REPORT
-  //-----------------------------------
   return [
     "1. Overall Summary",
     "2. Nursing",
@@ -53,4 +100,3 @@ export function getReportTemplate(type, discipline, orgType) {
     "8. Plan",
   ];
 }
-

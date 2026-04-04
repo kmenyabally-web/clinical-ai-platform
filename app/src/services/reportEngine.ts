@@ -9,6 +9,7 @@ import type {
   StructuredClinicalReportSections,
 } from "../types/clinical";
 import type { OrganisationType, ReportTypeKey } from "../config/reportConfig";
+import { STRUCTURED_CLINICAL_REPORT_TAGLINE } from "../config/clinicalReportMessages";
 import { generateAIContent, stripJsonFence } from "./geminiAiService.js";
 import { generateClinicalReportSection, structuredReportFallback } from "./aiService.js";
 import {
@@ -51,7 +52,7 @@ export type GenerateReportInput = {
 const STRUCTURED_AI_FALLBACK: UnifiedReport = {
   kind: "unified",
   title: "Report",
-  summary: "AI unavailable — structured fallback used.",
+  summary: STRUCTURED_CLINICAL_REPORT_TAGLINE,
   sections: [],
   recommendations: [],
 };
@@ -492,7 +493,8 @@ async function generateHospitalFullReport(input: GenerateReportInput, list: unkn
     return managementHearingToUnified(buildManagementHearingFallback(list) as ManagementHearingReport);
   }
   if (reportType === "MDT" && mdtMode === "clinical") {
-    return structuredClinicalToUnified(structuredReportFallback("mdtReview"));
+    const u = structuredClinicalToUnified(structuredReportFallback("mdtReview"));
+    return { ...u, summary: STRUCTURED_CLINICAL_REPORT_TAGLINE };
   }
   if (reportType === "MDT") {
     return mdtWardToUnified(buildMdtWardFallback(groupNotesByDiscipline(list)));
@@ -507,7 +509,8 @@ async function generateHospitalFullReport(input: GenerateReportInput, list: unkn
     return simpleTextToUnified(title, `${title} (${label}):\n\n${body}`);
   }
   const fb = reportType === "Tribunal" ? "tribunal" : "cpa";
-  return structuredClinicalToUnified(structuredReportFallback(fb));
+  const u = structuredClinicalToUnified(structuredReportFallback(fb));
+  return { ...u, summary: STRUCTURED_CLINICAL_REPORT_TAGLINE };
 }
 
 async function generateHospitalScopedReport(
@@ -579,7 +582,8 @@ async function generateHospitalScopedReport(
     return managementHearingToUnified(buildManagementHearingFallback(list) as ManagementHearingReport);
   }
   if (reportType === "MDT" && mdtMode === "clinical") {
-    return structuredClinicalToUnified(structuredReportFallback("mdtReview"));
+    const u = structuredClinicalToUnified(structuredReportFallback("mdtReview"));
+    return { ...u, summary: STRUCTURED_CLINICAL_REPORT_TAGLINE };
   }
   if (reportType === "MDT") {
     return mdtWardToUnified(buildMdtWardFallback(groupNotesByDiscipline(list)));
@@ -592,7 +596,8 @@ async function generateHospitalScopedReport(
     return simpleTextToUnified(`${disc} summary`, body || `No notes in ${label} for this discipline.`);
   }
   const fb = reportType === "Tribunal" ? "tribunal" : "cpa";
-  return structuredClinicalToUnified(structuredReportFallback(fb));
+  const u = structuredClinicalToUnified(structuredReportFallback(fb));
+  return { ...u, summary: STRUCTURED_CLINICAL_REPORT_TAGLINE };
 }
 
 async function generateCareHomeReport(input: GenerateReportInput): Promise<UnifiedReport> {
@@ -690,8 +695,13 @@ export function legacyReportToUnified(report: unknown, fallbackType: string): Un
   return {
     kind: "unified",
     title: "Report",
-    summary: `Structured fallback (${fallbackType}).`,
-    sections: [{ heading: "Details", content: String(JSON.stringify(report ?? {}, null, 2)).slice(0, 8000) }],
+    summary: STRUCTURED_CLINICAL_REPORT_TAGLINE,
+    sections: [
+      {
+        heading: "Details",
+        content: String(JSON.stringify(report ?? {}, null, 2)).slice(0, 8000) || STRUCTURED_CLINICAL_REPORT_TAGLINE,
+      },
+    ],
     recommendations: [],
   };
 }

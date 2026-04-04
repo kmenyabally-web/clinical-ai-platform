@@ -36,7 +36,7 @@ export function isPrivilegedReportRole(userRole: string | null | undefined): boo
   const r = String(userRole ?? "")
     .trim()
     .toLowerCase();
-  return ["admin", "manager"].includes(r);
+  return ["admin", "manager"].includes(r) || r === "organisation admin";
 }
 
 /**

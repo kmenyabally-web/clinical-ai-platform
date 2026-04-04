@@ -16,8 +16,10 @@ import {
   resolveOrganisationType,
   legacyReportToUnified,
 } from "./reportEngine";
+import { runHospitalReportPipeline } from "./reportBuilder";
+import { STRUCTURED_CLINICAL_REPORT_TAGLINE } from "../config/clinicalReportMessages";
 
-/** @typedef {"weekly"|"monthly"|"summary"|"tribunal"|"cpa"|"mdtReview"|"mdt"|"hearing"} ReportPipelineType */
+/** @typedef {"weekly"|"monthly"|"summary"|"tribunal"|"cpa"|"mdtReview"|"mdt"|"hearing"|"mdt_summary"} ReportPipelineType */
 
 /**
  * @param {unknown} n
@@ -125,6 +127,10 @@ function mapPipelineToEngine(type) {
  *   userRole?: string,
  *   userDiscipline?: string,
  *   selectedDiscipline?: string,
+ *   reportDiscipline?: string | null,
+ *   organisationName?: string | null,
+ *   userSystemRole?: string | null,
+ *   privilegedDisciplinePicker?: boolean,
  * }} args
  */
 export async function generateReport({
@@ -136,9 +142,48 @@ export async function generateReport({
   userRole,
   userDiscipline,
   selectedDiscipline,
+  userMdtRole,
+  showDisciplineSelect,
+  reportDiscipline,
+  organisationName,
+  userSystemRole,
+  privilegedDisciplinePicker,
 }) {
   const notes = await resolveNotes(notesOverride, patientId);
   const orgType = resolveOrganisationType(organisation ?? null);
+
+  if (orgType === "hospital") {
+    const early = await runHospitalReportPipeline({
+      pipelineType: String(type),
+      patientId,
+      organisationId,
+      notes,
+      userRole: userRole ?? "staff",
+      userDiscipline: userDiscipline ?? "nurse",
+      selectedDiscipline,
+      userMdtRole: userMdtRole ?? null,
+      showDisciplineSelect,
+      reportDiscipline: reportDiscipline ?? null,
+      organisationName: organisationName ?? null,
+      userSystemRole: userSystemRole ?? null,
+      privilegedDisciplinePicker: Boolean(privilegedDisciplinePicker),
+    });
+    if (early) return early;
+  }
+
+  const bypassNotes =
+    orgType === "hospital" && (String(type) === "cpa" || String(type) === "mdt_summary");
+  if (!bypassNotes && !notes.length) {
+    return legacyReportToUnified(
+      {
+        kind: "simpleText",
+        title: "Report",
+        text: "No clinical notes are available. Add notes for this patient or check access.",
+      },
+      String(type)
+    );
+  }
+
   const mapped = mapPipelineToEngine(type);
 
   return generateReportCore({
@@ -164,7 +209,11 @@ export function generateFallbackReport(type, notes) {
   const safe = Array.isArray(notes) ? notes : [];
   if (!safe.length) {
     return legacyReportToUnified(
-      { kind: "simpleText", title: "Report", text: "No clinical notes are available. Add notes for this patient or check access." },
+      {
+        kind: "simpleText",
+        title: "Report",
+        text: `${STRUCTURED_CLINICAL_REPORT_TAGLINE}\n\nNo clinical notes are available. Add notes for this patient or check access.`,
+      },
       String(type)
     );
   }
@@ -188,9 +237,22 @@ export function generateFallbackReport(type, notes) {
       return legacyReportToUnified(buildMdtWardFallback(grouped), String(type));
     case "hearing":
       return legacyReportToUnified(buildManagementHearingFallback(safe), String(type));
+    case "mdt_summary":
+      return legacyReportToUnified(
+        {
+          kind: "simpleText",
+          title: "MDT Summary",
+          text: `${STRUCTURED_CLINICAL_REPORT_TAGLINE}\n\nSave discipline CPA reports first, then regenerate the MDT summary.`,
+        },
+        String(type)
+      );
     default:
       return legacyReportToUnified(
-        { kind: "simpleText", title: "Report", text: `Unknown report type "${type}".` },
+        {
+          kind: "simpleText",
+          title: "Report",
+          text: `${STRUCTURED_CLINICAL_REPORT_TAGLINE}\n\nUnknown report type "${type}".`,
+        },
         String(type)
       );
   }
@@ -211,8 +273,8 @@ export function mapDropdownToPipelineType(value) {
       return "hearing";
     case "MDT":
       return "mdt";
-    case "MDT_CLINICAL":
-      return "mdtReview";
+    case "MDT_SUMMARY":
+      return "mdt_summary";
     case "Summary":
       return "summary";
     case "WEEKLY":
@@ -245,6 +307,8 @@ export function pipelineTypeToDropdown(pipelineType) {
       return "MDT";
     case "hearing":
       return "Management_Hearing";
+    case "mdt_summary":
+      return "MDT_SUMMARY";
     default:
       return "CPA";
   }

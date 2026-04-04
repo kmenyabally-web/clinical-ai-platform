@@ -205,9 +205,14 @@ ${jsonShape}`;
 }
 
 /**
- * @param {{ notes?: unknown[], patientId: string, organisationId?: string | null }} args
+ * @param {{ notes?: unknown[], patientId: string, organisationId?: string | null, reportDiscipline?: "nursing" | "responsible_clinician" }} args
  */
-export async function generateManagementHearingReport({ notes: notesOverride, patientId, organisationId }) {
+export async function generateManagementHearingReport({
+  notes: notesOverride,
+  patientId,
+  organisationId,
+  reportDiscipline,
+}) {
   const notes = await resolveNotes(notesOverride, patientId, organisationId);
   const grouped = groupNotesByDiscipline(notes);
   const contextBlock = formatGroupedForPrompt(grouped);
@@ -226,7 +231,18 @@ export async function generateManagementHearingReport({ notes: notesOverride, pa
   }
 }`;
 
-  const prompt = `You are a senior clinical lead preparing a management hearing report.
+  const disc = String(reportDiscipline ?? "nursing").trim().toLowerCase();
+  const isRc = disc === "responsible_clinician";
+
+  const roleLead = isRc
+    ? `You are the Responsible Clinician (or medical lead) preparing a formal management hearing report for mental health services in England & Wales.
+Emphasise medical formulation, psychiatric presentation, treatment rationale, Mental Health Act context, and RC recommendations for the hearing panel.
+Ground every statement in the notes; do not invent legal outcomes, diagnoses, or risks not evidenced in the record.`
+    : `You are a senior registered nurse preparing a formal management hearing report for mental health inpatient services in England & Wales.
+Emphasise nursing observations, observation levels, therapeutic engagement, medication administration and concordance, safeguarding concerns visible in nursing entries, and escalation to medical colleagues where documented.
+Ground every statement in the notes; do not invent incidents, risks, or legal facts not evidenced in the record.`;
+
+  const prompt = `${roleLead}
 
 Write a formal report including:
 
@@ -250,7 +266,7 @@ ${bundle.slice(0, 12000)}
 
 ${jsonShape}`;
 
-  console.log("Using model:", DEFAULT_GEMINI_MODEL_ID, "report: managementHearing");
+  console.log("Using model:", DEFAULT_GEMINI_MODEL_ID, "report: managementHearing", isRc ? "rc" : "nursing");
   try {
     const text = await generateAIContent(prompt, { responseMimeType: "application/json", temperature: 0.2 });
     if (!text) {

@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import PatientTimeline from "./PatientTimeline";
 import { generateClinicalReportSection } from "../services/aiService";
 import { analyzeCareMonitoringFromNotes } from "../utils/careMonitoringAnalysis";
@@ -232,7 +233,6 @@ export default function PatientClinicalIntelligenceTabs({
             loading={reportLoading}
             error={reportError}
             onGenerateCPA={() => handleGenerateReport("cpa")}
-            onGenerateTribunal={() => handleGenerateReport("tribunal")}
             onGenerateMdtReview={() => handleGenerateReport("mdtReview")}
             immutableClinicalRecords={immutableClinicalRecords}
           />
@@ -374,7 +374,7 @@ function MdtReviewsPanel({ notes, redactSensitive, formatWhen }) {
   );
 }
 
-function ReportsPanel({ patientId, notes, discipline, loading, error, onGenerateCPA, onGenerateTribunal, onGenerateMdtReview, immutableClinicalRecords }) {
+function ReportsPanel({ patientId, notes, discipline, loading, error, onGenerateCPA, onGenerateMdtReview, immutableClinicalRecords }) {
   const latest = notes?.slice().sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt))[0];
 
   const cpa = latest?.reports?.cpa;
@@ -387,9 +387,20 @@ function ReportsPanel({ patientId, notes, discipline, loading, error, onGenerate
         <button type="button" style={styles.reportBtn} onClick={onGenerateCPA} disabled={loading || immutableClinicalRecords}>
           {loading ? "Generating…" : "Generate CPA report"}
         </button>
-        <button type="button" style={styles.reportBtn} onClick={onGenerateTribunal} disabled={loading || immutableClinicalRecords}>
-          {loading ? "Generating…" : "Generate Tribunal report"}
-        </button>
+        <Link
+          to={`/reports?patient=${encodeURIComponent(patientId)}&reportType=Tribunal`}
+          style={{
+            ...styles.reportBtn,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            textDecoration: "none",
+            color: "inherit",
+            boxSizing: "border-box",
+          }}
+        >
+          Tribunal (AI Reports)
+        </Link>
         <button type="button" style={styles.reportBtn} onClick={onGenerateMdtReview} disabled={loading || immutableClinicalRecords}>
           {loading ? "Generating…" : "Generate MDT review"}
         </button>

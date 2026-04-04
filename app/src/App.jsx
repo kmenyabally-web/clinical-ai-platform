@@ -33,6 +33,11 @@ import AdminPanel from "./pages/AdminPanel";
 import OrganisationDashboard from "./pages/OrganisationDashboard";
 import Reports from "./pages/Reports";
 import BehaviourTracking from "./pages/BehaviourTracking";
+import NursingObservations from "./pages/NursingObservations";
+import PsychologyFormulation from "./pages/PsychologyFormulation";
+import MdtStructuredClinical from "./pages/MdtStructuredClinical";
+import WardDashboard from "./pages/WardDashboard";
+import ExecutiveDashboard from "./pages/ExecutiveDashboard";
 import MdtReviews from "./pages/MdtReviews";
 import PhysicalHealth from "./pages/PhysicalHealth";
 import ClinicalAiReports from "./pages/ClinicalAiReports";
@@ -110,11 +115,57 @@ export default function App() {
               </FeatureGate>
             }
           />
+          <Route path="/tribunal-report" element={<Navigate to="/reports" replace />} />
+          <Route path="/rc-tribunal-report" element={<Navigate to="/reports" replace />} />
+          <Route path="/tribunal" element={<Navigate to="/reports" replace />} />
+          <Route path="/rc-tribunal" element={<Navigate to="/reports" replace />} />
+          <Route path="/cpa-discipline-report" element={<Navigate to="/reports" replace />} />
+          <Route path="/mdt-summary" element={<Navigate to="/reports" replace />} />
           <Route
             path="/behaviour"
             element={
               <FeatureGate feature="risk">
                 <BehaviourTracking />
+              </FeatureGate>
+            }
+          />
+          <Route
+            path="/nursing-observations"
+            element={
+              <FeatureGate feature="risk">
+                <NursingObservations />
+              </FeatureGate>
+            }
+          />
+          <Route
+            path="/ward-dashboard"
+            element={
+              <FeatureGate feature="risk">
+                <WardDashboard />
+              </FeatureGate>
+            }
+          />
+          <Route
+            path="/executive-dashboard"
+            element={
+              <FeatureGate feature="risk">
+                <ExecutiveDashboard />
+              </FeatureGate>
+            }
+          />
+          <Route
+            path="/psychology-formulation"
+            element={
+              <FeatureGate feature="mdt">
+                <PsychologyFormulation />
+              </FeatureGate>
+            }
+          />
+          <Route
+            path="/mdt-structured-clinical"
+            element={
+              <FeatureGate feature="mdt">
+                <MdtStructuredClinical />
               </FeatureGate>
             }
           />

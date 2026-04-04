@@ -6,6 +6,7 @@ import {
   fetchStructuredBehaviourLogsForPatient,
   isValidStructuredBehaviourLog,
 } from "../services/behaviourService";
+import { addABCEntry, getABCLogsForPatient } from "../services/abcService";
 import { useRole } from "../context/RoleContext";
 import { useOrganisation } from "../context/OrganisationContext";
 import { usePermissions } from "../hooks/usePermissions";
@@ -42,6 +43,14 @@ const inputStyle = {
   border: "1px solid #cbd5e1",
   fontSize: 14,
   boxSizing: "border-box",
+};
+
+const textareaStyle = {
+  ...inputStyle,
+  maxWidth: "100%",
+  minHeight: 88,
+  resize: "vertical",
+  fontFamily: "inherit",
 };
 
 const cardStyle = {
@@ -133,6 +142,14 @@ export default function BehaviourTracking() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
 
+  const [abcAntecedent, setAbcAntecedent] = useState("");
+  const [abcBehaviourNarrative, setAbcBehaviourNarrative] = useState("");
+  const [abcConsequence, setAbcConsequence] = useState("");
+  const [abcSeverity, setAbcSeverity] = useState("medium");
+  const [abcSaving, setAbcSaving] = useState(false);
+  const [abcError, setAbcError] = useState(null);
+  const [abcEntries, setAbcEntries] = useState([]);
+
   useEffect(() => {
     if (!selectedPatientId && patients.length) {
       setSelectedPatientId(patients[0].id ?? "");
@@ -159,18 +176,21 @@ export default function BehaviourTracking() {
       setLogsLoading(true);
       setLogsError(null);
       try {
-        const [rows, inc] = await Promise.all([
+        const [rows, inc, abc] = await Promise.all([
           fetchStructuredBehaviourLogsForPatient(selectedPatientId, { limitCount: 100 }),
           fetchIncidentsForPatient(selectedPatientId, { limitCount: 50 }),
+          getABCLogsForPatient(selectedPatientId, { limitCount: 50 }),
         ]);
         if (!mounted) return;
         setBehaviourLogs(Array.isArray(rows) ? rows : []);
         setPatientIncidents(Array.isArray(inc) ? inc : []);
+        setAbcEntries(Array.isArray(abc) ? abc : []);
       } catch (e) {
         if (!mounted) return;
         setLogsError(e?.message ?? "Failed to load behaviour or incident data.");
         setBehaviourLogs([]);
         setPatientIncidents([]);
+        setAbcEntries([]);
       } finally {
         if (mounted) setLogsLoading(false);
       }
@@ -304,6 +324,68 @@ export default function BehaviourTracking() {
     }
   }
 
+  async function handleSubmitABC(e) {
+    e.preventDefault();
+    setAbcError(null);
+    if (!permissions?.canAccessBehaviour) {
+      const msg = "Your role does not have access to behaviour tracking.";
+      setAbcError(msg);
+      showToast(msg);
+      return;
+    }
+    if (!organisationId || !selectedPatientId || !user?.uid) {
+      setAbcError("Missing organisation, patient, or sign-in.");
+      return;
+    }
+    const ant = (abcAntecedent ?? "").toString().trim();
+    const beh = (abcBehaviourNarrative ?? "").toString().trim();
+    const cons = (abcConsequence ?? "").toString().trim();
+    if (!ant || !beh || !cons) {
+      const msg = "Antecedent, behaviour, and consequence are required.";
+      setAbcError(msg);
+      showToast(msg);
+      return;
+    }
+    const staff =
+      (user?.displayName ?? "").toString().trim() ||
+      (user?.email ?? "").toString().trim() ||
+      user.uid;
+    const sevRaw = (abcSeverity ?? "medium").toString().trim().toLowerCase();
+    const severity = sevRaw === "high" || sevRaw === "low" ? sevRaw : "medium";
+
+    setAbcSaving(true);
+    try {
+      await addABCEntry({
+        patientId: selectedPatientId,
+        organisationId,
+        antecedent: ant,
+        behaviour: beh,
+        consequence: cons,
+        severity,
+        staff,
+      });
+      setAbcAntecedent("");
+      setAbcBehaviourNarrative("");
+      setAbcConsequence("");
+      setAbcSeverity("medium");
+      showToast("ABC entry saved.");
+      const [rows, inc, abc] = await Promise.all([
+        fetchStructuredBehaviourLogsForPatient(selectedPatientId, { limitCount: 100 }),
+        fetchIncidentsForPatient(selectedPatientId, { limitCount: 50 }),
+        getABCLogsForPatient(selectedPatientId, { limitCount: 50 }),
+      ]);
+      setBehaviourLogs(Array.isArray(rows) ? rows : []);
+      setPatientIncidents(Array.isArray(inc) ? inc : []);
+      setAbcEntries(Array.isArray(abc) ? abc : []);
+    } catch (err) {
+      const msg = err?.message ?? "Could not save ABC entry.";
+      setAbcError(msg);
+      showToast(msg);
+    } finally {
+      setAbcSaving(false);
+    }
+  }
+
   return (
     <div style={{ padding: "2rem", width: "100%", fontFamily: "sans-serif", maxWidth: 960 }}>
       <h1 style={{ marginTop: 0 }}>Behaviour Tracking</h1>
@@ -387,6 +469,136 @@ export default function BehaviourTracking() {
             </ul>
           ) : (
             <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>No extra inspection flags from behaviour data yet.</p>
+          )}
+        </section>
+      ) : null}
+
+      {selectedPatientId ? (
+        <section
+          style={{
+            marginBottom: 24,
+            padding: "1.25rem",
+            background: "#ffffff",
+            borderRadius: 12,
+            border: "1px solid #e2e8f0",
+          }}
+        >
+          <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>ABC Behaviour Log</h2>
+          <p style={{ margin: "0 0 12px", fontSize: 14, color: "#64748b", maxWidth: 640 }}>
+            Antecedent–behaviour–consequence entries are stored as structured data and used as the primary source in CPA
+            behavioural and risk sections.
+          </p>
+          {!permissions?.canAccessBehaviour ? (
+            <p style={{ color: "#991b1b", fontWeight: 600 }}>Your role cannot save ABC entries.</p>
+          ) : (
+            <form onSubmit={handleSubmitABC}>
+              <div style={{ display: "grid", gap: 12, maxWidth: 560 }}>
+                <label style={{ fontWeight: 700 }}>
+                  Antecedent
+                  <textarea
+                    value={abcAntecedent}
+                    onChange={(e) => setAbcAntecedent(e.target.value)}
+                    style={{ ...textareaStyle, display: "block", marginTop: 6 }}
+                    rows={3}
+                    required
+                  />
+                </label>
+                <label style={{ fontWeight: 700 }}>
+                  Behaviour
+                  <textarea
+                    value={abcBehaviourNarrative}
+                    onChange={(e) => setAbcBehaviourNarrative(e.target.value)}
+                    style={{ ...textareaStyle, display: "block", marginTop: 6 }}
+                    rows={3}
+                    required
+                  />
+                </label>
+                <label style={{ fontWeight: 700 }}>
+                  Consequence
+                  <textarea
+                    value={abcConsequence}
+                    onChange={(e) => setAbcConsequence(e.target.value)}
+                    style={{ ...textareaStyle, display: "block", marginTop: 6 }}
+                    rows={3}
+                    required
+                  />
+                </label>
+                <label style={{ fontWeight: 700 }}>
+                  Severity
+                  <select
+                    value={abcSeverity}
+                    onChange={(e) => setAbcSeverity(e.target.value)}
+                    style={{ ...inputStyle, display: "block", marginTop: 6 }}
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </label>
+              </div>
+              {abcError ? (
+                <p role="alert" style={{ color: "#991b1b", fontWeight: 600, marginTop: 12 }}>
+                  {abcError}
+                </p>
+              ) : null}
+              <button
+                type="submit"
+                disabled={abcSaving}
+                style={{
+                  marginTop: 14,
+                  padding: "10px 18px",
+                  borderRadius: 10,
+                  border: "none",
+                  background: "#0f766e",
+                  color: "#fff",
+                  fontWeight: 800,
+                  cursor: abcSaving ? "wait" : "pointer",
+                }}
+              >
+                {abcSaving ? "Saving…" : "Save ABC Entry"}
+              </button>
+            </form>
+          )}
+
+          <h3 style={{ fontSize: "1rem", margin: "20px 0 10px" }}>Recent ABC logs</h3>
+          {logsLoading ? (
+            <p style={{ color: "#64748b" }}>Loading…</p>
+          ) : abcEntries.length === 0 ? (
+            <p style={{ color: "#64748b" }}>No ABC entries yet for this patient.</p>
+          ) : (
+            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+              {abcEntries.map((a) => (
+                <li
+                  key={a.id}
+                  style={{
+                    background: "#f8fafc",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: 10,
+                    padding: "12px 14px",
+                    marginBottom: 10,
+                  }}
+                >
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                    <span style={severityBadgeStyle(a.severity)}>
+                      {(a.severity ?? "").toString().toUpperCase()}
+                    </span>
+                    <span style={{ fontSize: 12, color: "#64748b" }}>{formatBehaviourLogTimestamp(a)}</span>
+                    {a.staff ? (
+                      <span style={{ fontSize: 12, color: "#475569" }}>Staff: {a.staff}</span>
+                    ) : null}
+                  </div>
+                  <p style={{ margin: "0 0 6px", fontSize: 14 }}>
+                    <strong>A:</strong> {a.antecedent}
+                  </p>
+                  <p style={{ margin: "0 0 6px", fontSize: 14 }}>
+                    <strong>B:</strong> {a.behaviour}
+                  </p>
+                  <p style={{ margin: 0, fontSize: 14 }}>
+                    <strong>C:</strong> {a.consequence}
+                  </p>
+                </li>
+              ))}
+            </ul>
           )}
         </section>
       ) : null}

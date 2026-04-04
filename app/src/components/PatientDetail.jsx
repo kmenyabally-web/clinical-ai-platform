@@ -11,13 +11,15 @@ import {
   combineRiskWithPhysicalHealth,
   physicalHealthRiskAdjustment,
 } from "../utils/riskEngine";
+import { fetchPatientAggregateRiskScore } from "../services/aggregatePatientRiskEngine";
+import { fetchPatientEarlyWarnings, filterAlertsForRole, sortAlertsBySeverity } from "../services/earlyWarningEngine";
 import { formatUkDateTime } from "../utils/dateFormat";
 import { useRole } from "../context/RoleContext";
 import { requireAdminRole } from "../lib/requireAdminAction";
 import { useOrganisation } from "../context/OrganisationContext";
 import { logAuditEvent } from "../services/auditService";
 import { generateDailySummary } from "../services/summaryService";
-import { generateCPAReport, generateTribunalReport } from "../services/reportService";
+import { generateCPAReport } from "../services/reportService";
 import { generateMdtWardRoundReport } from "../services/enterpriseReportsService";
 import { generateManagementReport } from "../services/managementService";
 import GenericSectionedReport from "./GenericSectionedReport";
@@ -37,7 +39,7 @@ const openedAuditKeys = new Set();
 
 export default function PatientDetail() {
   const { id } = useParams();
-  const { isInspectorRole, role: userRole } = useRole();
+  const { isInspectorRole, role: userRole, mdtRole, enterpriseRoleCode } = useRole();
   const { hasFeature, organisationId, hospitalId: profileHospitalId, organisation } = useOrganisation();
   const redactSensitive = isInspectorRole();
   const showRiskUi = hasFeature("risk");
@@ -62,7 +64,7 @@ export default function PatientDetail() {
   const [mdtSummaryLoading, setMdtSummaryLoading] = useState(false);
   const [dailySummaryError, setDailySummaryError] = useState(null);
 
-  // Ensures existing report UI works (CPA/Tribunal) and enables additional report flows.
+  // Ensures existing report UI works (CPA, AI Reports deep links) and enables additional report flows.
   const [report, setReport] = useState(null);
   const [reportGenLoading, setReportGenLoading] = useState(false);
   const [reportGenError, setReportGenError] = useState(null);
@@ -81,6 +83,10 @@ export default function PatientDetail() {
   const [patientTasks, setPatientTasks] = useState([]);
   const [physicalObservations, setPhysicalObservations] = useState([]);
   const [physicalObsLoading, setPhysicalObsLoading] = useState(false);
+  const [aggregateClinicalRisk, setAggregateClinicalRisk] = useState(null);
+  const [aggregateClinicalRiskLoading, setAggregateClinicalRiskLoading] = useState(false);
+  const [earlyWarnings, setEarlyWarnings] = useState([]);
+  const [earlyWarningsLoading, setEarlyWarningsLoading] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -231,6 +237,69 @@ export default function PatientDetail() {
       mounted = false;
     };
   }, [id, organisationId, showVitalsUi]);
+
+  useEffect(() => {
+    if (!showRiskUi || !organisationId || !id) {
+      setAggregateClinicalRisk(null);
+      setAggregateClinicalRiskLoading(false);
+      return;
+    }
+    let mounted = true;
+    setAggregateClinicalRiskLoading(true);
+    void fetchPatientAggregateRiskScore(id)
+      .then((r) => {
+        if (mounted) setAggregateClinicalRisk(r);
+      })
+      .catch(() => {
+        if (mounted) setAggregateClinicalRisk(null);
+      })
+      .finally(() => {
+        if (mounted) setAggregateClinicalRiskLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [id, organisationId, showRiskUi]);
+
+  useEffect(() => {
+    if (!showRiskUi || !organisationId || !id || redactSensitive) {
+      setEarlyWarnings([]);
+      setEarlyWarningsLoading(false);
+      return;
+    }
+    let mounted = true;
+    setEarlyWarningsLoading(true);
+    void fetchPatientEarlyWarnings(organisationId, id)
+      .then((list) => {
+        if (mounted) setEarlyWarnings(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (mounted) setEarlyWarnings([]);
+      })
+      .finally(() => {
+        if (mounted) setEarlyWarningsLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [id, organisationId, showRiskUi, redactSensitive]);
+
+  const visibleEarlyWarnings = useMemo(
+    () =>
+      sortAlertsBySeverity(
+        filterAlertsForRole(Array.isArray(earlyWarnings) ? earlyWarnings : [], {
+          mdtRole,
+          role: userRole,
+          enterpriseRoleCode,
+        })
+      ),
+    [earlyWarnings, mdtRole, userRole, enterpriseRoleCode]
+  );
+
+  const hasHighEarlyWarning =
+    !redactSensitive &&
+    showRiskUi &&
+    visibleEarlyWarnings.some((a) => String(a.severity).toLowerCase() === "high");
 
   /** Newest first (createdAt DESC) for risk engine, deterioration, and tables. */
   const physicalObsDesc = useMemo(
@@ -437,28 +506,6 @@ export default function PatientDetail() {
     }
   }
 
-  async function handleTribunal() {
-    if (!requireAdminRole(userRole)) return;
-    const patientId = patient?.id ?? id;
-    if (!patientId) return;
-    if (!reportContext.organisationId || !reportContext.hospitalId) {
-      setReportGenError(
-        "Organisation and hospital are required to load notes for this report."
-      );
-      return;
-    }
-    setReportGenLoading(true);
-    setReportGenError(null);
-    try {
-      const r = await generateTribunalReport(patientId, reportContext);
-      setReport(r);
-    } catch (e) {
-      setReportGenError(e?.message ?? "Failed to generate Tribunal report.");
-    } finally {
-      setReportGenLoading(false);
-    }
-  }
-
   async function handleManagement() {
     const patientId = patient?.id ?? id;
     if (!patientId) return;
@@ -515,6 +562,112 @@ export default function PatientDetail() {
       </div>
 
       <h2 style={styles.title}>{fullName || "Patient record"}</h2>
+
+      {showRiskUi && !redactSensitive && aggregateClinicalRiskLoading ? (
+        <p style={{ color: "#64748b", fontSize: 14, marginBottom: 12 }}>Loading clinical aggregate risk…</p>
+      ) : null}
+
+      {showRiskUi && !redactSensitive && aggregateClinicalRisk && !aggregateClinicalRiskLoading ? (
+        <>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: 12,
+              marginBottom: 10,
+              padding: "10px 14px",
+              background: "#f1f5f9",
+              borderRadius: 10,
+              border: "1px solid #e2e8f0",
+            }}
+          >
+            <span style={{ fontWeight: 800, fontSize: 14 }}>Clinical aggregate risk</span>
+            <span
+              style={{
+                ...styles.riskScore,
+                ...(aggregateClinicalRisk.overallRisk === "high"
+                  ? styles.riskScoreHigh
+                  : aggregateClinicalRisk.overallRisk === "medium"
+                    ? styles.riskScoreMedium
+                    : styles.riskScoreLow),
+                textTransform: "uppercase",
+                fontSize: 12,
+                fontWeight: 900,
+              }}
+            >
+              {aggregateClinicalRisk.overallRisk}
+            </span>
+            <span style={{ fontSize: 14, color: "#475569" }}>
+              {aggregateClinicalRisk.trend === "improving"
+                ? "↑"
+                : aggregateClinicalRisk.trend === "deteriorating"
+                  ? "↓"
+                  : "→"}{" "}
+              {aggregateClinicalRisk.trend}
+            </span>
+            <span style={{ fontSize: 12, color: "#64748b" }}>
+              ABC {aggregateClinicalRisk.behaviourRisk} · Incidents {aggregateClinicalRisk.incidentRisk} · Clinical{" "}
+              {aggregateClinicalRisk.clinicalRisk}
+            </span>
+          </div>
+          {aggregateClinicalRisk.riskDrivers?.length ? (
+            <div style={{ marginBottom: 12, fontSize: 13, color: "#334155", lineHeight: 1.45 }}>
+              <strong>Top risk drivers:</strong> {aggregateClinicalRisk.riskDrivers.slice(0, 3).join(" · ")}
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
+      {showRiskUi && !redactSensitive && aggregateClinicalRisk?.overallRisk === "high" && !aggregateClinicalRiskLoading ? (
+        <div role="alert" style={styles.highRiskBanner}>
+          ⚠️ High risk patient — immediate review required
+        </div>
+      ) : null}
+
+      {showRiskUi && !redactSensitive && earlyWarningsLoading ? (
+        <p style={{ color: "#64748b", fontSize: 14, marginBottom: 12 }}>Loading early warning alerts…</p>
+      ) : null}
+
+      {showRiskUi && !redactSensitive && hasHighEarlyWarning && !earlyWarningsLoading ? (
+        <div role="alert" style={styles.highRiskBanner}>
+          ⚠️ High-risk patient — review required
+        </div>
+      ) : null}
+
+      {showRiskUi && !redactSensitive && !earlyWarningsLoading && visibleEarlyWarnings.length > 0 ? (
+        <div
+          style={{
+            marginBottom: 14,
+            padding: "12px 14px",
+            background: "#f8fafc",
+            borderRadius: 10,
+            border: "1px solid #e2e8f0",
+          }}
+        >
+          <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 10 }}>Early warning alerts (V1)</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {visibleEarlyWarnings.map((a) => {
+              const s = String(a.severity).toLowerCase();
+              const cardStyle =
+                s === "high"
+                  ? { borderLeft: "4px solid #dc2626", background: "#fef2f2" }
+                  : s === "medium"
+                    ? { borderLeft: "4px solid #d97706", background: "#fffbeb" }
+                    : { borderLeft: "4px solid #16a34a", background: "#f0fdf4" };
+              return (
+                <div key={a.id} style={{ padding: "8px 10px", borderRadius: 8, ...cardStyle }}>
+                  <div style={{ fontWeight: 800, fontSize: 11, textTransform: "uppercase", color: "#475569" }}>
+                    {a.severity} · {a.source}
+                  </div>
+                  <div style={{ fontWeight: 600, marginTop: 2 }}>{String(a.type).replace(/_/g, " ")}</div>
+                  <div style={{ marginTop: 2, fontSize: 13, lineHeight: 1.45 }}>{a.message}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       {showRiskUi && !redactSensitive && !notesLoading && !notesError && (
         <div style={styles.riskStrip}>
@@ -908,7 +1061,7 @@ export default function PatientDetail() {
             <p style={styles.clinicalIntelHint}>
               {careSetting
                 ? "Management hearing output (care setting)."
-                : "CPA and Tribunal outputs from aggregated notes (organisation + hospital scoped)."}
+                : "CPA from aggregated notes; Tribunal and RC tribunal use AI Reports (role + discipline)."}
             </p>
             <div style={styles.reportButtonRow}>
               {clinicalSetting ? (
@@ -921,14 +1074,23 @@ export default function PatientDetail() {
                   >
                     {reportGenLoading ? "Generating…" : "Generate CPA Report"}
                   </button>
-                  <button
-                    type="button"
-                    style={styles.clinicalIntelBtnSecondary}
-                    onClick={handleTribunal}
-                    disabled={reportGenLoading || !reportContextReady}
+                  <Link
+                    to={
+                      (patient?.id ?? id)
+                        ? `/reports?patient=${encodeURIComponent(patient?.id ?? id)}`
+                        : "/reports"
+                    }
+                    style={{
+                      ...styles.clinicalIntelBtnSecondary,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      textDecoration: "none",
+                      color: "inherit",
+                    }}
                   >
-                    {reportGenLoading ? "Generating…" : "Generate Tribunal Report"}
-                  </button>
+                    AI Reports (Tribunal / RC)
+                  </Link>
                 </>
               ) : null}
               <button

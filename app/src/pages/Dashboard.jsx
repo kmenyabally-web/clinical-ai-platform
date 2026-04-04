@@ -35,13 +35,25 @@ import {
   listInspectionScores,
   saveInspectionScore,
 } from "../services/inspectionScoreService";
+import { listRecentRiskScoreSnapshots } from "../services/riskScoreHistoryService";
+import { listRecentAlertSnapshots, parseStoredAlerts } from "../services/alertHistoryService";
+import { filterAlertsForRole, sortAlertsBySeverity } from "../services/earlyWarningEngine";
+import { useRole } from "../context/RoleContext";
 import { getInspectionSimulationSnapshot } from "../services/inspectionSimulationService";
 import { collection, getDocs, limit, orderBy, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 
+function earlyWarningCardStyle(severity) {
+  const s = String(severity ?? "").toLowerCase();
+  if (s === "high") return { borderLeft: "4px solid #dc2626", background: "#fef2f2" };
+  if (s === "medium") return { borderLeft: "4px solid #d97706", background: "#fffbeb" };
+  return { borderLeft: "4px solid #16a34a", background: "#f0fdf4" };
+}
+
 export default function Dashboard() {
   const { organisationId, organisation } = useOrganisation();
   const { currentServiceId, services } = useService();
+  const { mdtRole, role: rbacRole, enterpriseRoleCode } = useRole();
 
   const [incidentStatsLoading, setIncidentStatsLoading] = useState(true);
   const [incidentStats, setIncidentStats] = useState({
@@ -78,6 +90,12 @@ export default function Dashboard() {
   const [scoreHistory, setScoreHistory] = useState([]);
   const [savingScore, setSavingScore] = useState(false);
 
+  const [riskScoreFeed, setRiskScoreFeed] = useState([]);
+  const [riskScoreFeedLoading, setRiskScoreFeedLoading] = useState(false);
+
+  const [alertFeed, setAlertFeed] = useState([]);
+  const [alertFeedLoading, setAlertFeedLoading] = useState(false);
+
   const currentServiceName =
     Array.isArray(services) && services.length > 0 && currentServiceId
       ? (services.find((s) => s?.id === currentServiceId)?.serviceName ||
@@ -87,6 +105,54 @@ export default function Dashboard() {
   useEffect(() => {
     logAuditEventNonBlocking({ action: "DASHBOARD_REPORTS_GENERATED" }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadRiskFeed() {
+      if (!organisationId) {
+        setRiskScoreFeed([]);
+        setRiskScoreFeedLoading(false);
+        return;
+      }
+      setRiskScoreFeedLoading(true);
+      try {
+        const rows = await listRecentRiskScoreSnapshots(organisationId, { limitCount: 20 });
+        if (!cancelled) setRiskScoreFeed(Array.isArray(rows) ? rows : []);
+      } catch {
+        if (!cancelled) setRiskScoreFeed([]);
+      } finally {
+        if (!cancelled) setRiskScoreFeedLoading(false);
+      }
+    }
+    void loadRiskFeed();
+    return () => {
+      cancelled = true;
+    };
+  }, [organisationId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadAlertFeed() {
+      if (!organisationId) {
+        setAlertFeed([]);
+        setAlertFeedLoading(false);
+        return;
+      }
+      setAlertFeedLoading(true);
+      try {
+        const rows = await listRecentAlertSnapshots(organisationId, { limitCount: 15 });
+        if (!cancelled) setAlertFeed(Array.isArray(rows) ? rows : []);
+      } catch {
+        if (!cancelled) setAlertFeed([]);
+      } finally {
+        if (!cancelled) setAlertFeedLoading(false);
+      }
+    }
+    void loadAlertFeed();
+    return () => {
+      cancelled = true;
+    };
+  }, [organisationId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -856,6 +922,171 @@ export default function Dashboard() {
               Run simulation →
             </Link>
           </div>
+        </div>
+
+        <div
+          style={{
+            marginTop: 20,
+            padding: "1rem 1.25rem",
+            background: "#f8fafc",
+            borderRadius: 12,
+            border: "1px solid #e2e8f0",
+          }}
+        >
+          <h3 style={{ margin: "0 0 10px", fontSize: "1rem" }}>Clinical aggregate risk (V1)</h3>
+          <p style={{ margin: "0 0 12px", fontSize: 13, color: "#64748b" }}>
+            From ABC logs, incidents, nursing observations, and psychology formulation. Saved to risk history when CPA data loads.
+          </p>
+          {riskScoreFeedLoading ? (
+            <p style={{ margin: 0, color: "#64748b", fontSize: 14 }}>Loading risk snapshots…</p>
+          ) : riskScoreFeed.length === 0 ? (
+            <p style={{ margin: 0, color: "#64748b", fontSize: 14 }}>No risk snapshots yet.</p>
+          ) : (
+            <>
+              <p style={{ margin: "0 0 10px", fontSize: 14, fontWeight: 700 }}>
+                High-risk snapshots in feed:{" "}
+                {riskScoreFeed.filter((r) => String(r.overallRisk).toLowerCase() === "high").length}
+              </p>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "#334155", lineHeight: 1.5 }}>
+                {riskScoreFeed.slice(0, 5).map((r) => (
+                  <li key={r.id} style={{ marginBottom: 8 }}>
+                    <Link to={`/patients/${encodeURIComponent(r.patientId)}`} style={{ fontWeight: 700, color: "#1d4ed8" }}>
+                      Patient {r.patientId.slice(0, 8)}…
+                    </Link>
+                    <span style={{ marginLeft: 8 }}>
+                      <span
+                        style={{
+                          padding: "2px 8px",
+                          borderRadius: 6,
+                          fontWeight: 800,
+                          fontSize: 11,
+                          textTransform: "uppercase",
+                          background:
+                            String(r.overallRisk).toLowerCase() === "high"
+                              ? "#fee2e2"
+                              : String(r.overallRisk).toLowerCase() === "medium"
+                                ? "#fef9c3"
+                                : "#dcfce7",
+                          color:
+                            String(r.overallRisk).toLowerCase() === "high"
+                              ? "#991b1b"
+                              : String(r.overallRisk).toLowerCase() === "medium"
+                                ? "#854d0e"
+                                : "#166534",
+                        }}
+                      >
+                        {String(r.overallRisk || "—")}
+                      </span>
+                      <span style={{ marginLeft: 8, color: "#64748b" }}>
+                        {r.trend === "improving" ? "↑" : r.trend === "deteriorating" ? "↓" : "→"} {r.trend}
+                      </span>
+                    </span>
+                    {r.drivers?.length ? (
+                      <div style={{ marginTop: 4, color: "#475569" }}>
+                        Top drivers: {r.drivers.slice(0, 3).join(" · ")}
+                      </div>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+
+        <div
+          style={{
+            marginTop: 20,
+            padding: "1rem 1.25rem",
+            background: "#f8fafc",
+            borderRadius: 12,
+            border: "1px solid #e2e8f0",
+          }}
+        >
+          <h3 style={{ margin: "0 0 10px", fontSize: "1rem" }}>Early warning alerts (V1)</h3>
+          <p style={{ margin: "0 0 12px", fontSize: 13, color: "#64748b" }}>
+            Multi-disciplinary flags from ABC logs, incidents, formulation, nursing observations, medications, and
+            physical-health notes. Saved when CPA data loads. Sorted high → medium → low.
+          </p>
+          {alertFeedLoading ? (
+            <p style={{ margin: 0, color: "#64748b", fontSize: 14 }}>Loading alert snapshots…</p>
+          ) : alertFeed.length === 0 ? (
+            <p style={{ margin: 0, color: "#64748b", fontSize: 14 }}>No alert snapshots yet.</p>
+          ) : (
+            <>
+              {alertFeed.some((row) => {
+                const models = parseStoredAlerts(row.patientId, row.alerts);
+                const vis = sortAlertsBySeverity(
+                  filterAlertsForRole(models, { mdtRole, role: rbacRole, enterpriseRoleCode })
+                );
+                return vis.some((a) => String(a.severity).toLowerCase() === "high");
+              }) ? (
+                <div
+                  role="alert"
+                  style={{
+                    marginBottom: 12,
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    background: "#fef2f2",
+                    border: "1px solid #fecaca",
+                    color: "#991b1b",
+                    fontWeight: 700,
+                    fontSize: 14,
+                  }}
+                >
+                  ⚠️ High-risk patient — review required
+                </div>
+              ) : null}
+              <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none", fontSize: 13, color: "#334155" }}>
+                {alertFeed.slice(0, 6).map((row) => {
+                  const models = parseStoredAlerts(row.patientId, row.alerts);
+                  const visible = sortAlertsBySeverity(
+                    filterAlertsForRole(models, { mdtRole, role: rbacRole, enterpriseRoleCode })
+                  );
+                  if (visible.length === 0) return null;
+                  return (
+                    <li
+                      key={row.id}
+                      style={{
+                        marginBottom: 16,
+                        paddingBottom: 14,
+                        borderBottom: "1px solid #e2e8f0",
+                      }}
+                    >
+                      <div style={{ marginBottom: 8 }}>
+                        <Link
+                          to={`/patients/${encodeURIComponent(row.patientId)}`}
+                          style={{ fontWeight: 800, color: "#1d4ed8" }}
+                        >
+                          Patient {row.patientId.slice(0, 8)}…
+                        </Link>
+                        <span style={{ marginLeft: 8, color: "#64748b", fontSize: 12 }}>
+                          {visible.length} active alert{visible.length === 1 ? "" : "s"} (for your role)
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {visible.map((a) => (
+                          <div
+                            key={a.id}
+                            style={{
+                              padding: "8px 10px",
+                              borderRadius: 8,
+                              ...earlyWarningCardStyle(a.severity),
+                            }}
+                          >
+                            <div style={{ fontWeight: 800, fontSize: 11, textTransform: "uppercase", color: "#475569" }}>
+                              {a.severity} · {a.source}
+                            </div>
+                            <div style={{ fontWeight: 600, marginTop: 2 }}>{a.type.replace(/_/g, " ")}</div>
+                            <div style={{ marginTop: 2, lineHeight: 1.4 }}>{a.message}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
         </div>
       </section>
 

@@ -2,8 +2,9 @@ export const REPORT_TYPES = [
   "CPA",
   "Tribunal",
   "Management_Hearing",
-  "MDT",
-  "Summary",
+  "MDT_SUMMARY",
+  "Weekly",
+  "Monthly",
 ] as const;
 
 export type ReportTypeKey = (typeof REPORT_TYPES)[number];

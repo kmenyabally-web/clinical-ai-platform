@@ -20,6 +20,7 @@ export const MDT_ROLES = [
   "Speech and Language Therapy Assistant",
   "Activity Coordinator",
   "Clinical Lead",
+  "Responsible Clinician",
   "Head of Care",
   "Ward Manager",
   "Deputy Ward Manager",

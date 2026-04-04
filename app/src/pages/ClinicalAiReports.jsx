@@ -1,24 +1,22 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { fetchClinicalNotesForPatient } from "../services/noteService";
 import { useOrganisation } from "../context/OrganisationContext";
 import { useAuth } from "../context/AuthContext";
-import ActionBar from "../components/ActionBar";
 import { buildStandardClinicalReport } from "../utils/buildStandardClinicalReport";
 import { exportToPDF } from "../utils/exportPdf";
 import { saveClinicalReportDocument } from "../services/savedClinicalReportsService";
-import {
-  generateReport,
-  generateFallbackReport,
-  mapDropdownToPipelineType,
-  pipelineTypeToDropdown,
-} from "../services/clinicalReportPipeline";
+import { generateReport, mapDropdownToPipelineType, pipelineTypeToDropdown } from "../services/clinicalReportPipeline";
+import { legacyReportToUnified } from "../services/reportEngine";
+import { STRUCTURED_CLINICAL_REPORT_TAGLINE } from "../config/clinicalReportMessages";
 import { REPORT_TYPES } from "../config/reportConfig";
 import {
   REPORT_DISCIPLINE_OPTIONS,
   isPrivilegedReportRole,
   normalizeUserDiscipline,
 } from "../utils/reportDiscipline";
+import { canAccessTribunalReport } from "../utils/tribunalReportAccess";
+import { CPA_DISCIPLINE_OPTIONS, mapCanonicalDisciplineToCpaKey } from "../templates/cpa";
 import { usePatients } from "../hooks/usePatients";
 import { isCareSetting } from "../utils/orgHelpers";
 import { getReportTemplate } from "../utils/reportTemplates";
@@ -30,16 +28,21 @@ function toIsoMillis(value) {
   return new Date(ms).toISOString();
 }
 
-const DROPDOWN_OPTIONS = [
+const DROPDOWN_OPTIONS_ALL = [
   { value: "CPA", label: "CPA Report" },
   { value: "Tribunal", label: "Tribunal Report" },
   { value: "Management_Hearing", label: "Management Hearing" },
-  { value: "MDT", label: "MDT — ward round" },
-  { value: "MDT_CLINICAL", label: "MDT — clinical review" },
-  { value: "Summary", label: "Notes summary (all)" },
-  { value: "WEEKLY", label: "Weekly summary (7 days)" },
-  { value: "MONTHLY", label: "Monthly summary (30 days)" },
+  { value: "MDT_SUMMARY", label: "MDT Summary" },
+  { value: "WEEKLY", label: "Weekly Summary" },
+  { value: "MONTHLY", label: "Monthly Summary" },
 ];
+
+const REPORT_WORKFLOW_DISCIPLINE_OPTIONS = [
+  { value: "nursing", label: "Nursing" },
+  { value: "responsible_clinician", label: "Responsible Clinician" },
+];
+
+const TRIBUNAL_MANAGEMENT_ACCESS_ERROR = "This report is only available for Nurse or Responsible Clinician.";
 
 const cardStyle = {
   background: "#fff",
@@ -51,6 +54,7 @@ const cardStyle = {
 };
 
 export default function ClinicalAiReports() {
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const {
     organisationId,
@@ -72,18 +76,6 @@ export default function ClinicalAiReports() {
   const [notesError, setNotesError] = useState(null);
 
   const [reportType, setReportType] = useState("CPA");
-  const dropdownOptions = useMemo(() => {
-    if (!careSetting) return DROPDOWN_OPTIONS;
-    // Care settings: discipline-based outputs removed; keep management + general summaries.
-    const allowed = new Set(["Management_Hearing"]);
-    return DROPDOWN_OPTIONS.filter((o) => allowed.has(o.value));
-  }, [careSetting]);
-
-  useEffect(() => {
-    if (!careSetting) return;
-    const allowed = ["Management_Hearing"];
-    if (!allowed.includes(reportType)) setReportType("Management_Hearing");
-  }, [careSetting, reportType]);
   const [generating, setGenerating] = useState(false);
   const [reportError, setReportError] = useState(null);
   const [reportWarning, setReportWarning] = useState(null);
@@ -94,6 +86,9 @@ export default function ClinicalAiReports() {
   const [saveError, setSaveError] = useState(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [selectedDiscipline, setSelectedDiscipline] = useState("ALL");
+  const [cpaDisciplineKey, setCpaDisciplineKey] = useState("nurse");
+  const [reportWorkflowDiscipline, setReportWorkflowDiscipline] = useState("nursing");
+  const [reportMeta, setReportMeta] = useState(null);
   const reportRunLock = useRef(false);
 
   const showDisciplineSelect = useMemo(
@@ -109,10 +104,74 @@ export default function ClinicalAiReports() {
     [userProfile?.mdtRole, userProfile?.role]
   );
 
-  const shouldShowDisciplineScope = !careSetting && ["CPA", "Tribunal", "Management_Hearing"].includes(reportType);
-  const effectiveDisciplineForUI = showDisciplineSelect ? selectedDiscipline : userDiscipline;
-  const disciplineForTemplate = ["MDT", "MDT_CLINICAL"].includes(reportType) ? null : effectiveDisciplineForUI;
-  const templateSections = getReportTemplate(reportType, disciplineForTemplate, orgType);
+  const canRunTribunalOrManagement = useMemo(
+    () => canAccessTribunalReport(userProfile?.mdtRole, userDiscipline),
+    [userProfile?.mdtRole, userDiscipline]
+  );
+
+  const dropdownOptions = useMemo(() => {
+    if (!careSetting) {
+      return DROPDOWN_OPTIONS_ALL.filter((o) => o.value !== "Tribunal" || canRunTribunalOrManagement);
+    }
+    const allowed = new Set(["Management_Hearing"]);
+    return DROPDOWN_OPTIONS_ALL.filter((o) => allowed.has(o.value));
+  }, [careSetting, canRunTribunalOrManagement]);
+
+  useEffect(() => {
+    if (!careSetting) return;
+    if (!["Management_Hearing"].includes(reportType)) setReportType("Management_Hearing");
+  }, [careSetting, reportType]);
+
+  useEffect(() => {
+    setCpaDisciplineKey(mapCanonicalDisciplineToCpaKey(userDiscipline));
+  }, [userDiscipline]);
+
+  useEffect(() => {
+    const p = (searchParams.get("patient") ?? "").trim();
+    if (p) setSelectedPatientId(p);
+    const rt = (searchParams.get("reportType") ?? searchParams.get("type") ?? "").trim();
+    if (rt === "Tribunal" || rt === "Management_Hearing") setReportType(rt);
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (reportType !== "Tribunal" && reportType !== "Management_Hearing") return;
+    if (!canRunTribunalOrManagement) return;
+    if (showDisciplineSelect) return;
+    setReportWorkflowDiscipline(userDiscipline === "nurse" ? "nursing" : "responsible_clinician");
+  }, [reportType, userDiscipline, canRunTribunalOrManagement, showDisciplineSelect]);
+
+  const shouldShowCpaDiscipline = !careSetting && reportType === "CPA";
+  const shouldShowReportWorkflowDiscipline =
+    !careSetting &&
+    (reportType === "Tribunal" || reportType === "Management_Hearing") &&
+    canRunTribunalOrManagement;
+
+  const effectiveDisciplineForPipeline =
+    reportType === "CPA"
+      ? cpaDisciplineKey
+      : showDisciplineSelect
+        ? selectedDiscipline
+        : userDiscipline;
+
+  const disciplineForTemplate =
+    reportType === "CPA"
+      ? cpaDisciplineKey
+      : reportType === "MDT_SUMMARY"
+        ? null
+        : ["WEEKLY", "MONTHLY"].includes(reportType)
+          ? null
+          : reportType === "Tribunal" || reportType === "Management_Hearing"
+            ? reportWorkflowDiscipline
+            : effectiveDisciplineForPipeline === "ALL"
+              ? null
+              : effectiveDisciplineForPipeline;
+
+  const templateSections = getReportTemplate(
+    reportType,
+    disciplineForTemplate,
+    orgType,
+    reportType === "Tribunal" ? reportWorkflowDiscipline : null
+  );
 
   const patientOptions = useMemo(
     () =>
@@ -204,6 +263,11 @@ export default function ClinicalAiReports() {
       setReportWarning(null);
       return;
     }
+    if (!careSetting && (type === "tribunal" || type === "hearing") && !canRunTribunalOrManagement) {
+      setReportError(TRIBUNAL_MANAGEMENT_ACCESS_ERROR);
+      setReport(null);
+      return;
+    }
 
     reportRunLock.current = true;
     setReportError(null);
@@ -211,6 +275,7 @@ export default function ClinicalAiReports() {
     setSaveMessage(null);
     setSaveError(null);
     setReport(null);
+    setReportMeta(null);
     setGenerating(true);
     setLastGenerated(null);
     setReportType(pipelineTypeToDropdown(String(type)));
@@ -222,6 +287,11 @@ export default function ClinicalAiReports() {
     }
 
     try {
+      const selForPipeline = type === "cpa" ? cpaDisciplineKey : selectedDiscipline;
+
+      const privilegedPick =
+        !careSetting && showDisciplineSelect && (type === "tribunal" || type === "hearing");
+
       const result = await generateReport({
         patientId: selectedPatientId,
         organisationId,
@@ -230,20 +300,42 @@ export default function ClinicalAiReports() {
         organisation,
         userRole: userProfile?.role ?? userProfile?.systemRole ?? "staff",
         userDiscipline,
-        selectedDiscipline: showDisciplineSelect ? selectedDiscipline : undefined,
+        selectedDiscipline: selForPipeline,
+        userMdtRole: userProfile?.mdtRole,
+        showDisciplineSelect: type === "cpa" ? showDisciplineSelect : false,
+        reportDiscipline:
+          !careSetting && (type === "tribunal" || type === "hearing")
+            ? privilegedPick
+              ? reportWorkflowDiscipline
+              : undefined
+            : undefined,
+        organisationName: organisationName ?? null,
+        userSystemRole: userProfile?.systemRole ?? null,
+        privilegedDisciplinePicker: privilegedPick,
       });
       setReport(result);
       setLastGenerated({ reportType: String(type), noteId: latestNote?.id ?? null, savedToNote: false });
+      const typeLabel =
+        DROPDOWN_OPTIONS_ALL.find((o) => mapDropdownToPipelineType(o.value) === String(type))?.label ?? String(type);
+      const discLabel =
+        type === "cpa"
+          ? CPA_DISCIPLINE_OPTIONS.find((o) => o.value === cpaDisciplineKey)?.label ?? cpaDisciplineKey
+          : !careSetting && (type === "tribunal" || type === "hearing")
+            ? REPORT_WORKFLOW_DISCIPLINE_OPTIONS.find((o) => o.value === reportWorkflowDiscipline)?.label ??
+              reportWorkflowDiscipline
+            : REPORT_DISCIPLINE_OPTIONS.find((o) => o.value === userDiscipline)?.label ?? userDiscipline;
+      setReportMeta({
+        reportTypeLabel: typeLabel,
+        disciplineLabel: discLabel,
+        roleLabel: userProfile?.mdtRole || userProfile?.role || userProfile?.systemRole || "—",
+        at: new Date().toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }),
+      });
+      setReportWarning(null);
     } catch (err) {
       console.error("Report error:", err);
-      const fallback = generateFallbackReport(type, notes ?? []);
-      setReport(fallback);
+      setReport(legacyReportToUnified({ kind: "simpleText", title: "Report", text: STRUCTURED_CLINICAL_REPORT_TAGLINE }, type));
       setLastGenerated({ reportType: String(type), noteId: latestNote?.id ?? null, savedToNote: false });
-      setReportWarning(
-        err?.message
-          ? `Report generation issue — showing fallback. (${err.message})`
-          : "Report generation issue — showing fallback output."
-      );
+      setReportWarning(null);
     } finally {
       setGenerating(false);
       reportRunLock.current = false;
@@ -301,8 +393,26 @@ export default function ClinicalAiReports() {
   const unifiedRecommendationsText =
     unifiedRecommendationsForRender.map((x) => String(x ?? "").trim()).filter(Boolean).join("\n\n") || "";
 
-  const resolveTemplateSectionContent = (sectionTitle) => {
-    if (!unified) return "Pending...";
+  const resolveTemplateSectionContent = (sectionTitle, idx) => {
+    if (!unified) return "No information recorded";
+
+    if (reportType === "CPA" && unifiedSectionsForRender[idx] != null) {
+      const c = unifiedSectionsForRender[idx]?.content;
+      if (typeof c === "string" && c.trim()) return c.trim();
+    }
+
+    if (reportType === "MDT_SUMMARY" && unifiedSectionsForRender[idx] != null) {
+      const c = unifiedSectionsForRender[idx]?.content;
+      if (typeof c === "string" && c.trim()) return c.trim();
+    }
+
+    if (
+      (reportType === "Tribunal" || reportType === "Management_Hearing") &&
+      unifiedSectionsForRender[idx] != null
+    ) {
+      const c = unifiedSectionsForRender[idx]?.content;
+      if (typeof c === "string" && c.trim()) return c.trim();
+    }
 
     const key = stripTemplateNumber(sectionTitle);
 
@@ -313,19 +423,6 @@ export default function ClinicalAiReports() {
       const bestEffort =
         getByHeadingNeedles(["physical", "nutrition", "hydration", "behaviour", "behavior", "risk", "action"]) ?? null;
       return bestEffort ?? "Pending...";
-    }
-
-    // MDT templates
-    if (["mdt", "mdt_clinical"].includes(String(reportType ?? "").toLowerCase())) {
-      if (key.includes("overall summary")) return unified.summary ?? "Pending...";
-      if (key.includes("nursing")) return getByHeadingNeedles(["nursing"]) ?? "Pending...";
-      if (key.includes("medical")) return getByHeadingNeedles(["psychiatry", "medical"]) ?? "Pending...";
-      if (key.includes("psychology")) return getByHeadingNeedles(["psychology"]) ?? "Pending...";
-      if (key.includes("occupational therapy")) return getByHeadingNeedles(["occupational therapy", "occupational"]) ?? "Pending...";
-      if (key.includes("speech & language") || key.includes("speech and language")) return getByHeadingNeedles(["speech"]) ?? "Pending...";
-      if (key.includes("risk summary")) return unifiedRecommendationsText || "Pending...";
-      if (key.includes("plan")) return getByHeadingNeedles(["mdt plan", "plan"]) ?? "Pending...";
-      return "Pending...";
     }
 
     // Discipline templates
@@ -340,7 +437,7 @@ export default function ClinicalAiReports() {
     }
     if (key.includes("plan")) return getByHeadingNeedles(["legal context"]) ?? "Pending...";
 
-    return "Pending...";
+    return STRUCTURED_CLINICAL_REPORT_TAGLINE;
   };
 
   return (
@@ -369,41 +466,6 @@ export default function ClinicalAiReports() {
           </Link>
         </div>
       </div>
-
-      <ActionBar
-        actions={[
-          {
-            label: "⚡ Weekly Summary",
-            type: "generate",
-            onClick: () => void handleGenerateReport("weekly"),
-          },
-          {
-            label: "⚡ Monthly Summary",
-            type: "generate",
-            onClick: () => void handleGenerateReport("monthly"),
-          },
-          {
-            label: "⚡ Tribunal Report",
-            type: "generate",
-            onClick: () => void handleGenerateReport("tribunal"),
-          },
-          {
-            label: "⚡ CPA Report",
-            type: "generate",
-            onClick: () => void handleGenerateReport("cpa"),
-          },
-          {
-            label: "⚡ MDT Ward Round",
-            type: "generate",
-            onClick: () => void handleGenerateReport("mdt"),
-          },
-          {
-            label: "⚡ Management Hearing",
-            type: "generate",
-            onClick: () => void handleGenerateReport("hearing"),
-          },
-        ]}
-      />
 
       {!organisationId ? (
         <div style={{ background: "#fef2f2", border: "1px solid #fecaca", padding: 12, borderRadius: 10, color: "#991b1b", marginTop: 14 }}>
@@ -449,16 +511,16 @@ export default function ClinicalAiReports() {
           </select>
         </label>
 
-        {shouldShowDisciplineScope ? (
+        {shouldShowCpaDiscipline ? (
           showDisciplineSelect ? (
             <label style={{ fontWeight: 900 }}>
-              Discipline scope:
+              Discipline:
               <select
-                value={selectedDiscipline}
-                onChange={(e) => setSelectedDiscipline(e.target.value)}
+                value={cpaDisciplineKey}
+                onChange={(e) => setCpaDisciplineKey(e.target.value)}
                 style={{ marginLeft: 10, padding: "6px 10px" }}
               >
-                {REPORT_DISCIPLINE_OPTIONS.map((opt) => (
+                {CPA_DISCIPLINE_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
                   </option>
@@ -467,7 +529,35 @@ export default function ClinicalAiReports() {
             </label>
           ) : (
             <span style={{ color: "#64748b", fontSize: 14 }}>
-              Your report scope: <strong>{userDiscipline}</strong> (role-based)
+              Discipline: <strong>{CPA_DISCIPLINE_OPTIONS.find((o) => o.value === cpaDisciplineKey)?.label ?? cpaDisciplineKey}</strong> (role-based)
+            </span>
+          )
+        ) : null}
+
+        {shouldShowReportWorkflowDiscipline ? (
+          showDisciplineSelect ? (
+            <label style={{ fontWeight: 900 }}>
+              Report Discipline:
+              <select
+                value={reportWorkflowDiscipline}
+                onChange={(e) => setReportWorkflowDiscipline(e.target.value)}
+                style={{ marginLeft: 10, padding: "6px 10px" }}
+              >
+                {REPORT_WORKFLOW_DISCIPLINE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <span style={{ color: "#64748b", fontSize: 14 }}>
+              Report Discipline:{" "}
+              <strong>
+                {REPORT_WORKFLOW_DISCIPLINE_OPTIONS.find((o) => o.value === reportWorkflowDiscipline)?.label ??
+                  reportWorkflowDiscipline}
+              </strong>{" "}
+              (role-based)
             </span>
           )
         ) : null}
@@ -475,14 +565,27 @@ export default function ClinicalAiReports() {
         <button
           type="button"
           onClick={() => void handleGenerateReport(mapDropdownToPipelineType(reportType))}
-          disabled={generating || !selectedPatientId}
+          disabled={
+            generating ||
+            !selectedPatientId ||
+            (!careSetting &&
+              (reportType === "Tribunal" || reportType === "Management_Hearing") &&
+              !canRunTribunalOrManagement)
+          }
           style={{
             padding: "10px 16px",
             background: "#1976d2",
             color: "#fff",
             border: "none",
             borderRadius: 10,
-            cursor: generating ? "not-allowed" : "pointer",
+            cursor:
+              generating ||
+              !selectedPatientId ||
+              (!careSetting &&
+                (reportType === "Tribunal" || reportType === "Management_Hearing") &&
+                !canRunTribunalOrManagement)
+                ? "not-allowed"
+                : "pointer",
             fontWeight: 800,
           }}
         >
@@ -609,6 +712,33 @@ export default function ClinicalAiReports() {
           </div>
 
           <div id="clinical-ai-report-export" style={{ background: "#f8fafc", padding: 20, borderRadius: 12, border: "1px solid #e2e8f0" }}>
+            {reportMeta ? (
+              <div
+                style={{
+                  marginBottom: 16,
+                  padding: 12,
+                  background: "#fff",
+                  borderRadius: 8,
+                  border: "1px solid #e2e8f0",
+                  fontSize: 13,
+                  color: "#334155",
+                  lineHeight: 1.6,
+                }}
+              >
+                <div>
+                  <strong>Report Type:</strong> {reportMeta.reportTypeLabel}
+                </div>
+                <div>
+                  <strong>Discipline:</strong> {reportMeta.disciplineLabel}
+                </div>
+                <div>
+                  <strong>Generated by:</strong> {reportMeta.roleLabel}
+                </div>
+                <div>
+                  <strong>Date:</strong> {reportMeta.at}
+                </div>
+              </div>
+            ) : null}
             <h2 style={{ marginTop: 0, color: "#0f172a" }}>{unified.title || "Report"}</h2>
             {unified.summary ? (
               <div style={{ marginBottom: 16, color: "#334155", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
@@ -618,7 +748,7 @@ export default function ClinicalAiReports() {
             ) : null}
 
             {templateSections.map((sectionTitle, idx) => {
-              const content = resolveTemplateSectionContent(sectionTitle);
+              const content = resolveTemplateSectionContent(sectionTitle, idx);
               return (
                 <div key={`${sectionTitle}-${idx}`} style={cardStyle} className="report-section">
                   <h3 style={{ margin: "0 0 8px", fontSize: "1.05rem", color: "#0f172a" }}>{sectionTitle}</h3>

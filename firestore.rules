@@ -436,6 +436,83 @@ service cloud.firestore {
     }
 
     // =========
+    // ABC behaviour logs (antecedent–behaviour–consequence)
+    // =========
+    match /abc_logs/{logId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if isAuthenticated()
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data);
+    }
+
+    // =========
+    // Structured nursing observations (CPA / care quality)
+    // =========
+    match /nursing_observations/{observationId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if isAuthenticated()
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data);
+    }
+
+    // =========
+    // Psychology formulations (5Ps + risk narrative)
+    // =========
+    match /formulations/{formulationId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if isAuthenticated()
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data);
+    }
+
+    // Structured MDT clinical data (V2) — psychology tracking, psychiatry, OT, SALT
+    match /psychology_tracking/{docId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if isAuthenticated()
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data);
+    }
+    match /psychiatry_structured/{docId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if isAuthenticated()
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data);
+    }
+    match /ot_structured/{docId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if isAuthenticated()
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data);
+    }
+    match /salt_structured/{docId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if isAuthenticated()
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data);
+    }
+
+    // =========
     // Physical health / vital signs (NEWS2-style scoring in app)
     // =========
     match /physical_observations/{observationId} {
@@ -462,8 +539,77 @@ service cloud.firestore {
     }
 
     // =========
+    // Tribunal nursing reports (structured sections + signature metadata)
+    // =========
+    match /tribunal_reports/{reportId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if isAuthenticated()
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data);
+    }
+
+    // =========
+    // Responsible Clinician tribunal reports
+    // =========
+    match /rc_reports/{reportId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if isAuthenticated()
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data);
+    }
+
+    // =========
+    // Discipline-specific CPA reports
+    // =========
+    match /cpa_discipline_reports/{reportId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if isAuthenticated()
+        && sameOrganisation(docOrgId(resource.data))
+        && docOrgId(request.resource.data) == docOrgId(resource.data);
+    }
+
+    match /mdt_summaries/{summaryId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if false;
+    }
+
+    // =========
     // Risk alerts (derived from notes / risk engine)
     // =========
+    // =========
+    // Aggregate patient risk snapshots (ABC + incidents + nursing + formulation)
+    // =========
+    match /risk_scores/{scoreId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Early warning / MDT alert snapshots (multi-disciplinary V1)
+    match /alerts/{alertDocId} {
+      allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
+      allow create: if isAuthenticated()
+        && docOrgId(request.resource.data) != null
+        && sameOrganisation(docOrgId(request.resource.data));
+      allow update: if false;
+      allow delete: if false;
+    }
+
     match /risk_alerts/{alertId} {
       allow read: if isAuthenticated() && sameOrganisation(docOrgId(resource.data));
       allow create: if isAuthenticated()
