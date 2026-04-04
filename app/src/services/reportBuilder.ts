@@ -15,6 +15,8 @@ import { generateCPASection } from "./ai/cpaSectionGenerator";
 import { listCpaDisciplineReportsForPatient } from "./cpaDisciplineReportService";
 import { buildReportsPayloadFromCpaDocuments } from "./mdtSummariesService";
 import { generateMDTSummaryWithActivityTrend, type MDTSummaryStructured } from "./mdtSummaryEngine";
+import { loadPatientPeriodMdtData } from "./patientPeriodMdtSummaryService";
+import { buildNarrativeWeeklyMonthlyUnifiedReport } from "./patientPeriodNarrativeReportService";
 import { canAccessTribunalReport } from "../utils/tribunalReportAccess";
 import { isPrivilegedReportRole } from "../utils/reportDiscipline";
 import { canAccessRCTribunalReport } from "../utils/rcTribunalAccess";
@@ -76,6 +78,22 @@ export async function buildDisciplineCPAUnifiedReport(
     sections,
     recommendations: [],
   };
+}
+
+/** Weekly / Monthly patient summaries — deterministic clinical narratives (no raw log enumeration). */
+export async function buildPatientPeriodMdtUnifiedReport(
+  patientId: string,
+  organisationId: string,
+  daysBack: 7 | 30,
+  reportTitle: string
+): Promise<UnifiedReport> {
+  const pid = String(patientId ?? "").trim();
+  const org = String(organisationId ?? "").trim();
+  if (!pid || !org) {
+    return simpleTextToUnified(reportTitle, STRUCTURED_CLINICAL_REPORT_TAGLINE);
+  }
+  const ctx = await loadPatientPeriodMdtData(org, pid, daysBack);
+  return buildNarrativeWeeklyMonthlyUnifiedReport(ctx, reportTitle);
 }
 
 function mdtStructuredToUnified(s: MDTSummaryStructured): UnifiedReport {
@@ -259,6 +277,13 @@ export async function runHospitalReportPipeline(args: HospitalPipelineArgs): Pro
 
   if (type === "mdt_summary" && orgId) {
     return buildMdtSummaryUnifiedReport(pid, orgId);
+  }
+
+  if (type === "weekly" && orgId) {
+    return buildPatientPeriodMdtUnifiedReport(pid, orgId, 7, "Weekly Patient Summary");
+  }
+  if (type === "monthly" && orgId) {
+    return buildPatientPeriodMdtUnifiedReport(pid, orgId, 30, "Monthly Patient Summary");
   }
 
   return null;

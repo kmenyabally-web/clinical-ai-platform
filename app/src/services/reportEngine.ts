@@ -482,7 +482,7 @@ async function generateHospitalFullReport(input: GenerateReportInput, list: unkn
       if (sumAi) return sumAi;
       const body = summariseNotes(list);
       const title =
-        sw === "7d" ? "Weekly summary" : sw === "30d" ? "Monthly summary" : "Clinical notes summary";
+        sw === "7d" ? "Weekly Patient Summary" : sw === "30d" ? "Monthly Patient Summary" : "Clinical notes summary";
       return simpleTextToUnified(title, `${title} (${label}):\n\n${body}`);
     }
   } catch (e) {
@@ -505,7 +505,7 @@ async function generateHospitalFullReport(input: GenerateReportInput, list: unkn
       sw === "7d" ? "the last 7 days" : sw === "30d" ? "the last 30 days" : "the full note set";
     const body = summariseNotes(list);
     const title =
-      sw === "7d" ? "Weekly summary" : sw === "30d" ? "Monthly summary" : "Clinical notes summary";
+      sw === "7d" ? "Weekly Patient Summary" : sw === "30d" ? "Monthly Patient Summary" : "Clinical notes summary";
     return simpleTextToUnified(title, `${title} (${label}):\n\n${body}`);
   }
   const fb = reportType === "Tribunal" ? "tribunal" : "cpa";

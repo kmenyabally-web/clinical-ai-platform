@@ -18,6 +18,7 @@ import {
 } from "./reportEngine";
 import { runHospitalReportPipeline } from "./reportBuilder";
 import { STRUCTURED_CLINICAL_REPORT_TAGLINE } from "../config/clinicalReportMessages";
+import { enrichUnifiedReportWithExecutiveLayers } from "./executiveReportEnrichment";
 
 /** @typedef {"weekly"|"monthly"|"summary"|"tribunal"|"cpa"|"mdtReview"|"mdt"|"hearing"|"mdt_summary"} ReportPipelineType */
 
@@ -53,7 +54,7 @@ function buildWeeklySummary(notes) {
   const filtered = filterNotesByDays(notes, 7);
   const pool = filtered.length ? filtered : notes;
   const body = summariseNotes(pool);
-  const title = "Weekly Summary";
+  const title = "Weekly Patient Summary";
   const text = filtered.length
     ? `Clinical notes from the last 7 days (${filtered.length} note(s)):\n\n${body}`
     : `No notes dated in the last 7 days. Showing all available notes (${(notes ?? []).length}):\n\n${body}`;
@@ -67,7 +68,7 @@ function buildMonthlySummary(notes) {
   const filtered = filterNotesByDays(notes, 30);
   const pool = filtered.length ? filtered : notes;
   const body = summariseNotes(pool);
-  const title = "Monthly Summary";
+  const title = "Monthly Patient Summary";
   const text = filtered.length
     ? `Clinical notes from the last 30 days (${filtered.length} note(s)):\n\n${body}`
     : `No notes dated in the last 30 days. Showing all available notes (${(notes ?? []).length}):\n\n${body}`;
@@ -168,13 +169,19 @@ export async function generateReport({
       userSystemRole: userSystemRole ?? null,
       privilegedDisciplinePicker: Boolean(privilegedDisciplinePicker),
     });
-    if (early) return early;
+    if (early) {
+      return enrichUnifiedReportWithExecutiveLayers(early, organisationId, patientId);
+    }
   }
 
   const bypassNotes =
-    orgType === "hospital" && (String(type) === "cpa" || String(type) === "mdt_summary");
+    orgType === "hospital" &&
+    (String(type) === "cpa" ||
+      String(type) === "mdt_summary" ||
+      String(type) === "weekly" ||
+      String(type) === "monthly");
   if (!bypassNotes && !notes.length) {
-    return legacyReportToUnified(
+    const emptyUnified = legacyReportToUnified(
       {
         kind: "simpleText",
         title: "Report",
@@ -182,11 +189,12 @@ export async function generateReport({
       },
       String(type)
     );
+    return enrichUnifiedReportWithExecutiveLayers(emptyUnified, organisationId, patientId);
   }
 
   const mapped = mapPipelineToEngine(type);
 
-  return generateReportCore({
+  const core = await generateReportCore({
     organisationType: orgType,
     reportType: /** @type {import("../config/reportConfig").ReportTypeKey} */ (mapped.reportType),
     notes,
@@ -198,6 +206,7 @@ export async function generateReport({
     userDiscipline: userDiscipline ?? "nurse",
     selectedDiscipline,
   });
+  return enrichUnifiedReportWithExecutiveLayers(core, organisationId, patientId);
 }
 
 /**

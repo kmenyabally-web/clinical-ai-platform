@@ -99,11 +99,11 @@ STRICT RULES:
 STRUCTURE (map into JSON fields below):
 
 1. Overall Clinical Summary → overallSummary
-2. Nursing Summary → nursing
-3. Psychiatry Summary → psychiatry
-4. Psychology Summary → psychology
-5. Occupational Therapy Summary → ot
-6. Speech & Language Summary → salt
+2. Nursing → nursing
+3. Medical (Psychiatry / Responsible Clinician) → psychiatry
+4. Psychology → psychology
+5. Occupational Therapy → ot
+6. Speech & Language Therapy → salt
 7. Key Risks → keyRisks (array of short strings)
 8. Risk Trend (Improving / Stable / Deteriorating) → riskTrend
 9. MDT Recommendations → recommendations (array of strings)
