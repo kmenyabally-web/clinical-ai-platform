@@ -16,6 +16,7 @@ import { getSubscription as getPreStripeSubscription, MOCK_PLANS } from "../serv
 import { hasFeature as hasPlanFeature } from "../utils/featureAccess.js";
 import { PLANS as PLAN_DEFS } from "../constants/plans";
 import { formatUkDate } from "../utils/dateFormat";
+import { CLINICAL_CONTENT_MAX_WIDTH_PX } from "../config/contentLayout";
 
 const cardStyle: CSSProperties = {
   background: "#fff",
@@ -154,7 +155,15 @@ export default function Billing() {
   const currentKey = subscription?.planName ?? effectivePlanKey ?? PLANS.BASIC;
 
   return (
-    <div style={{ padding: "1rem 0", maxWidth: 960 }}>
+    <div
+      style={{
+        padding: "1rem 0",
+        width: "100%",
+        maxWidth: CLINICAL_CONTENT_MAX_WIDTH_PX,
+        margin: "0 auto",
+        boxSizing: "border-box",
+      }}
+    >
       <h1 style={{ marginTop: 0 }}>Billing &amp; subscription</h1>
       <p style={{ color: "#64748b", marginBottom: "1.25rem" }}>
         {organisation?.name ?? "Organisation"} · effective plan <strong>{currentKey}</strong> (billing is per organisation, not per user).

@@ -18,6 +18,7 @@ import { analyzeSafeguardingIntelligence, buildSafeguardingSummary } from "../ut
 import { fetchIncidentsForPatient } from "../services/incidentService";
 import { usePatients } from "../hooks/usePatients";
 import { showToast } from "../utils/toast";
+import { CLINICAL_CONTENT_MAX_WIDTH_PX } from "../config/contentLayout";
 
 function severityBadgeStyle(severity) {
   const s = String(severity ?? "").toLowerCase();
@@ -387,7 +388,16 @@ export default function BehaviourTracking() {
   }
 
   return (
-    <div style={{ padding: "2rem", width: "100%", fontFamily: "sans-serif", maxWidth: 960 }}>
+    <div
+      style={{
+        padding: "2rem",
+        width: "100%",
+        fontFamily: "sans-serif",
+        maxWidth: CLINICAL_CONTENT_MAX_WIDTH_PX,
+        margin: "0 auto",
+        boxSizing: "border-box",
+      }}
+    >
       <h1 style={{ marginTop: 0 }}>Behaviour Tracking</h1>
 
       {!permissions?.canAccessBehaviour ? (

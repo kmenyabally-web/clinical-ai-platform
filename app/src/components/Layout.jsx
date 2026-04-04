@@ -200,11 +200,12 @@ const layoutStyles = {
     flexDirection: "column",
   },
   content: {
-    padding: "24px 28px",
+    padding: "20px clamp(16px, 3vw, 32px)",
     overflowY: "auto",
     maxWidth: "none",
     width: "100%",
     margin: 0,
+    boxSizing: "border-box",
   },
   subNav: {
     display: "flex",

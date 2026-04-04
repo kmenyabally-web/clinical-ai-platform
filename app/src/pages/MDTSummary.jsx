@@ -18,6 +18,7 @@ import {
 } from "../services/mdtSummariesService";
 import { listCpaDisciplineReportsForPatient } from "../services/cpaDisciplineReportService";
 import { exportMDTReport } from "../services/exportMDT";
+import { CLINICAL_CONTENT_MAX_WIDTH_PX } from "../config/contentLayout";
 
 const NO_INFO = "No information recorded";
 
@@ -241,7 +242,15 @@ export default function MDTSummary() {
   }
 
   return (
-    <div style={{ padding: "1rem 0", maxWidth: 960 }}>
+    <div
+      style={{
+        padding: "1rem 0",
+        width: "100%",
+        maxWidth: CLINICAL_CONTENT_MAX_WIDTH_PX,
+        margin: "0 auto",
+        boxSizing: "border-box",
+      }}
+    >
       <style>{`
         @media print {
           body {

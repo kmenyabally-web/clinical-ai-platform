@@ -1,6 +1,7 @@
 import React, { useCallback } from "react";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
+import { CLINICAL_CONTENT_MAX_WIDTH_PX } from "../config/contentLayout";
 
 const containerStyle = {
   background: "#ffffff",
@@ -8,7 +9,9 @@ const containerStyle = {
   borderRadius: 10,
   lineHeight: 1.6,
   color: "#0f172a",
-  maxWidth: 900,
+  width: "100%",
+  maxWidth: CLINICAL_CONTENT_MAX_WIDTH_PX,
+  boxSizing: "border-box",
 };
 
 const h2Style = {

@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { usePermissions } from "../hooks/usePermissions";
 import { usePatients } from "../hooks/usePatients";
 import { showToast } from "../utils/toast";
+import { CLINICAL_CONTENT_MAX_WIDTH_PX } from "../config/contentLayout";
 import {
   addPsychologyTracking,
   addPsychiatryStructured,
@@ -278,7 +279,16 @@ export default function MdtStructuredClinical() {
   }
 
   return (
-    <div style={{ padding: "2rem", width: "100%", fontFamily: "sans-serif", maxWidth: 960 }}>
+    <div
+      style={{
+        padding: "2rem",
+        width: "100%",
+        fontFamily: "sans-serif",
+        maxWidth: CLINICAL_CONTENT_MAX_WIDTH_PX,
+        margin: "0 auto",
+        boxSizing: "border-box",
+      }}
+    >
       <h1 style={{ marginTop: 0 }}>MDT structured clinical data (V2)</h1>
       <p style={{ color: "#64748b", marginTop: 0, maxWidth: 720 }}>
         Structured entries feed CPA, MDT summaries, aggregate risk, and early-warning alerts. Latest record per patient

@@ -6,6 +6,7 @@ import { usePermissions } from "../hooks/usePermissions";
 import { usePatients } from "../hooks/usePatients";
 import { addNursingObservation, getNursingObservationsForPatient } from "../services/nursingObservationsService";
 import { showToast } from "../utils/toast";
+import { CLINICAL_CONTENT_MAX_WIDTH_PX } from "../config/contentLayout";
 
 const inputStyle = {
   width: "100%",
@@ -150,7 +151,16 @@ export default function NursingObservations() {
   }
 
   return (
-    <div style={{ padding: "2rem", width: "100%", fontFamily: "sans-serif", maxWidth: 960 }}>
+    <div
+      style={{
+        padding: "2rem",
+        width: "100%",
+        fontFamily: "sans-serif",
+        maxWidth: CLINICAL_CONTENT_MAX_WIDTH_PX,
+        margin: "0 auto",
+        boxSizing: "border-box",
+      }}
+    >
       <h1 style={{ marginTop: 0 }}>Nursing observations</h1>
       <p style={{ color: "#64748b", marginTop: 0, maxWidth: 640 }}>
         Structured nursing inputs (V2: ADL domains, physical health note) feed CPA, MDT, risk, and alerts. Use alongside{" "}

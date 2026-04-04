@@ -7,6 +7,7 @@ import {
   aggregateOrganisationOverview,
 } from "../services/executiveService";
 import { ALERT_TYPE_LABEL } from "../services/wardDashboardDataService";
+import { CLINICAL_CONTENT_MAX_WIDTH_PX } from "../config/contentLayout";
 
 const card = {
   background: "#ffffff",
@@ -182,7 +183,15 @@ export default function ExecutiveDashboard() {
   }
 
   return (
-    <div style={{ padding: "1.5rem 2rem 2.5rem", maxWidth: 1440, margin: "0 auto" }}>
+    <div
+      style={{
+        padding: "1.5rem 2rem 2.5rem",
+        width: "100%",
+        maxWidth: CLINICAL_CONTENT_MAX_WIDTH_PX,
+        margin: "0 auto",
+        boxSizing: "border-box",
+      }}
+    >
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: "1.5rem" }}>Executive dashboard</h1>

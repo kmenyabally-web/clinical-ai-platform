@@ -154,55 +154,60 @@ export default function PatientList() {
             flexWrap: "wrap",
             gap: 12,
             alignItems: "flex-end",
+            justifyContent: "space-between",
           }}
         >
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 800 }}>
-            Hospital
-            <select
-              value={currentHospitalId ?? ""}
-              onChange={(e) => setCurrentHospitalId(e.target.value || null)}
-              style={styles.select}
-            >
-              <option value="">All hospitals</option>
-              {hospitals.map((h) => (
-                <option key={h.id} value={h.id}>
-                  {h.name || h.id}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 800 }}>
-            Ward
-            <select
-              value={currentWardId ?? ""}
-              onChange={(e) => setCurrentWardId(e.target.value || null)}
-              disabled={!currentHospitalId}
-              style={styles.select}
-            >
-              <option value="">{currentHospitalId ? "All wards in hospital" : "Select hospital first"}</option>
-              {wards.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name || w.id}
-                </option>
-              ))}
-            </select>
-          </label>
-          {mayAddPatient ? (
-            <button
-              type="button"
-              onClick={() => {
-                setShowCreate(true);
-                setCreateError(null);
-              }}
-              style={styles.addBtn}
-            >
-              Add patient
-            </button>
-          ) : (
-            <span style={{ fontSize: 12, color: "#64748b", maxWidth: 280 }}>
-              Your role does not include creating patients (e.g. Inspector).
-            </span>
-          )}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end", flex: "1 1 auto" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 800 }}>
+              Hospital
+              <select
+                value={currentHospitalId ?? ""}
+                onChange={(e) => setCurrentHospitalId(e.target.value || null)}
+                style={styles.select}
+              >
+                <option value="">All hospitals</option>
+                {hospitals.map((h) => (
+                  <option key={h.id} value={h.id}>
+                    {h.name || h.id}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 800 }}>
+              Ward
+              <select
+                value={currentWardId ?? ""}
+                onChange={(e) => setCurrentWardId(e.target.value || null)}
+                disabled={!currentHospitalId}
+                style={styles.select}
+              >
+                <option value="">{currentHospitalId ? "All wards in hospital" : "Select hospital first"}</option>
+                {wards.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name || w.id}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div style={{ display: "flex", alignItems: "flex-end", flex: "0 0 auto" }}>
+            {mayAddPatient ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCreate(true);
+                  setCreateError(null);
+                }}
+                style={styles.addBtn}
+              >
+                Add patient
+              </button>
+            ) : (
+              <span style={{ fontSize: 12, color: "#64748b", maxWidth: 280 }}>
+                Your role does not include creating patients (e.g. Inspector).
+              </span>
+            )}
+          </div>
         </div>
       ) : null}
 
@@ -706,10 +711,12 @@ function formatDob(value) {
 
 const styles = {
   container: {
-    padding: 20,
+    padding: "4px 0 20px 0",
     fontFamily: "sans-serif",
-    maxWidth: 960,
-    margin: "0 auto",
+    width: "100%",
+    maxWidth: "none",
+    margin: 0,
+    boxSizing: "border-box",
   },
   headerRow: {
     display: "flex",

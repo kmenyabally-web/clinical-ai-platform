@@ -6,6 +6,7 @@ import { usePermissions } from "../hooks/usePermissions";
 import { usePatients } from "../hooks/usePatients";
 import { addFormulation, getLatestFormulationForPatient } from "../services/formulationService";
 import { showToast } from "../utils/toast";
+import { CLINICAL_CONTENT_MAX_WIDTH_PX } from "../config/contentLayout";
 
 const textareaStyle = {
   width: "100%",
@@ -135,7 +136,16 @@ export default function PsychologyFormulation() {
   }
 
   return (
-    <div style={{ padding: "2rem", width: "100%", fontFamily: "sans-serif", maxWidth: 960 }}>
+    <div
+      style={{
+        padding: "2rem",
+        width: "100%",
+        fontFamily: "sans-serif",
+        maxWidth: CLINICAL_CONTENT_MAX_WIDTH_PX,
+        margin: "0 auto",
+        boxSizing: "border-box",
+      }}
+    >
       <h1 style={{ marginTop: 0 }}>Psychology formulation</h1>
       <p style={{ color: "#64748b", marginTop: 0, maxWidth: 720 }}>
         Structured 5P formulation and risk narrative feed psychology CPA sections and the MDT summary context.

@@ -34,6 +34,7 @@ import HealthTrendChart from "./HealthTrendChart";
 import { buildTrendData, sortObservationsByCreatedAtDesc } from "../utils/healthTrends";
 import { detectDeterioration } from "../utils/deterioration";
 import { isCareSetting, isClinicalSetting } from "../utils/orgHelpers";
+import { CLINICAL_CONTENT_MAX_WIDTH_PX } from "../config/contentLayout";
 
 const openedAuditKeys = new Set();
 
@@ -699,36 +700,45 @@ export default function PatientDetail() {
         </div>
       ) : null}
 
-      <div style={styles.hubCard}>
-        <div style={styles.hubTitle}>Patient Hub</div>
-        <p style={styles.hubText}>Use quick actions to document care and generate MDT outputs from one place.</p>
-        <div style={styles.actionsRow}>
-          <Link to="/clinical-notes" style={styles.primaryAction}>
-            Add Note
-          </Link>
-          {showVitalsUi ? (
-            <Link to={`/physical-health?patient=${id}`} style={styles.secondaryAction}>
-              Physical health
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 340px), 1fr))",
+          gap: 12,
+          marginBottom: 12,
+          alignItems: "stretch",
+        }}
+      >
+        <div style={{ ...styles.hubCard, marginBottom: 0 }}>
+          <div style={styles.hubTitle}>Patient Hub</div>
+          <p style={styles.hubText}>Use quick actions to document care and generate MDT outputs from one place.</p>
+          <div style={styles.actionsRow}>
+            <Link to="/clinical-notes" style={styles.primaryAction}>
+              Add Note
             </Link>
-          ) : null}
-          <Link to={`/incidents/new/${id}`} style={styles.secondaryAction}>
-            Add Incident
-          </Link>
-          {!careSetting ? (
-            <button type="button" onClick={handleMDT} disabled={mdtWardRoundLoading} style={styles.secondaryActionBtn}>
-              {mdtWardRoundLoading ? "Generating MDT…" : "MDT"}
-            </button>
-          ) : null}
+            {showVitalsUi ? (
+              <Link to={`/physical-health?patient=${id}`} style={styles.secondaryAction}>
+                Physical health
+              </Link>
+            ) : null}
+            <Link to={`/incidents/new/${id}`} style={styles.secondaryAction}>
+              Add Incident
+            </Link>
+            {!careSetting ? (
+              <button type="button" onClick={handleMDT} disabled={mdtWardRoundLoading} style={styles.secondaryActionBtn}>
+                {mdtWardRoundLoading ? "Generating MDT…" : "MDT"}
+              </button>
+            ) : null}
+          </div>
+          <div style={styles.hubLinksRow}>
+            <a href="#clinical-intelligence" style={styles.hubLink}>Clinical Intelligence</a>
+            <a href="#reports-preview" style={styles.hubLink}>Report Preview</a>
+            <a href="#timeline" style={styles.hubLink}>Timeline</a>
+          </div>
         </div>
-        <div style={styles.hubLinksRow}>
-          <a href="#clinical-intelligence" style={styles.hubLink}>Clinical Intelligence</a>
-          <a href="#reports-preview" style={styles.hubLink}>Report Preview</a>
-          <a href="#timeline" style={styles.hubLink}>Timeline</a>
-        </div>
-      </div>
 
-      {showVitalsUi && !redactSensitive ? (
-        <div style={{ marginBottom: 12, backgroundColor: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 14px" }}>
+        {showVitalsUi && !redactSensitive ? (
+        <div style={{ marginBottom: 0, backgroundColor: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 14px" }}>
           <div style={styles.hubTitle}>{careSetting ? "Care monitoring" : "Physical health"}</div>
           {careSetting ? (
             <>
@@ -784,6 +794,7 @@ export default function PatientDetail() {
           )}
         </div>
       ) : null}
+      </div>
 
       {latestNote && !redactSensitive ? (
         <div style={styles.insightStrip}>
@@ -1174,8 +1185,10 @@ function formatWhen(value) {
 
 const styles = {
   container: {
-    maxWidth: 900,
+    width: "100%",
+    maxWidth: CLINICAL_CONTENT_MAX_WIDTH_PX,
     margin: "0 auto",
+    boxSizing: "border-box",
     fontFamily: "sans-serif",
   },
   headerRow: {
@@ -1786,8 +1799,10 @@ const styles = {
     backgroundColor: "#fef2f2",
     color: "#7f1d1d",
     fontFamily: "sans-serif",
-    maxWidth: 900,
+    width: "100%",
+    maxWidth: CLINICAL_CONTENT_MAX_WIDTH_PX,
     margin: "0 auto",
+    boxSizing: "border-box",
   },
   errorTitle: {
     fontWeight: 900,
