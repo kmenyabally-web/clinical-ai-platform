@@ -1,6 +1,6 @@
 /**
  * CPA prompt bodies (STRICT STRUCTURED V4) — discipline-specific clinical templates.
- * Consumed by {@link ./cpaPromptBuilder#buildCPAPrompt} (builder switch unchanged).
+ * Consumed by {@link ./cpaPromptBuilder#buildPrompt} / {@link ./cpaPromptBuilder#buildCPAPrompt}.
  */
 
 import type { CpaPromptPatientData } from "./cpaPatientDataTypes";

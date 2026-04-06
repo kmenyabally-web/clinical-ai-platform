@@ -595,7 +595,8 @@ function buildStructuredReportPrompt(
   reportType: ClinicalReportType,
   patientId: string,
   discipline: string,
-  contextBlock: string
+  contextBlock: string,
+  clinicalContextBlock?: string
 ): string {
   const jsonFooter = `Return STRICT JSON only (no markdown fences) with exactly this shape:
 {
@@ -647,6 +648,9 @@ Write in paragraphs. Map each section to the corresponding JSON field under "sec
 Context record ID (do not repeat verbatim in output): ${patientId}
 Discipline / MDT role: ${discipline}
 
+Clinical context (instructions only; do not add facts):
+${clinicalContextBlock?.trim() ? clinicalContextBlock.trim() : "(none)"}
+
 Clinical notes context:
 ${contextBlock}
 
@@ -675,6 +679,9 @@ Sections:
 Context record ID: ${patientId}
 Discipline: ${discipline}
 
+Clinical context (instructions only; do not add facts):
+${clinicalContextBlock?.trim() ? clinicalContextBlock.trim() : "(none)"}
+
 Clinical notes:
 ${contextBlock}
 
@@ -702,6 +709,9 @@ Use the same nine sections:
 Context record ID: ${patientId}
 Discipline: ${discipline}
 
+Clinical context (instructions only; do not add facts):
+${clinicalContextBlock?.trim() ? clinicalContextBlock.trim() : "(none)"}
+
 Clinical notes:
 ${contextBlock}
 
@@ -716,8 +726,9 @@ export async function generateClinicalReportSection(params: {
   patientId: string;
   discipline: string;
   contextNotes: Array<{ rawNote: string; correctedNote?: string | null; structuredSummary?: string | null }>;
+  clinicalContextBlock?: string;
 }): Promise<StructuredClinicalReport> {
-  const { reportType, patientId, discipline, contextNotes } = params;
+  const { reportType, patientId, discipline, contextNotes, clinicalContextBlock } = params;
 
   const context = (contextNotes ?? [])
     .map((n, idx) => {
@@ -727,7 +738,13 @@ export async function generateClinicalReportSection(params: {
     })
     .join("\n\n---\n\n");
 
-  const prompt = buildStructuredReportPrompt(reportType, patientId, discipline, context || "(none)");
+  const prompt = buildStructuredReportPrompt(
+    reportType,
+    patientId,
+    discipline,
+    context || "(none)",
+    clinicalContextBlock
+  );
 
   console.log("Using model:", NOTE_ANALYSIS_MODEL);
   try {

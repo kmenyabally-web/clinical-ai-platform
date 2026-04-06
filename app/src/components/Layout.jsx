@@ -21,12 +21,6 @@ export default function Layout() {
 
   const appName = APP_CONFIG?.name || "SanctumCare";
   const appTagline = APP_CONFIG?.tagline || "Clinical Intelligence & Compliance Platform";
-  console.log("🔥 BRAND CHECK:", appName);
-
-  console.log("🧠 ORG STATE:", {
-    organisationId,
-    userProfile,
-  });
 
   return (
     <div style={layoutStyles.app}>
@@ -100,7 +94,6 @@ export default function Layout() {
           </div>
           {missingOrganisation ? (
             <>
-              {console.warn("⚠️ Missing organisation — entering recovery mode")}
               <div
                 style={{
                   background: "var(--background)",

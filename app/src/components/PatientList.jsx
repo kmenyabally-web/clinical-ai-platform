@@ -211,6 +211,26 @@ export default function PatientList() {
         </div>
       ) : null}
 
+      {organisationId && !structureLoading && !isLoading && !error && rows.length === 0 && !isSearchActive ? (
+        <div
+          role="alert"
+          style={{
+            marginBottom: 14,
+            padding: "12px 14px",
+            background: "#fffbeb",
+            border: "1px solid #fcd34d",
+            borderRadius: 10,
+            color: "#92400e",
+            fontWeight: 700,
+            fontSize: 14,
+            lineHeight: 1.5,
+          }}
+        >
+          No patients found for current organisation. If you expect data here, confirm each patient document includes a
+          matching <code style={{ fontSize: 13 }}>organisationId</code> (for example your tenant id such as snc002).
+        </div>
+      ) : null}
+
       <div style={styles.searchRow}>
         <label style={styles.searchLabel} htmlFor="patientSearch">
           Search
@@ -459,6 +479,8 @@ function CreatePatientModal({
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [dob, setDob] = useState("");
+  const [hasLD, setHasLD] = useState(false);
+  const [hasMentalHealth, setHasMentalHealth] = useState(false);
   const [hospitalId, setHospitalId] = useState(defaultHospitalId || "");
   const [wardId, setWardId] = useState(defaultWardId || "");
   const [wardOptions, setWardOptions] = useState(wards);
@@ -508,6 +530,8 @@ function CreatePatientModal({
       dateOfBirth: dob || null,
       gender: "",
       nhsNumber: "",
+      hasLD,
+      hasMentalHealth,
     });
   };
 
@@ -598,6 +622,16 @@ function CreatePatientModal({
             Date of birth
             <input type="date" value={dob} onChange={(e) => setDob(e.target.value)} style={styles.input} />
           </label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 4 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "#0f172a" }}>
+              <input type="checkbox" checked={hasLD} onChange={(e) => setHasLD(e.target.checked)} />
+              Learning disability (LD) pathway
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "#0f172a" }}>
+              <input type="checkbox" checked={hasMentalHealth} onChange={(e) => setHasMentalHealth(e.target.checked)} />
+              Mental health pathway
+            </label>
+          </div>
           <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
             <button type="submit" disabled={loading || hospitals.length === 0} style={styles.primaryBtn}>
               {loading ? "Saving…" : "Create"}
@@ -626,11 +660,15 @@ function EditPatientModal({
   const [firstName, setFirstName] = useState(patient?.firstName ?? "");
   const [lastName, setLastName] = useState(patient?.lastName ?? "");
   const [dob, setDob] = useState(() => formatDob(patient?.dob));
+  const [hasLD, setHasLD] = useState(Boolean(patient?.hasLD));
+  const [hasMentalHealth, setHasMentalHealth] = useState(Boolean(patient?.hasMentalHealth));
 
   React.useEffect(() => {
     setFirstName(patient?.firstName ?? "");
     setLastName(patient?.lastName ?? "");
     setDob(formatDob(patient?.dob));
+    setHasLD(Boolean(patient?.hasLD));
+    setHasMentalHealth(Boolean(patient?.hasMentalHealth));
   }, [patient]);
 
   const hospitalName = hospitals.find((h) => h.id === patient?.hospitalId)?.name ?? patient?.hospitalName ?? "";
@@ -642,6 +680,8 @@ function EditPatientModal({
       firstName,
       lastName,
       dateOfBirth: dob || null,
+      hasLD,
+      hasMentalHealth,
     });
   };
 
@@ -684,6 +724,16 @@ function EditPatientModal({
             Date of birth
             <input type="date" value={dob} onChange={(e) => setDob(e.target.value)} style={styles.input} />
           </label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 4 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "#0f172a" }}>
+              <input type="checkbox" checked={hasLD} onChange={(e) => setHasLD(e.target.checked)} />
+              Learning disability (LD) pathway
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "#0f172a" }}>
+              <input type="checkbox" checked={hasMentalHealth} onChange={(e) => setHasMentalHealth(e.target.checked)} />
+              Mental health pathway
+            </label>
+          </div>
           <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
             <button type="submit" disabled={loading || hospitals.length === 0} style={styles.primaryBtn}>
               {loading ? "Saving…" : "Save changes"}

@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { APP_CONFIG } from "../config/appConfig";
 
 const DEMO_MAIL = "mailto:sales@sanctumcare.app?subject=SanctumCare%20Demo";
@@ -15,8 +15,8 @@ const TIERS = [
       "Care Monitoring",
       "Physical Health Monitoring",
     ],
-    ctaLabel: "Start Trial",
-    ctaTo: "/signup",
+    ctaLabel: "Request Demo",
+    ctaTo: DEMO_MAIL,
     variant: "default",
   },
   {
@@ -25,8 +25,8 @@ const TIERS = [
     price: "£99",
     period: "/month",
     bullets: ["AI Reports", "Inspection Simulator", "Risk Detection", "Structured Reports"],
-    ctaLabel: "Start Trial",
-    ctaTo: "/signup",
+    ctaLabel: "Request Demo",
+    ctaTo: DEMO_MAIL,
     variant: "highlight",
   },
   {
@@ -46,7 +46,7 @@ const TIERS = [
   },
 ];
 
-function HeaderActions({ navigate }) {
+function HeaderActions() {
   const btnBase = {
     borderRadius: 8,
     padding: "8px 16px",
@@ -71,25 +71,13 @@ function HeaderActions({ navigate }) {
       >
         Login
       </Link>
-      <button
-        type="button"
-        onClick={() => navigate("/signup")}
+      <a
+        href={DEMO_MAIL}
         style={{
           ...btnBase,
           background: "var(--primary)",
           color: "#fff",
           border: "none",
-        }}
-      >
-        Start Trial
-      </button>
-      <a
-        href={DEMO_MAIL}
-        style={{
-          ...btnBase,
-          background: "var(--surface)",
-          color: "var(--text-primary)",
-          border: "1px solid var(--border)",
         }}
       >
         Request Demo
@@ -134,7 +122,7 @@ export default function Pricing() {
         >
           {name}
         </Link>
-        <HeaderActions navigate={navigate} />
+        <HeaderActions />
       </header>
 
       <section style={{ maxWidth: 1100, margin: "0 auto", padding: "40px 20px 28px" }}>
@@ -215,43 +203,23 @@ export default function Pricing() {
                     </li>
                   ))}
                 </ul>
-                {isEnterprise ? (
-                  <a
-                    href={tier.ctaTo}
-                    style={{
-                      display: "block",
-                      textAlign: "center",
-                      padding: "12px 16px",
-                      borderRadius: 10,
-                      fontWeight: 900,
-                      fontSize: 15,
-                      textDecoration: "none",
-                      border: "1px solid var(--border)",
-                      color: "var(--text-primary)",
-                      background: "var(--background)",
-                    }}
-                  >
-                    {tier.ctaLabel}
-                  </a>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => navigate(tier.ctaTo)}
-                    style={{
-                      width: "100%",
-                      padding: "12px 16px",
-                      borderRadius: 10,
-                      fontWeight: 900,
-                      fontSize: 15,
-                      cursor: "pointer",
-                      border: "none",
-                      background: "var(--primary)",
-                      color: "#fff",
-                    }}
-                  >
-                    {tier.ctaLabel}
-                  </button>
-                )}
+                <a
+                  href={tier.ctaTo}
+                  style={{
+                    display: "block",
+                    textAlign: "center",
+                    padding: "12px 16px",
+                    borderRadius: 10,
+                    fontWeight: 900,
+                    fontSize: 15,
+                    textDecoration: "none",
+                    border: isEnterprise ? "1px solid var(--border)" : "none",
+                    color: isEnterprise ? "var(--text-primary)" : "#fff",
+                    background: isEnterprise ? "var(--background)" : "var(--primary)",
+                  }}
+                >
+                  {tier.ctaLabel}
+                </a>
               </div>
             );
           })}
@@ -268,31 +236,15 @@ export default function Pricing() {
       >
         <h2 style={{ margin: 0, fontSize: "clamp(1.25rem, 3vw, 1.75rem)", fontWeight: 900 }}>Ready to move forward?</h2>
         <div style={{ marginTop: 22, display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
-          <button
-            type="button"
-            onClick={() => navigate("/signup")}
+          <a
+            href={DEMO_MAIL}
             style={{
+              display: "inline-block",
               background: "#fff",
               color: "var(--primary)",
               border: "none",
               borderRadius: 10,
               padding: "14px 28px",
-              fontWeight: 900,
-              fontSize: 16,
-              cursor: "pointer",
-            }}
-          >
-            Start Trial
-          </button>
-          <a
-            href={DEMO_MAIL}
-            style={{
-              display: "inline-block",
-              background: "transparent",
-              color: "#fff",
-              border: "2px solid #fff",
-              borderRadius: 10,
-              padding: "12px 26px",
               fontWeight: 900,
               fontSize: 16,
               textDecoration: "none",

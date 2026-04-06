@@ -14,6 +14,7 @@ import { managementStyles as s } from "./managementStyles";
 import ActionBar from "../../components/ActionBar";
 import { useRole } from "../../context/RoleContext";
 import { isOrganisationAdminRole } from "../../utils/organisationAdmin";
+import { WARD_TYPES } from "../../engine/clinicalContextEngine";
 
 export default function Wards() {
   const { organisationId, isPlatformAdmin } = useOrganisation();
@@ -22,13 +23,14 @@ export default function Wards() {
   const [orgFilter, setOrgFilter] = useState("");
   const [hospitals, setHospitals] = useState<Array<{ id: string; name: string; organisationId: string }>>([]);
   const [hospitalFilter, setHospitalFilter] = useState("");
-  const [rows, setRows] = useState<Array<{ id: string; name: string; hospitalId: string; organisationId: string }>>(
-    []
-  );
+  const [rows, setRows] = useState<
+    Array<{ id: string; name: string; hospitalId: string; organisationId: string; wardType?: string }>
+  >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [name, setName] = useState("");
+  const [wardTypeModal, setWardTypeModal] = useState("");
   const [modalHospitalId, setModalHospitalId] = useState("");
   const [modalOrgId, setModalOrgId] = useState("");
   const [hospitalsModal, setHospitalsModal] = useState<Array<{ id: string; name: string; organisationId: string }>>(
@@ -40,6 +42,7 @@ export default function Wards() {
     name: string;
     hospitalId: string;
     organisationId: string;
+    wardType?: string;
   } | null>(null);
   const [editSaving, setEditSaving] = useState(false);
   const [deleteSavingId, setDeleteSavingId] = useState<string | null>(null);
@@ -147,6 +150,7 @@ export default function Wards() {
     setModalOrgId(oid);
     setModalHospitalId(hospitalFilter?.trim() ?? "");
     setName("");
+    setWardTypeModal("");
   }
 
   async function handleAdd(e: React.FormEvent) {
@@ -157,7 +161,10 @@ export default function Wards() {
     setSaving(true);
     setError(null);
     try {
-      await createWard(oid, hid, { name: name.trim() });
+      await createWard(oid, hid, {
+        name: name.trim(),
+        ...(wardTypeModal.trim() ? { wardType: wardTypeModal.trim() } : {}),
+      });
       setModalOpen(false);
       setName("");
       await loadWards();
@@ -245,6 +252,7 @@ export default function Wards() {
           <thead>
             <tr>
               <th style={s.th}>Name</th>
+              <th style={s.th}>Ward type</th>
               <th style={s.th}>Hospital ID</th>
               <th style={s.th}>Organisation ID</th>
               {canMutate ? <th style={s.th}>Actions</th> : null}
@@ -254,6 +262,7 @@ export default function Wards() {
             {rows.map((r) => (
               <tr key={r.id}>
                 <td style={s.td}>{r.name}</td>
+                <td style={s.td}>{r.wardType ? <code style={{ fontSize: 12 }}>{r.wardType}</code> : "—"}</td>
                 <td style={s.td}>
                   <code style={{ fontSize: 12 }}>{r.hospitalId}</code>
                 </td>
@@ -272,6 +281,7 @@ export default function Wards() {
                             name: r.name,
                             hospitalId: r.hospitalId,
                             organisationId: r.organisationId,
+                            wardType: r.wardType ?? "",
                           })
                         }
                       >
@@ -340,6 +350,7 @@ export default function Wards() {
                 try {
                   await updateWard(editRow.organisationId, editRow.hospitalId, editRow.id, {
                     name: editRow.name.trim(),
+                    wardType: editRow.wardType?.trim() ? editRow.wardType.trim() : null,
                   });
                   setEditRow(null);
                   await loadWards();
@@ -358,6 +369,23 @@ export default function Wards() {
                   onChange={(e) => setEditRow((prev) => (prev ? { ...prev, name: e.target.value } : prev))}
                   style={s.input}
                 />
+              </label>
+              <label style={s.label}>
+                Ward type (clinical context)
+                <select
+                  value={editRow.wardType ?? ""}
+                  onChange={(e) =>
+                    setEditRow((prev) => (prev ? { ...prev, wardType: e.target.value } : prev))
+                  }
+                  style={s.select}
+                >
+                  <option value="">Not set</option>
+                  {WARD_TYPES.map((wt) => (
+                    <option key={wt} value={wt}>
+                      {wt}
+                    </option>
+                  ))}
+                </select>
               </label>
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                 <button type="submit" disabled={editSaving} style={s.btnPrimary}>
@@ -392,6 +420,17 @@ export default function Wards() {
               <label style={s.label}>
                 Name
                 <input required value={name} onChange={(e) => setName(e.target.value)} style={s.input} />
+              </label>
+              <label style={s.label}>
+                Ward type (optional)
+                <select value={wardTypeModal} onChange={(e) => setWardTypeModal(e.target.value)} style={s.select}>
+                  <option value="">Not set</option>
+                  {WARD_TYPES.map((wt) => (
+                    <option key={wt} value={wt}>
+                      {wt}
+                    </option>
+                  ))}
+                </select>
               </label>
               {isPlatformAdmin ? (
                 <label style={s.label}>

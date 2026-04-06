@@ -33,6 +33,8 @@ export type CpaAggregatedPatientData = {
   /** Early warning alerts (multi-disciplinary, sorted high → medium → low). */
   alerts: Alert[];
   mdtSummaryText?: string;
+  /** Pre-built Sanctum LD/MH/ward/org instructions for Gemini (CPA section prompts). */
+  clinicalContextBlock?: string;
 };
 
 /**

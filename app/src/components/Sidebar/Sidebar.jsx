@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useOrganisation } from "../../context/OrganisationContext";
 import { useRole } from "../../context/RoleContext";
 import { NAV_ITEMS, MANAGEMENT_NAV_ITEMS } from "../../config/routes";
@@ -12,10 +12,15 @@ import {
 } from "./constants";
 import SidebarNavItem from "./SidebarNavItem";
 import { APP_CONFIG } from "../../config/appConfig";
+import { isModulePathAllowedForOrganisation } from "../../config/documentRegistry";
+import { isOrganisationAdminRole } from "../../utils/organisationAdmin";
+
+/** Never hide these paths due to missing org type, empty features, or feature flags. */
+const CORE_NAV_PATHS = new Set(["/dashboard", "/patients", "/clinical-notes", "/audit-log"]);
 
 export default function Sidebar() {
-  const { organisation, organisationId, isPlatformAdmin } = useOrganisation();
-  const { isAllowed, isGlobalAdmin, isSuperAdmin } = useRole();
+  const { organisation, organisationId, isPlatformAdmin, organisationType: contextOrgType } = useOrganisation();
+  const { isAllowed, isGlobalAdmin, isSuperAdmin, role } = useRole();
   const [collapsed, setCollapsed] = useState(false);
 
   const features = organisation?.features ?? null;
@@ -45,34 +50,64 @@ export default function Sidebar() {
     "/inspection-defence": "inspection",
   };
 
-  const visibleItems = useMemo(
-    () =>
-      NAV_ITEMS.filter((item) =>
-        item.platformAdminOnly
-          ? isPlatformAdmin
-          : item.allowedRoles == null
-            ? isFeatureEnabled(navFeatureRequirements[item.path])
-            : (organisationId || isPlatformAdmin) && isAllowed(item.allowedRoles)
-      ),
-    [isAllowed, isPlatformAdmin, organisationId, features]
-  );
+  const rawOrgType = organisation?.type ?? organisation?.organisationType;
+  const organisationType = rawOrgType != null && String(rawOrgType).trim() !== "" ? String(rawOrgType).trim() : null;
+  const featureFlags = organisation?.features;
 
-  // DEBUG: force management nav (Users, etc.) — set back to role-based check after auth/RBAC verified.
-  const showManagementSection = true;
+  const hasUsableFeatureFlags =
+    featureFlags != null &&
+    typeof featureFlags === "object" &&
+    Object.keys(featureFlags).length > 0;
+
+  /** Missing org, type, or usable features → do not filter by registry or feature flags (never yield an empty nav). */
+  const failsafeFullMenu =
+    organisation == null || organisationType == null || !hasUsableFeatureFlags;
+
+  useEffect(() => {
+    console.log("SIDEBAR DEBUG", {
+      organisationType: organisationType ?? contextOrgType,
+      featureFlags,
+      role,
+    });
+  }, [organisationType, contextOrgType, featureFlags, role]);
+
+  const visibleItems = useMemo(() => {
+    return NAV_ITEMS.filter((item) => {
+      const isCore = CORE_NAV_PATHS.has(item.path);
+      if (item.enabled === false && !isCore) return false;
+
+      if (item.platformAdminOnly) return isPlatformAdmin;
+
+      if (item.allowedRoles != null) {
+        return (organisationId || isPlatformAdmin) && isAllowed(item.allowedRoles);
+      }
+
+      const relaxRegistryAndFeatures = failsafeFullMenu || isCore;
+      if (!relaxRegistryAndFeatures) {
+        if (!isModulePathAllowedForOrganisation(item.path, organisationType)) return false;
+        if (!isFeatureEnabled(navFeatureRequirements[item.path])) return false;
+      }
+      return true;
+    });
+  }, [isAllowed, isPlatformAdmin, organisationId, features, organisationType, failsafeFullMenu]);
+
+  const roleUpper = role != null ? String(role).toUpperCase() : "";
+  /** Stable visibility: do not depend on flickering RBAC; fail-open when role not yet resolved. */
+  const showManagementSection =
+    role == null ||
+    roleUpper === "" ||
+    roleUpper === "SUPER_ADMIN" ||
+    roleUpper === "ADMIN" ||
+    isOrganisationAdminRole(role) ||
+    isGlobalAdmin ||
+    isPlatformAdmin;
 
   const managementItems = useMemo(() => {
     if (!showManagementSection) return [];
     return MANAGEMENT_NAV_ITEMS.filter((item) =>
-      item.platformAdminOnly
-        ? isPlatformAdmin || isGlobalAdmin
-        : item.allowedRoles == null
-          ? true
-          : (
-              (organisationId || isPlatformAdmin) &&
-              (isAllowed(item.allowedRoles) || (isGlobalAdmin && !!organisationId))
-            )
+      item.platformAdminOnly ? isPlatformAdmin || isGlobalAdmin : true
     );
-  }, [isAllowed, isPlatformAdmin, isGlobalAdmin, organisationId, showManagementSection]);
+  }, [showManagementSection, isPlatformAdmin, isGlobalAdmin]);
 
   const width = collapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH_EXPANDED;
   const toggleAriaLabel = collapsed ? "Expand sidebar" : "Collapse sidebar";

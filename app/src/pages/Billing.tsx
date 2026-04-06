@@ -1,5 +1,4 @@
 import { useState, useEffect, type CSSProperties } from "react";
-import { useSearchParams } from "react-router-dom";
 import { useOrganisation } from "../context/OrganisationContext";
 import { useAuth } from "../context/AuthContext";
 import { useRole } from "../context/RoleContext";
@@ -7,16 +6,14 @@ import {
   getSubscription,
   updateSubscriptionPlan,
   cancelSubscription,
-  createCheckoutSession,
   PLANS,
   getPlanLimits,
-  BILLING_CYCLES,
 } from "../services/billingService";
-import { getSubscription as getPreStripeSubscription, MOCK_PLANS } from "../services/subscriptionService";
-import { hasFeature as hasPlanFeature } from "../utils/featureAccess.js";
 import { PLANS as PLAN_DEFS } from "../constants/plans";
 import { formatUkDate } from "../utils/dateFormat";
 import { CLINICAL_CONTENT_MAX_WIDTH_PX } from "../config/contentLayout";
+
+const DEMO_MAIL = "mailto:sales@sanctumcare.app?subject=SanctumCare%20billing%20enquiry";
 
 const cardStyle: CSSProperties = {
   background: "#fff",
@@ -31,27 +28,18 @@ function formatDate(ts: unknown) {
 }
 
 /**
- * Billing and subscription — organisation-scoped plan, Stripe Checkout for paid tiers, manual downgrade to Basic.
+ * Billing — organisation-scoped plan display. Commercial upgrades go through Request Demo (no in-app Stripe).
  */
 export default function Billing() {
   const { organisationId, organisation, reload, effectivePlanKey } = useOrganisation();
   const { user } = useAuth();
   const { role, can } = useRole();
-  const [searchParams, setSearchParams] = useSearchParams();
   const [subscription, setSubscription] = useState<Awaited<ReturnType<typeof getSubscription>>>(null);
-  const [preStripeSubscription, setPreStripeSubscription] = useState<Awaited<ReturnType<typeof getPreStripeSubscription>>>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
 
   const canManageBilling = can("organisation:manage");
-
-  useEffect(() => {
-    if (searchParams.get("checkout") === "success") {
-      reload();
-      setSearchParams({}, { replace: true });
-    }
-  }, [searchParams, reload, setSearchParams]);
 
   useEffect(() => {
     if (!organisationId) {
@@ -66,24 +54,16 @@ export default function Billing() {
       .finally(() => setLoading(false));
   }, [organisationId]);
 
-  useEffect(() => {
-    if (!organisationId) {
-      setPreStripeSubscription(null);
-      return;
-    }
-    getPreStripeSubscription(organisationId).then(setPreStripeSubscription).catch(() => setPreStripeSubscription(null));
-  }, [organisationId]);
-
   async function handleChangePlanLocal(newPlanKey: string) {
     if (!organisationId || !canManageBilling) return;
     setError(null);
     setActionLoading(true);
     try {
-      await updateSubscriptionPlan(
+      await updateSubscriptionPlan(organisationId, newPlanKey, {
         organisationId,
-        newPlanKey,
-        { organisationId, userId: user?.uid ?? "", userRole: role ?? "" }
-      );
+        userId: user?.uid ?? "",
+        userRole: role ?? "",
+      });
       const updated = await getSubscription(organisationId);
       setSubscription(updated);
       reload();
@@ -93,40 +73,6 @@ export default function Billing() {
     } finally {
       setActionLoading(false);
     }
-  }
-
-  async function handleCheckoutPaid(planKey: string) {
-    if (!organisationId || !canManageBilling) return;
-    setError(null);
-    setActionLoading(true);
-    try {
-      const origin = window.location.origin;
-      const { url } = await createCheckoutSession(
-        organisationId,
-        planKey,
-        BILLING_CYCLES.MONTHLY,
-        `${origin}/billing?checkout=success`,
-        `${origin}/billing?checkout=cancel`
-      );
-      if (url) {
-        window.location.href = url;
-        return;
-      }
-      setError("Checkout did not return a redirect URL. Is the billing backend deployed?");
-    } catch (e: unknown) {
-      const err = e as Error;
-      setError(err?.message ?? "Failed to start checkout.");
-    } finally {
-      setActionLoading(false);
-    }
-  }
-
-  async function handleSelectPlan(planKey: string) {
-    if (planKey === PLANS.BASIC) {
-      await handleChangePlanLocal(planKey);
-      return;
-    }
-    await handleCheckoutPaid(planKey);
   }
 
   async function handleCancel() {
@@ -166,7 +112,8 @@ export default function Billing() {
     >
       <h1 style={{ marginTop: 0 }}>Billing &amp; subscription</h1>
       <p style={{ color: "#64748b", marginBottom: "1.25rem" }}>
-        {organisation?.name ?? "Organisation"} · effective plan <strong>{currentKey}</strong> (billing is per organisation, not per user).
+        {organisation?.name ?? "Organisation"} · effective plan <strong>{currentKey}</strong> (per organisation, not per
+        user). Upgrades and enterprise terms are arranged via demo — no self-serve card checkout in this build.
       </p>
 
       {!canManageBilling && (
@@ -184,8 +131,8 @@ export default function Billing() {
       {!subscription && !loading && organisationId && (
         <div style={cardStyle}>
           <p style={{ marginTop: 0 }}>
-            No active subscription document found for this organisation. Complete signup or contact support. You can
-            still choose a target plan below once billing is provisioned.
+            No active subscription document found for this organisation. Provisioning is admin-controlled — use{" "}
+            <a href={DEMO_MAIL}>Request demo</a> to align a plan, or contact support.
           </p>
         </div>
       )}
@@ -210,38 +157,10 @@ export default function Billing() {
       )}
 
       <div style={cardStyle}>
-        <h2 style={{ marginTop: 0, fontSize: "1.2rem" }}>Pre-Stripe plan access</h2>
-        <p style={{ color: "#666", marginTop: 0 }}>
-          Current plan: <strong>{preStripeSubscription?.plan ?? "FREE"}</strong>
-        </p>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: "left", padding: "8px 6px", borderBottom: "1px solid #e5e7eb" }}>Plan</th>
-                <th style={{ textAlign: "left", padding: "8px 6px", borderBottom: "1px solid #e5e7eb" }}>Evidence Pack</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(MOCK_PLANS).map(([plan, features]) => (
-                <tr key={plan}>
-                  <td style={{ padding: "8px 6px", borderBottom: "1px solid #f1f5f9", fontWeight: 700 }}>{plan}</td>
-                  <td style={{ padding: "8px 6px", borderBottom: "1px solid #f1f5f9" }}>
-                    {features.evidencePack ? "Enabled" : "Locked"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p style={{ color: "#64748b", marginBottom: 0, marginTop: 10, fontSize: "0.85rem" }}>
-          Effective access now:{" "}
-          <strong>{hasPlanFeature(preStripeSubscription, "evidencePack") ? "Evidence Pack enabled" : "Evidence Pack locked"}</strong>
-        </p>
-      </div>
-
-      <div style={cardStyle}>
         <h2 style={{ marginTop: 0, fontSize: "1.2rem" }}>Plans &amp; pricing</h2>
+        <p style={{ color: "#64748b", marginTop: 0, fontSize: "0.95rem" }}>
+          Starter <strong>£59</strong> · Professional <strong>£99</strong> (most popular) · Enterprise <strong>£249+</strong>
+        </p>
         <div
           style={{
             display: "grid",
@@ -252,7 +171,7 @@ export default function Billing() {
           {(Object.keys(PLAN_DEFS) as Array<keyof typeof PLAN_DEFS>).map((key) => {
             const def = PLAN_DEFS[key];
             const isCurrent = currentKey === key;
-            const priceLabel = `£${def.price}/mo`;
+            const priceLabel = key === "ENTERPRISE" ? `£${def.price}+/mo` : `£${def.price}/mo`;
             return (
               <div
                 key={key}
@@ -264,32 +183,33 @@ export default function Billing() {
                 }}
               >
                 <div style={{ fontWeight: 800, fontSize: "1.1rem" }}>{def.name}</div>
+                {key === "PRO" ? (
+                  <div style={{ fontSize: 11, fontWeight: 800, color: "#1976d2", marginTop: 4 }}>Most popular</div>
+                ) : null}
                 <div style={{ fontSize: "1.25rem", marginTop: 8 }}>{priceLabel}</div>
                 <ul style={{ margin: "0.75rem 0 0 1rem", padding: 0, fontSize: "0.85rem", color: "#555" }}>
                   {def.features.map((f) => (
                     <li key={f}>{f}</li>
                   ))}
                 </ul>
-                {canManageBilling && !isCurrent && (
-                  <button
-                    type="button"
-                    disabled={actionLoading}
-                    onClick={() => handleSelectPlan(key)}
-                    style={{
-                      marginTop: 12,
-                      width: "100%",
-                      padding: "8px 12px",
-                      background: "#1976d2",
-                      color: "#fff",
-                      border: "none",
-                      borderRadius: 8,
-                      cursor: actionLoading ? "not-allowed" : "pointer",
-                      fontWeight: 600,
-                    }}
-                  >
-                    {key === PLANS.BASIC ? "Switch to Starter" : `Upgrade to ${def.name}`}
-                  </button>
-                )}
+                <a
+                  href={DEMO_MAIL}
+                  style={{
+                    display: "block",
+                    marginTop: 12,
+                    width: "100%",
+                    textAlign: "center",
+                    padding: "8px 12px",
+                    background: "#1976d2",
+                    color: "#fff",
+                    borderRadius: 8,
+                    fontWeight: 600,
+                    textDecoration: "none",
+                    boxSizing: "border-box",
+                  }}
+                >
+                  Request demo
+                </a>
                 {isCurrent && (
                   <p style={{ marginTop: 12, marginBottom: 0, fontSize: "0.85rem", color: "#1976d2" }}>
                     Current plan
@@ -299,58 +219,54 @@ export default function Billing() {
             );
           })}
         </div>
-        <p style={{ fontSize: "0.8rem", color: "#888", marginTop: 12, marginBottom: 0 }}>
-          Paid tiers use Stripe Checkout where configured (Cloud Functions and <code>VITE_FIREBASE_FUNCTIONS_URL</code>).
-          Switching to Starter without checkout is available for manual plan assignment.
-        </p>
       </div>
 
       {subscription && canManageBilling && (
-            <div style={cardStyle}>
-              <h2 style={{ marginTop: 0, fontSize: "1.2rem" }}>Change plan (quick)</h2>
-              <p style={{ color: "#666", marginBottom: "1rem" }}>
-                Same keys as subscription records: BASIC · PRO · ENTERPRISE
-              </p>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {Object.values(PLANS)
-                  .filter((p) => p !== subscription.planName)
-                  .map((plan) => (
-                    <button
-                      key={plan}
-                      type="button"
-                      onClick={() => handleChangePlanLocal(plan)}
-                      disabled={actionLoading}
-                      style={{
-                        padding: "8px 16px",
-                        background: "#1976d2",
-                        color: "#fff",
-                        border: "none",
-                        borderRadius: 8,
-                        cursor: actionLoading ? "not-allowed" : "pointer",
-                      }}
-                    >
-                      Set to {plan}
-                    </button>
-                  ))}
-              </div>
-              <div style={{ marginTop: "1.5rem", paddingTop: "1rem", borderTop: "1px solid #eee" }}>
+        <div style={cardStyle}>
+          <h2 style={{ marginTop: 0, fontSize: "1.2rem" }}>Admin: plan record (manual)</h2>
+          <p style={{ color: "#666", marginBottom: "1rem" }}>
+            For testing or support-assigned plans only — keys: BASIC · PRO · ENTERPRISE
+          </p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {Object.values(PLANS)
+              .filter((p) => p !== subscription.planName)
+              .map((plan) => (
                 <button
+                  key={plan}
                   type="button"
-                  onClick={handleCancel}
+                  onClick={() => handleChangePlanLocal(plan)}
                   disabled={actionLoading}
                   style={{
                     padding: "8px 16px",
-                    background: "transparent",
-                    color: "#c62828",
-                    border: "1px solid #c62828",
+                    background: "#1976d2",
+                    color: "#fff",
+                    border: "none",
                     borderRadius: 8,
                     cursor: actionLoading ? "not-allowed" : "pointer",
                   }}
                 >
-                  Cancel subscription
+                  Set to {plan}
                 </button>
-              </div>
-            </div>
+              ))}
+          </div>
+          <div style={{ marginTop: "1.5rem", paddingTop: "1rem", borderTop: "1px solid #eee" }}>
+            <button
+              type="button"
+              onClick={handleCancel}
+              disabled={actionLoading}
+              style={{
+                padding: "8px 16px",
+                background: "transparent",
+                color: "#c62828",
+                border: "1px solid #c62828",
+                borderRadius: 8,
+                cursor: actionLoading ? "not-allowed" : "pointer",
+              }}
+            >
+              Cancel subscription
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

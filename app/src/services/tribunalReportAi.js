@@ -1,9 +1,5 @@
 import { generateAIContent } from "./geminiAiService.js";
-
-const DATA_ONLY =
-  "Use ONLY the information explicitly present in the PROVIDED DATA below. " +
-  "Do not invent incidents, dates, diagnoses, risks, or legal conclusions. " +
-  "If the data does not support an answer, write exactly: Insufficient data.";
+import { buildNursingTribunalPrompt } from "./ai/tribunalPromptBuilder.ts";
 
 /**
  * Build a single text blob for AI context from live records.
@@ -63,34 +59,12 @@ export function buildTribunalEvidenceContext(input) {
 }
 
 /**
+ * One AI call per nursing tribunal section — prompts from {@link ./ai/tribunalPromptBuilder}.
  * @param {{ sectionTitle: string, sectionType: string, evidenceText: string }} args
  * @returns {Promise<string | null>}
  */
 export async function generateTribunalSectionAI({ sectionTitle, sectionType, evidenceText }) {
-  let typeHint =
-    "Provide a concise factual paragraph suitable for a tribunal nursing report. No bullet lists unless essential.";
-  if (sectionType === "yesno") {
-    typeHint =
-      "Respond with exactly one word on the first line: Yes or No (based only on data). " +
-      "On the second line, one short sentence citing only what supports that answer, or 'Insufficient data.'";
-  } else if (sectionType === "yesno_text") {
-    typeHint =
-      "Line 1: Yes or No (based only on data). Lines after: short factual narrative from data only; if unclear, say Insufficient data.";
-  }
-
-  const prompt = `You are assisting a registered nurse to draft a section of a mental health tribunal nursing report (UK).
-
-Generate a professional nursing tribunal response for the section titled:
-"${sectionTitle}"
-
-${typeHint}
-
-${DATA_ONLY}
-
---- PROVIDED DATA (notes, incidents, behaviour, physical health) ---
-${evidenceText || "(no records supplied)"}
-`;
-
+  const prompt = buildNursingTribunalPrompt({ sectionTitle, sectionType, evidenceText });
   return generateAIContent(prompt, { temperature: 0.15 });
 }
 

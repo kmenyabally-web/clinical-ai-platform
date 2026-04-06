@@ -286,6 +286,11 @@ STRICT RULES:
 
 ---
 
+CLINICAL CONTEXT (instructions only; do not add facts):
+${context?.clinicalContextBlock?.trim() ? context.clinicalContextBlock.trim() : "(none)"}
+
+---
+
 NOTES:
 ${combined}
 

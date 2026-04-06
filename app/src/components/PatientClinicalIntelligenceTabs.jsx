@@ -4,6 +4,7 @@ import PatientTimeline from "./PatientTimeline";
 import { generateClinicalReportSection } from "../services/aiService";
 import { analyzeCareMonitoringFromNotes } from "../utils/careMonitoringAnalysis";
 import { isCareSetting, isClinicalSetting } from "../utils/orgHelpers";
+import { deriveClinicalContext } from "../engine/clinicalContextEngine";
 
 function toMillis(value) {
   if (!value) return 0;
@@ -33,6 +34,9 @@ export default function PatientClinicalIntelligenceTabs({
   formatWhen,
   refreshNotes,
   organisationType,
+  hasLD,
+  hasMentalHealth,
+  wardType,
 }) {
   const immutableClinicalRecords = true;
   const [activeTab, setActiveTab] = useState("notes"); // notes | timeline | summaries | mdt | reports | care | monitoring
@@ -40,6 +44,15 @@ export default function PatientClinicalIntelligenceTabs({
   const orgType = organisationType ?? "hospital";
   const careSetting = isCareSetting(orgType);
   const clinicalSetting = isClinicalSetting(orgType);
+
+  const clinicalContext = useMemo(() => {
+    return deriveClinicalContext({
+      hasLD: Boolean(hasLD),
+      hasMentalHealth: Boolean(hasMentalHealth),
+      wardType,
+      organisationType: orgType,
+    });
+  }, [hasLD, hasMentalHealth, wardType, orgType]);
 
   // If organisation switches (or type missing), ensure the active tab is allowed.
   React.useEffect(() => {
@@ -58,8 +71,15 @@ export default function PatientClinicalIntelligenceTabs({
   const disciplineOptions = useMemo(() => {
     const fromNotes = uniq((notes ?? []).map((n) => n?.discipline).filter(Boolean));
     fromNotes.sort((a, b) => String(a).localeCompare(String(b)));
-    return fromNotes;
-  }, [notes]);
+    const allowed = (d) => {
+      const k = String(d ?? "").toLowerCase();
+      if (!clinicalContext.uiVisibility.showPsychiatry && k.includes("psychiat")) return false;
+      if (!clinicalContext.uiVisibility.showPsychology && k.includes("psychology")) return false;
+      if (!clinicalContext.uiVisibility.showPsychology && k.includes("psychology-formulation")) return false;
+      return true;
+    };
+    return fromNotes.filter(allowed);
+  }, [notes, clinicalContext]);
 
   const filteredAiNotes = useMemo(() => {
     const from = dateFrom ? new Date(dateFrom).getTime() : null;
@@ -99,12 +119,20 @@ export default function PatientClinicalIntelligenceTabs({
       if (!latestNote?.id) throw new Error("Could not find a target note to store the generated report.");
 
       const discipline = disciplineFilter !== "all" ? disciplineFilter : String(latestNote?.discipline ?? "Clinical");
+      const desired = discipline;
+      const k = String(desired ?? "").toLowerCase();
+      const isAllowed =
+        (clinicalContext.uiVisibility.showPsychiatry || !k.includes("psychiat")) &&
+        (clinicalContext.uiVisibility.showPsychology || !k.includes("psychology"));
+      const allowedFallback = disciplineOptions[0] ?? "Clinical";
+      const disciplineToUse = isAllowed ? desired : allowedFallback;
 
       const section = await generateClinicalReportSection({
         reportType,
         patientId,
-        discipline,
+        discipline: disciplineToUse,
         contextNotes,
+        clinicalContextBlock: clinicalContext.aiContextBlock,
       });
 
       // Clinical notes are immutable. Report output is preview-only unless saved as a new clinical addendum/note.

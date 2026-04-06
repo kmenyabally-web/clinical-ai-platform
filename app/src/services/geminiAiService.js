@@ -46,7 +46,9 @@ export async function generateAIContent(prompt, options = {}) {
 
     const data = await res.json();
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-    console.log("AI RESPONSE:", typeof text === "string" ? text.slice(0, 800) : text);
+    if (import.meta.env.DEV) {
+      console.log("AI RESPONSE:", typeof text === "string" ? text.slice(0, 800) : text);
+    }
     return text || null;
   } catch (err) {
     console.error("AI ERROR:", err);

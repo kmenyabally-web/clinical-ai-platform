@@ -26,6 +26,9 @@ export function RoleProvider({ children }) {
   const { user } = useAuth();
   const { userProfile, loading: orgLoading, organisationId } = useOrganisation();
 
+  /** First resolved role from Firestore profile — avoids STAFF→Admin flicker while claims load. */
+  const [lockedRole, setLockedRole] = useState(null);
+
   const [claimRole, setClaimRole] = useState(null);
   useEffect(() => {
     let cancelled = false;
@@ -48,6 +51,18 @@ export function RoleProvider({ children }) {
     };
   }, [user]);
 
+  useEffect(() => {
+    if (!user) {
+      setLockedRole(null);
+      return;
+    }
+    setLockedRole((prev) => {
+      if (prev != null) return prev;
+      const r = userProfile?.role || userProfile?.systemRole;
+      return r != null && String(r).trim() !== "" ? String(r).trim() : null;
+    });
+  }, [user, userProfile?.role, userProfile?.systemRole]);
+
   const roleState = useMemo(() => {
     const profile = userProfile;
     const token = claimRole ? { claimRole } : null;
@@ -60,10 +75,15 @@ export function RoleProvider({ children }) {
     const isSuperAdmin = role === "SUPER_ADMIN";
     const isGroupAdmin = role === "GROUP_ADMIN";
     const isGlobalAdmin = role === "SUPER_ADMIN" || profile?.isGlobalAdmin === true;
-    console.log("🔥 ROLE:", role, "GLOBAL:", isGlobalAdmin);
     return { role, isGlobalAdmin, isSuperAdmin, isGroupAdmin };
   }, [userProfile?.role, userProfile?.systemRole, claimRole]);
-  const role = normalizeRole(roleState.role) ?? roleState.role;
+
+  const role = useMemo(() => {
+    if (lockedRole != null) {
+      return normalizeRole(lockedRole) ?? lockedRole;
+    }
+    return normalizeRole(roleState.role) ?? roleState.role;
+  }, [lockedRole, roleState.role]);
   const isGlobalAdmin = roleState.isGlobalAdmin;
   const isSuperAdmin = roleState.isSuperAdmin;
   const isGroupAdmin = roleState.isGroupAdmin;

@@ -78,9 +78,17 @@ function assertRequiredWriteContext({ organisationId, hospitalId, userId }) {
  * @param {string} [filters.serviceId]
  */
 export async function listPatientMetadata(filters = {}) {
-  const { organisationId, hospitalId: ctxHospitalId, wardId: ctxWardId } = await getUserContext();
-
-  if (!organisationId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
+  let organisationId;
+  let ctxHospitalId = null;
+  let ctxWardId = null;
+  try {
+    const ctx = await getUserContext();
+    organisationId = ctx.organisationId;
+    ctxHospitalId = ctx.hospitalId;
+    ctxWardId = ctx.wardId;
+  } catch {
+    organisationId = null;
+  }
 
   const allInOrganisation =
     filters.allInOrganisation === true ||
@@ -90,7 +98,15 @@ export async function listPatientMetadata(filters = {}) {
   const serviceId = filters.serviceId != null ? String(filters.serviceId).trim() : "";
 
   let snapshot;
-  if (allInOrganisation) {
+  let devUnscoped = false;
+  if (!organisationId) {
+    if (!import.meta.env.DEV) {
+      throw new Error(GENERIC_USER_ERROR_MESSAGE);
+    }
+    console.warn("No orgId — fallback loading all (dev only)");
+    devUnscoped = true;
+    snapshot = await getDocs(query(collection(db, PATIENTS_COLLECTION), limit(MAX_ORG_WIDE_PATIENTS)));
+  } else if (allInOrganisation) {
     const q = query(
       collection(db, PATIENTS_COLLECTION),
       where("organisationId", "==", organisationId),
@@ -123,6 +139,15 @@ export async function listPatientMetadata(filters = {}) {
   let results = docs.map((d) => {
     const data = d?.data?.() ?? {};
 
+    const oid = data.organisationId;
+    if (import.meta.env.DEV && (oid == null || String(oid).trim() === "")) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "Patient document missing organisationId — scoped queries will not return this row:",
+        d?.id
+      );
+    }
+
     if (
       Object.prototype.hasOwnProperty.call(data, "clinicalNotes") ||
       Object.prototype.hasOwnProperty.call(data, "medicalHistory")
@@ -148,8 +173,23 @@ export async function listPatientMetadata(filters = {}) {
         `${typeof data.firstName === "string" ? data.firstName : ""} ${typeof data.lastName === "string" ? data.lastName : ""}`.trim() ||
         "",
       dateOfBirth: data.dateOfBirth ?? data.dob ?? null,
+      hasLD: data.hasLD === true,
+      hasMentalHealth: data.hasMentalHealth === true,
     };
   });
+
+  if (devUnscoped) {
+    const hospitalId =
+      filters.hospitalId != null
+        ? String(filters.hospitalId).trim()
+        : ctxHospitalId != null
+          ? String(ctxHospitalId).trim()
+          : "";
+    const wardId =
+      filters.wardId != null ? String(filters.wardId).trim() : ctxWardId != null ? String(ctxWardId).trim() : "";
+    if (hospitalId) results = results.filter((p) => !p.hospitalId || p.hospitalId === hospitalId);
+    if (wardId) results = results.filter((p) => !p.wardId || p.wardId === wardId);
+  }
 
   // hospitalId/wardId filtering is enforced in Firestore query constraints above.
   if (serviceId) {
@@ -159,7 +199,7 @@ export async function listPatientMetadata(filters = {}) {
   await logAuditEventNonBlocking({
     action: "METADATA_READ_LIST",
     entityType: "PATIENT",
-    organisationId,
+    organisationId: organisationId ?? "dev-unscoped",
     count: results.length,
   });
 
@@ -194,8 +234,17 @@ export function listPatients(arg1, arg2) {
 export async function getPatientsByOrganisation(organisationId, options = {}) {
   const org = (organisationId ?? "").toString().trim();
   if (!org) return [];
-  const { organisationId: ctxOrg } = await getUserContext();
-  if (!ctxOrg || ctxOrg !== org) {
+  let ctxOrg = null;
+  try {
+    const ctx = await getUserContext();
+    ctxOrg = ctx.organisationId;
+  } catch {
+    ctxOrg = null;
+  }
+  if (ctxOrg && ctxOrg !== org) {
+    throw new Error(GENERIC_USER_ERROR_MESSAGE);
+  }
+  if (!ctxOrg && !import.meta.env.DEV) {
     throw new Error(GENERIC_USER_ERROR_MESSAGE);
   }
   const includeArchived = options.includeArchived === true;
@@ -282,6 +331,8 @@ export async function createPatient(params) {
     nhsNumber: (params.nhsNumber ?? "").toString().trim(),
     stompMonitoring: Boolean(params.stompMonitoring),
     medications: normalizeStompMedicationsArray(params.medications),
+    hasLD: params.hasLD === true,
+    hasMentalHealth: params.hasMentalHealth === true,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     isDeleted: false,
@@ -398,6 +449,8 @@ export async function getPatientById(id) {
     wardName: typeof data.wardName === "string" ? data.wardName : "",
     stompMonitoring: data.stompMonitoring === true,
     medications: normalizeStompMedicationsArray(data.medications),
+    hasLD: data.hasLD === true,
+    hasMentalHealth: data.hasMentalHealth === true,
   };
 }
 
@@ -472,6 +525,10 @@ export async function updatePatientDemographics(patientId, updates) {
     if (updates.address != null) patch.address = String(updates.address).trim();
     if (updates.gpName != null) patch.gpName = String(updates.gpName).trim();
     if (updates.emergencyContact != null) patch.emergencyContact = String(updates.emergencyContact).trim();
+    if (Object.prototype.hasOwnProperty.call(updates, "hasLD")) patch.hasLD = updates.hasLD === true;
+    if (Object.prototype.hasOwnProperty.call(updates, "hasMentalHealth")) {
+      patch.hasMentalHealth = updates.hasMentalHealth === true;
+    }
   }
   const first = patch.firstName !== undefined ? patch.firstName : cur.firstName ?? "";
   const last = patch.lastName !== undefined ? patch.lastName : cur.lastName ?? "";

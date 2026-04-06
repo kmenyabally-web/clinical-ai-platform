@@ -61,6 +61,8 @@ export function useOrganisation() {
 export function OrganisationProvider({ children }) {
   const { user } = useAuth();
   const [organisationId, setOrganisationId] = useState(null);
+  /** First resolved tenant id after auth — kept stable (not cleared when transient loads flicker). */
+  const [activeOrgId, setActiveOrgId] = useState(null);
   const [organisation, setOrganisation] = useState(null);
   const [subscription, setSubscription] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
@@ -93,6 +95,7 @@ export function OrganisationProvider({ children }) {
         wardId: null,
       };
       setOrganisationId(devOrgId);
+      setActiveOrgId(devOrgId);
       setOrganisation(applyDevOrganisationFeatures(devOrg));
       setSubscription(null);
       setUserProfile(devProfile);
@@ -104,6 +107,7 @@ export function OrganisationProvider({ children }) {
     }
     if (!uid) {
       setOrganisationId(null);
+      setActiveOrgId(null);
       setOrganisation(null);
       setSubscription(null);
       setUserProfile(null);
@@ -166,6 +170,7 @@ export function OrganisationProvider({ children }) {
         console.error("User doc missing", { uid });
         console.warn("User profile missing", { uid });
         setOrganisationId(null);
+        setActiveOrgId(null);
         setOrganisation(null);
         setSubscription(null);
         setUserProfile(null);
@@ -265,6 +270,7 @@ export function OrganisationProvider({ children }) {
         const platformAdmin = await isPlatformAdmin(uid);
         if (platformAdmin) {
           setOrganisationId(null);
+          setActiveOrgId(null);
           setOrganisation(null);
           setSubscription(null);
           setUserProfile({ ...(resolvedProfile ?? {}), isPlatformAdmin: true });
@@ -274,6 +280,7 @@ export function OrganisationProvider({ children }) {
           return;
         }
         setOrganisationId(null);
+        setActiveOrgId(null);
         setOrganisation(null);
         setSubscription(null);
         setUserProfile(resolvedProfile ?? null);
@@ -321,6 +328,7 @@ export function OrganisationProvider({ children }) {
       }
       if (resolvedProfile.status != null && resolvedProfile.status !== "active") {
         setOrganisationId(null);
+        setActiveOrgId(null);
         setOrganisation(null);
         setSubscription(null);
         setUserProfile(resolvedProfile);
@@ -417,6 +425,7 @@ export function OrganisationProvider({ children }) {
       setNeedsSetup(false);
       if (org.status === "suspended") {
         setOrganisationId(null);
+        setActiveOrgId(null);
         setOrganisation(applyDevOrganisationFeatures(org));
         setSubscription(null);
         setNeedsSetup(false);
@@ -425,6 +434,7 @@ export function OrganisationProvider({ children }) {
     } catch (err) {
       setError(err.message ?? "Failed to load organisation.");
       setOrganisationId(null);
+      setActiveOrgId(null);
       setOrganisation(null);
       setSubscription(null);
       setUserProfile(null);
@@ -435,12 +445,6 @@ export function OrganisationProvider({ children }) {
     }
   }, []);
 
-  // TEMP: helps diagnose cross-module tenant scoping bugs.
-  useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log("ACTIVE ORG ID:", organisationId);
-  }, [organisationId]);
-
   // Load tenant profile from the same auth source Firebase uses (avoids races with React context).
   useEffect(() => {
     if (DEV_AUTH_BYPASS) {
@@ -450,6 +454,7 @@ export function OrganisationProvider({ children }) {
     const unsubscribe = onAuthStateChanged(auth, (authUser) => {
       if (!authUser) {
         setOrganisationId(null);
+        setActiveOrgId(null);
         setOrganisation(null);
         setSubscription(null);
         setUserProfile(null);
@@ -475,7 +480,7 @@ export function OrganisationProvider({ children }) {
   );
 
   // Default type behaviour: if missing, treat as clinical "hospital".
-  const orgType = organisation?.type ?? "hospital";
+  const orgType = organisation?.type ?? organisation?.organisationType ?? "hospital";
 
   const hasFeature = useCallback(
     (feature) => {
@@ -491,14 +496,40 @@ export function OrganisationProvider({ children }) {
     [effectivePlanKey, organisation?.features]
   );
 
+  const organisationWithTypeDefault = useMemo(() => {
+    if (!organisation) return null;
+    return {
+      ...organisation,
+      organisationType: organisation.organisationType ?? organisation.type ?? "hospital",
+    };
+  }, [organisation]);
+
+  /** Prefer locked tenant id so UI/services do not flicker when transient loads clear organisationId. */
+  const effectiveOrganisationId = activeOrgId ?? organisationId ?? null;
+
+  useEffect(() => {
+    if (organisationId) {
+      setActiveOrgId((prev) => prev ?? organisationId);
+    }
+  }, [organisationId]);
+
+  useEffect(() => {
+    console.log("ORG DEBUG", {
+      activeOrgId: effectiveOrganisationId,
+      role: userProfile?.role ?? userProfile?.systemRole,
+      userOrg: userProfile?.organisationId ?? userProfile?.orgId,
+    });
+  }, [effectiveOrganisationId, userProfile?.role, userProfile?.systemRole, userProfile?.organisationId, userProfile?.orgId]);
+
   const value = {
     profile: userProfile,
-    organisationId: organisationId ?? null,
+    organisationId: effectiveOrganisationId,
+    activeOrgId: effectiveOrganisationId,
     organisationName: organisation?.name ?? "",
     groupId: userProfile?.groupId ?? null,
     hospitalId: userProfile?.hospitalId ?? null,
     wardId: userProfile?.wardId ?? null,
-    organisation: organisation ?? null,
+    organisation: organisationWithTypeDefault,
     organisationType: orgType,
     orgType,
     subscription: subscription ?? null,

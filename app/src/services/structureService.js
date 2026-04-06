@@ -99,11 +99,13 @@ function mapWardDocs(docs) {
     .filter((d) => (d?.data?.()?.isDeleted !== true))
     .map((d) => {
       const x = d?.data?.() ?? {};
+      const wt = typeof x.wardType === "string" ? x.wardType.trim() : "";
       return {
         id: d?.id ?? "",
         name: typeof x.name === "string" ? x.name : "",
         hospitalId: x.hospitalId ?? "",
         organisationId: x.organisationId ?? "",
+        wardType: wt || "",
       };
     });
 }
@@ -155,11 +157,14 @@ export async function createWard(organisationId, hospitalId, data) {
   await assertSameOrganisation(organisationId);
   assertTenantContext(organisationId, hospitalId);
   const ref = doc(collection(db, WARDS_COLLECTION));
+  const wardType =
+    typeof data.wardType === "string" && data.wardType.trim() ? data.wardType.trim() : "";
   await setDoc(ref, {
     name: data.name.trim(),
     hospitalId,
     organisationId,
     wardId: ref.id,
+    ...(wardType ? { wardType } : {}),
     isDeleted: false,
     deletedAt: null,
     deletedBy: null,
@@ -249,7 +254,9 @@ export async function updateWard(organisationId, hospitalId, wardId, data) {
   if (!organisationId?.trim() || !hospitalId?.trim() || !wardId?.trim()) {
     throw new Error("organisationId, hospitalId, and wardId required");
   }
-  if (!data?.name?.trim()) throw new Error("Ward name required");
+  if (!data || typeof data !== "object") throw new Error("Invalid ward update");
+  const nameTrim = typeof data.name === "string" ? data.name.trim() : "";
+  if (!nameTrim) throw new Error("Ward name required");
   await assertManagementWrite();
   await assertSameOrganisation(organisationId);
   const ref = doc(db, WARDS_COLLECTION, wardId);
@@ -261,11 +268,16 @@ export async function updateWard(organisationId, hospitalId, wardId, data) {
   }
   if (cur.isDeleted === true) throw new Error("Ward has been deleted.");
   const uid = auth.currentUser?.uid ?? null;
-  await updateDoc(ref, {
-    name: data.name.trim(),
+  const patch = {
+    name: nameTrim,
     updatedAt: serverTimestamp(),
     ...(uid ? { updatedBy: uid } : {}),
-  });
+  };
+  if (Object.prototype.hasOwnProperty.call(data, "wardType")) {
+    const wt = data.wardType;
+    patch.wardType = typeof wt === "string" && wt.trim() ? wt.trim() : null;
+  }
+  await updateDoc(ref, patch);
   void logManagementAudit({
     action: "ORG_ADMIN_UPDATE",
     entityType: "ward",
@@ -307,6 +319,31 @@ export async function softDeleteWard(organisationId, hospitalId, wardId) {
     entityId: wardId,
     organisationId,
   });
+}
+
+/**
+ * Single ward for clinical context (e.g. CPA AI). Tenant-scoped.
+ * @param {string} organisationId
+ * @param {string} wardId
+ * @returns {Promise<{ id: string, name: string, hospitalId: string, organisationId: string, wardType: string } | null>}
+ */
+export async function getWardById(organisationId, wardId) {
+  if (!organisationId?.trim() || !wardId?.trim()) return null;
+  await assertSameOrganisation(organisationId);
+  const ref = doc(db, WARDS_COLLECTION, wardId.trim());
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return null;
+  const x = snap.data() ?? {};
+  if (x.organisationId !== organisationId) return null;
+  if (x.isDeleted === true) return null;
+  const wt = typeof x.wardType === "string" ? x.wardType.trim() : "";
+  return {
+    id: snap.id,
+    name: typeof x.name === "string" ? x.name : "",
+    hospitalId: x.hospitalId ?? "",
+    organisationId: x.organisationId ?? "",
+    wardType: wt || "",
+  };
 }
 
 async function assertSameOrganisation(organisationId) {

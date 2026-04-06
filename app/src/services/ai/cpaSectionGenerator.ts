@@ -9,8 +9,9 @@ import { getPatientCPAData, extractMdtReviewsFromNotes } from "../cpaDataAggrega
 import { mapDataToSection } from "../cpaSectionMapper";
 import { calculateAggregateRisk } from "../aggregatePatientRiskEngine";
 import { buildPatientAlerts } from "../earlyWarningEngine";
-import { buildCPAPrompt, normalizeCpaDisciplineForPrompt } from "./cpaPromptBuilder";
+import { buildPrompt, normalizeCpaDisciplineForPrompt } from "./cpaPromptBuilder";
 import type { CpaAggregatedPatientData, CpaPatientDataBundle, CpaPromptPatientData } from "./cpaPatientDataTypes";
+import { loadClinicalContextPromptForPatient } from "../../engine/clinicalContextResolver";
 
 export type { CpaAggregatedPatientData, CpaPatientDataBundle, CpaPromptPatientData } from "./cpaPatientDataTypes";
 
@@ -205,11 +206,19 @@ export async function generateCPASection(input: GenerateCPASectionInput): Promis
       fullData = await getPatientCPAData(org, pid);
     }
 
+    if (!fullData.clinicalContextBlock?.trim()) {
+      const block = await loadClinicalContextPromptForPatient(org, pid);
+      if (block) fullData = { ...fullData, clinicalContextBlock: block };
+    }
+
     const baseSection = mapDataToSection(sectionName, fullData) as Record<string, unknown>;
     const sectionData = {
       ...baseSection,
       ...(fullData.risk ? { patientRisk: fullData.risk } : {}),
       ...(Array.isArray(fullData.alerts) && fullData.alerts.length > 0 ? { activeAlerts: fullData.alerts } : {}),
+      ...(fullData.clinicalContextBlock?.trim()
+        ? { sanctumClinicalContext: fullData.clinicalContextBlock }
+        : {}),
     } as Record<string, unknown>;
 
     if (isEffectivelyEmptySectionData(sectionData)) {
@@ -224,7 +233,21 @@ export async function generateCPASection(input: GenerateCPASectionInput): Promis
 
     const limitedData = isLimitedSectionData(sectionData);
     const promptDiscipline = normalizeCpaDisciplineForPrompt(input.discipline);
-    const prompt = buildCPAPrompt(promptDiscipline, sectionName, sectionData as CpaPromptPatientData);
+    const sectionForPrompt = { ...(sectionData as Record<string, unknown>) };
+    delete sectionForPrompt.sanctumClinicalContext;
+    const promptPatientData = {
+      ...sectionForPrompt,
+      discipline: input.discipline,
+      sectionName,
+    } as CpaPromptPatientData;
+    const contextPayload = fullData.clinicalContextBlock?.trim()
+      ? {
+          sanctumClinicalContext: fullData.clinicalContextBlock,
+          discipline: input.discipline,
+          sectionName,
+        }
+      : undefined;
+    const prompt = buildPrompt(promptDiscipline, sectionName, promptPatientData, contextPayload);
     const raw = await generateAIContent(prompt, { temperature: 0.12 });
     const text = typeof raw === "string" ? raw.trim() : "";
     const content = text || CPA_SECTION_EMPTY_MESSAGE;

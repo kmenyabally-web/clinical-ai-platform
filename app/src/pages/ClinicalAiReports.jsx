@@ -18,7 +18,7 @@ import {
 import { canAccessTribunalReport } from "../utils/tribunalReportAccess";
 import { CPA_DISCIPLINE_OPTIONS, mapCanonicalDisciplineToCpaKey } from "../templates/cpa";
 import { usePatients } from "../hooks/usePatients";
-import { isCareSetting } from "../utils/orgHelpers";
+import { getReportPipelineValuesForOrganisation, isCareLikeOrganisation } from "../config/documentRegistry";
 import { getReportTemplate } from "../utils/reportTemplates";
 
 function toIsoMillis(value) {
@@ -65,8 +65,8 @@ export default function ClinicalAiReports() {
     hasFeature,
   } = useOrganisation();
 
-  const careSetting = isCareSetting(organisation?.type);
   const orgType = organisation?.type ?? "hospital";
+  const careSetting = isCareLikeOrganisation(orgType);
 
   const { data: patients = [], loading: patientsLoading, error: patientsError } = usePatients();
 
@@ -110,17 +110,18 @@ export default function ClinicalAiReports() {
   );
 
   const dropdownOptions = useMemo(() => {
-    if (!careSetting) {
-      return DROPDOWN_OPTIONS_ALL.filter((o) => o.value !== "Tribunal" || canRunTribunalOrManagement);
-    }
-    const allowed = new Set(["Management_Hearing"]);
-    return DROPDOWN_OPTIONS_ALL.filter((o) => allowed.has(o.value));
-  }, [careSetting, canRunTribunalOrManagement]);
+    const allowed = new Set(getReportPipelineValuesForOrganisation(orgType));
+    return DROPDOWN_OPTIONS_ALL.filter((o) => {
+      if (!allowed.has(o.value)) return false;
+      if (o.value === "Tribunal" && !canRunTribunalOrManagement) return false;
+      return true;
+    });
+  }, [orgType, canRunTribunalOrManagement]);
 
   useEffect(() => {
-    if (!careSetting) return;
-    if (!["Management_Hearing"].includes(reportType)) setReportType("Management_Hearing");
-  }, [careSetting, reportType]);
+    const allowed = getReportPipelineValuesForOrganisation(orgType);
+    if (!allowed.includes(reportType)) setReportType(allowed[0] ?? "CPA");
+  }, [orgType, reportType]);
 
   useEffect(() => {
     setCpaDisciplineKey(mapCanonicalDisciplineToCpaKey(userDiscipline));

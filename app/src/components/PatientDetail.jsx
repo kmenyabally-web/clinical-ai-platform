@@ -35,6 +35,8 @@ import { buildTrendData, sortObservationsByCreatedAtDesc } from "../utils/health
 import { detectDeterioration } from "../utils/deterioration";
 import { isCareSetting, isClinicalSetting } from "../utils/orgHelpers";
 import { CLINICAL_CONTENT_MAX_WIDTH_PX } from "../config/contentLayout";
+import { getWardById } from "../services/structureService";
+import { deriveClinicalContext } from "../engine/clinicalContextEngine";
 
 const openedAuditKeys = new Set();
 
@@ -53,6 +55,7 @@ export default function PatientDetail() {
   const clinicalSetting = isClinicalSetting(orgType);
   const [isLoading, setIsLoading] = useState(true);
   const [patient, setPatient] = useState(null);
+  const [wardType, setWardType] = useState(null);
   const [error, setError] = useState(null);
   const [incidents, setIncidents] = useState([]);
   const [incidentsLoading, setIncidentsLoading] = useState(false);
@@ -133,6 +136,25 @@ export default function PatientDetail() {
       mounted = false;
     };
   }, [id]);
+
+  // Ward type powers the unified clinical context (LD + MH + ward are always combined).
+  useEffect(() => {
+    let cancelled = false;
+    if (!organisationId || !patient?.wardId) {
+      setWardType(null);
+      return;
+    }
+    void getWardById(organisationId, patient.wardId)
+      .then((w) => {
+        if (!cancelled) setWardType(w?.wardType ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setWardType(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [organisationId, patient?.wardId]);
 
   useEffect(() => {
     let mounted = true;
@@ -334,8 +356,24 @@ export default function PatientDetail() {
       (patient?.hospitalId && String(patient.hospitalId).trim()) ||
       (profileHospitalId && String(profileHospitalId).trim()) ||
       null;
-    return { organisationId: oid, hospitalId: hid };
-  }, [organisationId, patient?.organisationId, patient?.hospitalId, profileHospitalId]);
+    const orgType = organisation?.type ?? "hospital";
+    const clinicalContext = deriveClinicalContext({
+      hasLD: patient?.hasLD === true,
+      hasMentalHealth: patient?.hasMentalHealth === true,
+      wardType,
+      organisationType: orgType,
+    });
+    return { organisationId: oid, hospitalId: hid, clinicalContextBlock: clinicalContext.aiContextBlock };
+  }, [
+    organisationId,
+    patient?.organisationId,
+    patient?.hospitalId,
+    profileHospitalId,
+    wardType,
+    patient?.hasLD,
+    patient?.hasMentalHealth,
+    organisation?.type,
+  ]);
 
   const reportContextReady = Boolean(
     reportContext.organisationId &&
@@ -1162,6 +1200,9 @@ export default function PatientDetail() {
           formatWhen={formatWhen}
           refreshNotes={refreshNotes}
           organisationType={organisation?.type ?? null}
+          hasLD={patient?.hasLD === true}
+          hasMentalHealth={patient?.hasMentalHealth === true}
+          wardType={wardType}
         />
       </div>
     </div>

@@ -22,6 +22,7 @@ if (isProd && !firebaseConfig.apiKey) {
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
+/** Firestore location follows the Firebase project default (set in console). Align Functions via VITE_FIREBASE_FUNCTIONS_REGION. */
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 

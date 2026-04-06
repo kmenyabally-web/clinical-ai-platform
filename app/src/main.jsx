@@ -12,7 +12,6 @@ import { initErrorMonitoring } from "./lib/errorMonitoring";
 import { runFirestoreTestWriteOnce } from "./services/firestoreTestWrite";
 
 initErrorMonitoring();
-console.log("🚀 SanctumCare System Loaded");
 if (import.meta.env.DEV) {
   runFirestoreTestWriteOnce();
 }

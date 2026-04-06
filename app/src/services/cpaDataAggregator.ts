@@ -30,6 +30,9 @@ import {
   buildSALTStructuredSummary,
 } from "./mdtStructuredSummary";
 import type { CpaAggregatedPatientData } from "./ai/cpaPatientDataTypes";
+import { buildClinicalContextPromptBlock } from "../engine/clinicalContextEngine";
+import { getOrganisation } from "./organisation";
+import { getWardById } from "./structureService";
 
 export function extractMdtReviewsFromNotes(notes: unknown[]): unknown[] {
   const out: unknown[] = [];
@@ -185,5 +188,6 @@ export async function getPatientCPAData(
     risk,
     alerts,
     mdtSummaryText,
+    clinicalContextBlock,
   };
 }
