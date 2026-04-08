@@ -22,6 +22,17 @@ import {
   getUiModeForOrganisationType,
 } from "../config/organisationTemplates";
 
+export const ORGANISATION_TYPES = ["hospital", "care_home", "nursing_home", "supported_living"];
+
+function normalizeOrganisationType(raw) {
+  const t = String(raw ?? "hospital").trim().toLowerCase();
+  if (!t) return "hospital";
+  if (!ORGANISATION_TYPES.includes(t)) {
+    throw new Error("Invalid organisation type. Expected hospital | care_home | nursing_home | supported_living.");
+  }
+  return t;
+}
+
 /**
  * Fetch the current user's document to get organisationId.
  * @param {string} uid - Firebase Auth UID
@@ -68,7 +79,7 @@ export async function getOrganisation(organisationId) {
   const data = orgSnap.data?.() ?? {};
   if (data.isDeleted === true) return null;
   const rawPlan = data.plan ?? data.subscriptionPlan ?? null;
-  const orgType = data.type ?? data.organisationType ?? data.orgType ?? "hospital";
+  const orgType = normalizeOrganisationType(data.type ?? data.organisationType ?? data.orgType ?? "hospital");
   const featuresFromDoc = data.features && typeof data.features === "object" ? data.features : null;
   const baseFromType = getFeaturesForOrganisationType(orgType);
   const effectiveFeatures = {
@@ -105,7 +116,7 @@ export async function createOrganisation(organisationId, data) {
   if (!data?.name?.trim()) throw new Error("Organisation name required");
   const orgRef = doc(db, "organisations", organisationId);
   const plan = data.plan != null ? normalizePlanKey(data.plan) : "BASIC";
-  const typeField = data.type ?? data.organisationType ?? data.orgType ?? null;
+  const typeField = normalizeOrganisationType(data.type ?? data.organisationType ?? data.orgType ?? "hospital");
   const baseFromType = getFeaturesForOrganisationType(typeField);
   const effectiveFeatures = {
     ...baseFromType,
@@ -121,7 +132,7 @@ export async function createOrganisation(organisationId, data) {
     status: data.status ?? "active",
     features: effectiveFeatures,
     roles: effectiveRoles,
-    ...(typeField ? { type: typeField } : null),
+    type: typeField,
     uiMode,
     isDeleted: false,
     deletedAt: null,

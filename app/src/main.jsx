@@ -10,10 +10,12 @@ import { RoleProvider } from "./context/RoleContext";
 import { ServiceProvider } from "./context/ServiceContext";
 import { initErrorMonitoring } from "./lib/errorMonitoring";
 import { runFirestoreTestWriteOnce } from "./services/firestoreTestWrite";
+import { seedSanctumCareDemoData } from "./services/seedSanctumCareDemo";
 
 initErrorMonitoring();
 if (import.meta.env.DEV) {
   runFirestoreTestWriteOnce();
+  void seedSanctumCareDemoData();
 }
 
 // Provider order: Auth → Organisation → Role → Service (needs org + user) → App.

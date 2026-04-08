@@ -10,6 +10,75 @@ import { normalizeWardType, type WardTypeCanonical } from "../engine/clinicalCon
 /** Every primary app module path from `routes.js` `NAV_ITEMS`. */
 export const ALL_MODULE_PATHS: string[] = NAV_ITEMS.map((i) => i.path);
 
+/**
+ * DOCUMENT_REGISTRY_V1
+ * UI menus should derive document groups from this object.
+ */
+export const DOCUMENTS = {
+  reports: [
+    "CPA (discipline)",
+    "MDT Summary",
+    "Tribunal Report (Nursing)",
+    "RC Tribunal Report",
+    "Management Hearing",
+    "CTR Report",
+  ],
+  care: [
+    "Care Plan",
+    "72hr Care Plan",
+    "PBS Plan",
+    "Communication Plan",
+  ],
+  risk: [
+    "Risk Assessment",
+    "Para-risk Assessment",
+    "Safeguarding",
+    "Incident Report",
+  ],
+  compliance: [
+    "Policies",
+    "Staff Training",
+    "Audit Logs",
+  ],
+} as const;
+
+export type DocumentRegistryCategory = keyof typeof DOCUMENTS;
+export type DocumentRegistryLabel = (typeof DOCUMENTS)[DocumentRegistryCategory][number];
+
+export type MenuItem = { path: string; label: string };
+
+/** Non-role-filtered menu derived from DOCUMENT_REGISTRY_V1. */
+export function getMainMenuFromDocumentRegistry(): MenuItem[] {
+  return [
+    { path: "/dashboard", label: "Dashboard" },
+    { path: "/patients", label: "Patients" },
+    { path: "/clinical-notes", label: "Clinical Notes" },
+    { path: "/behaviour", label: "Behaviour Tracking" },
+    { path: "/physical-health", label: "Physical Health" },
+    { path: "/incidents", label: "Incidents & Safeguarding" },
+    { path: "/documents", label: "Documents" },
+    { path: "/care-plans", label: "Care Plans" },
+    { path: "/mdt", label: "MDT Reviews" },
+    // From DOCUMENTS.reports
+    { path: "/reports", label: "AI Reports" },
+    { path: "/evidence-pack", label: "Evidence Pack" },
+    { path: "/inspection-simulator", label: "Inspection Simulator" },
+    // From DOCUMENTS.compliance
+    { path: "/organisation/policies", label: "Policies" },
+    { path: "/staff-training", label: "Staff Training" },
+    { path: "/audit-log", label: "Audit Log" },
+  ];
+}
+
+export function getManagementMenuFromDocumentRegistry(): MenuItem[] {
+  return [
+    { path: "/management/organisations", label: "Organisations" },
+    { path: "/management/hospitals", label: "Hospitals" },
+    { path: "/management/wards", label: "Wards" },
+    { path: "/management/users", label: "Users" },
+  ];
+}
+
 export type OrganisationRegistryKey =
   | "hospital"
   | "care_home"
@@ -32,21 +101,17 @@ function canonicalOrganisationType(raw: string | null | undefined): Organisation
   return s as OrganisationRegistryKey;
 }
 
-/** Module paths hidden for care-like orgs (psychiatry/psychology-heavy CPA surfaces). */
-const CARE_LIKE_HIDDEN_MODULES = new Set<string>(["/psychology-formulation", "/mdt-structured-clinical"]);
-
 /**
- * organisationType → allowed module paths (nav items). Hospital-like gets full clinical stack;
- * care-like orgs drop MDT psychology surfaces; unknown types fall back to hospital.
+ * organisationType → allowed module paths (nav items).
+ * Organisation type logic is defaults/labels only; never hide system modules by org type.
  */
 export const MODULES_BY_ORGANISATION: Record<OrganisationRegistryKey, string[]> = {
   hospital: [...ALL_MODULE_PATHS],
   default: [...ALL_MODULE_PATHS],
-  care_home: ALL_MODULE_PATHS.filter((p) => !CARE_LIKE_HIDDEN_MODULES.has(p)),
-  nursing_home: ALL_MODULE_PATHS.filter((p) => !CARE_LIKE_HIDDEN_MODULES.has(p)),
-  supported_living: ALL_MODULE_PATHS.filter((p) => !CARE_LIKE_HIDDEN_MODULES.has(p)),
-  /** Domiciliary: align with care-like for psychiatry/psychology CPA modules. */
-  domiciliary_care: ALL_MODULE_PATHS.filter((p) => !CARE_LIKE_HIDDEN_MODULES.has(p)),
+  care_home: [...ALL_MODULE_PATHS],
+  nursing_home: [...ALL_MODULE_PATHS],
+  supported_living: [...ALL_MODULE_PATHS],
+  domiciliary_care: [...ALL_MODULE_PATHS],
 };
 
 /** Supporting / formal document identifiers (not routes — used for labels, exports, future Documents hub). */
@@ -69,7 +134,15 @@ export type SupportingDocumentId =
   | "s17_leave_risk"
   | "s117_aftercare"
   | "restrictive_practice_log"
-  | "high_frequency_behaviour";
+  | "high_frequency_behaviour"
+  | "rapid_risk_review"
+  | "crisis_plan"
+  | "admission_assessment"
+  | "ot_plan"
+  | "progress_report"
+  | "discharge_planning"
+  | "risk_assessment"
+  | "moj_report";
 
 const BASE_DOCUMENTS: SupportingDocumentId[] = [
   "clinical_notes",
@@ -96,16 +169,23 @@ const BASE_DOCUMENTS: SupportingDocumentId[] = [
  * Unknown or missing ward type → base list only.
  */
 export const DOCUMENTS_BY_WARD: Record<WardTypeCanonical, SupportingDocumentId[]> = {
-  acute: BASE_DOCUMENTS,
+  acute: [...BASE_DOCUMENTS, "crisis_plan", "admission_assessment", "mdt_review"],
   picu: [
     ...BASE_DOCUMENTS,
+    "incident_investigation",
+    "rapid_risk_review",
     "restrictive_practice_log",
     "high_frequency_behaviour",
   ],
-  rehab: BASE_DOCUMENTS,
-  low_secure: BASE_DOCUMENTS,
-  medium_secure: BASE_DOCUMENTS,
+  rehab: [...BASE_DOCUMENTS, "ot_plan", "progress_report", "discharge_planning"],
+  low_secure: [...BASE_DOCUMENTS, "tribunal_nursing", "tribunal_rc", "s17_leave_risk", "risk_assessment", "moj_report"],
+  medium_secure: [...BASE_DOCUMENTS, "tribunal_nursing", "tribunal_rc", "s17_leave_risk", "risk_assessment", "moj_report"],
 };
+
+/** Canonical ward-type document logic for form availability (does not hide core modules). */
+export function getDocumentsForWardType(wardType: string | null | undefined): SupportingDocumentId[] {
+  return getSupportingDocumentsForWard(wardType);
+}
 
 /** AI Reports page pipeline values (aligned with `ClinicalAiReports` dropdown). */
 export type ReportPipelineValue =
@@ -146,18 +226,51 @@ export type FormSlug =
   | "mdt_review"
   | "tribunal_nursing_section"
   | "tribunal_rc_section"
-  | "management_hearing";
+  | "management_hearing"
+  | "rapid_risk_review"
+  | "restrictive_intervention_log"
+  | "crisis_plan"
+  | "admission_assessment"
+  | "ot_plan"
+  | "progress_report"
+  | "discharge_planning"
+  | "section_17_leave"
+  | "risk_assessment"
+  | "moj_report";
 
 /** modulePath → forms available when that module is visible. */
 export const FORMS_BY_MODULE: Record<string, FormSlug[]> = {
   "/clinical-notes": ["clinical_note"],
-  "/behaviour": ["behaviour_log"],
+  "/behaviour": ["behaviour_log", "rapid_risk_review", "restrictive_intervention_log", "risk_assessment"],
   "/physical-health": ["physical_health_obs"],
-  "/incidents": ["incident"],
-  "/reports": ["cpa_section", "mdt_review", "tribunal_nursing_section", "tribunal_rc_section"],
+  "/incidents": ["incident", "rapid_risk_review", "restrictive_intervention_log"],
+  "/reports": ["cpa_section", "mdt_review", "tribunal_nursing_section", "tribunal_rc_section", "progress_report", "moj_report"],
   "/mdt": ["mdt_review"],
-  "/care-plans": ["care_monitoring"],
-  "/care-plan": ["care_monitoring"],
+  "/care-plans": ["care_monitoring", "crisis_plan", "admission_assessment", "ot_plan", "discharge_planning", "section_17_leave"],
+  "/care-plan": ["care_monitoring", "crisis_plan", "admission_assessment", "ot_plan", "discharge_planning", "section_17_leave"],
+};
+
+const DOCUMENTS_BY_FORM: Partial<Record<FormSlug, SupportingDocumentId[]>> = {
+  clinical_note: ["clinical_notes"],
+  behaviour_log: ["behaviour_logs"],
+  physical_health_obs: ["physical_health"],
+  care_monitoring: ["care_monitoring"],
+  incident: ["incident_investigation"],
+  cpa_section: ["cpa_discipline"],
+  mdt_review: ["mdt_review"],
+  tribunal_nursing_section: ["tribunal_nursing"],
+  tribunal_rc_section: ["tribunal_rc"],
+  management_hearing: ["management_hearing"],
+  rapid_risk_review: ["rapid_risk_review"],
+  restrictive_intervention_log: ["restrictive_practice_log"],
+  crisis_plan: ["crisis_plan"],
+  admission_assessment: ["admission_assessment"],
+  ot_plan: ["ot_plan"],
+  progress_report: ["progress_report"],
+  discharge_planning: ["discharge_planning"],
+  section_17_leave: ["s17_leave_risk"],
+  risk_assessment: ["risk_assessment"],
+  moj_report: ["moj_report"],
 };
 
 export function getModulesForOrganisation(organisationType: string | null | undefined): string[] {
@@ -195,9 +308,16 @@ export function getFormsForModulePath(modulePath: string): FormSlug[] {
 export function getVisibleFormsForContext(args: {
   organisationType: string | null | undefined;
   modulePath: string;
+  wardType?: string | null;
 }): FormSlug[] {
-  if (!isModulePathAllowedForOrganisation(args.modulePath, args.organisationType)) return [];
-  return getFormsForModulePath(args.modulePath);
+  const forms = getFormsForModulePath(args.modulePath);
+  if (!args.wardType) return forms;
+  const docs = new Set(getDocumentsForWardType(args.wardType));
+  return forms.filter((f) => {
+    const needs = DOCUMENTS_BY_FORM[f];
+    if (!needs?.length) return true;
+    return needs.some((d) => docs.has(d));
+  });
 }
 
 /**

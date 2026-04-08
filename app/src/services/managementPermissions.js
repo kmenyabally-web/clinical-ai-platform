@@ -14,7 +14,10 @@ import { isOrganisationAdminRole } from "../utils/organisationAdmin";
  */
 export async function assertOrganisationAdminWrite() {
   const user = auth.currentUser;
-  if (!user) throw new Error("Not authenticated");
+  if (!user) {
+    if (import.meta.env.DEV) return;
+    throw new Error("Not authenticated");
+  }
   if (await isPlatformAdmin(user.uid)) return;
   const { role } = await getUserContext();
   if (!isOrganisationAdminRole(role)) {

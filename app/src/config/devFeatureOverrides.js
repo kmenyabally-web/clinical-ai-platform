@@ -4,6 +4,7 @@
  * Production builds are unchanged.
  */
 export const DEV_ORG_FEATURES_OVERRIDE = {
+  allFeatures: true,
   ai: true,
   aiReports: true,
   evidencePack: true,

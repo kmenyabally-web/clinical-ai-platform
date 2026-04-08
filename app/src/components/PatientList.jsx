@@ -227,7 +227,8 @@ export default function PatientList() {
           }}
         >
           No patients found for current organisation. If you expect data here, confirm each patient document includes a
-          matching <code style={{ fontSize: 13 }}>organisationId</code> (for example your tenant id such as snc002).
+          matching <code style={{ fontSize: 13 }}>organisationId</code> (for example your tenant id such as demo-org).
+          <div style={{ marginTop: 6 }}>⚠️ No patients — check data path</div>
         </div>
       ) : null}
 

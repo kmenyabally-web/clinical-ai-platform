@@ -62,7 +62,7 @@ export function OrganisationProvider({ children }) {
   const { user } = useAuth();
   const [organisationId, setOrganisationId] = useState(null);
   /** First resolved tenant id after auth — kept stable (not cleared when transient loads flicker). */
-  const [activeOrgId, setActiveOrgId] = useState(null);
+  const [activeOrgId, setActiveOrgId] = useState(import.meta.env.DEV ? "demo-org" : null);
   const [organisation, setOrganisation] = useState(null);
   const [subscription, setSubscription] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
@@ -107,7 +107,7 @@ export function OrganisationProvider({ children }) {
     }
     if (!uid) {
       setOrganisationId(null);
-      setActiveOrgId(null);
+      setActiveOrgId(import.meta.env.DEV ? "demo-org" : null);
       setOrganisation(null);
       setSubscription(null);
       setUserProfile(null);
@@ -454,7 +454,7 @@ export function OrganisationProvider({ children }) {
     const unsubscribe = onAuthStateChanged(auth, (authUser) => {
       if (!authUser) {
         setOrganisationId(null);
-        setActiveOrgId(null);
+        setActiveOrgId(import.meta.env.DEV ? "demo-org" : null);
         setOrganisation(null);
         setSubscription(null);
         setUserProfile(null);
@@ -508,8 +508,14 @@ export function OrganisationProvider({ children }) {
   const effectiveOrganisationId = activeOrgId ?? organisationId ?? null;
 
   useEffect(() => {
+    if (user?.organisationId) {
+      setActiveOrgId(String(user.organisationId).trim());
+    }
+  }, [user?.organisationId]);
+
+  useEffect(() => {
     if (organisationId) {
-      setActiveOrgId((prev) => prev ?? organisationId);
+      setActiveOrgId(organisationId);
     }
   }, [organisationId]);
 

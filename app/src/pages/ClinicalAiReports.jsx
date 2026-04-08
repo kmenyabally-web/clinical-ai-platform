@@ -5,6 +5,7 @@ import { useOrganisation } from "../context/OrganisationContext";
 import { useAuth } from "../context/AuthContext";
 import { buildStandardClinicalReport } from "../utils/buildStandardClinicalReport";
 import { exportToPDF } from "../utils/exportPdf";
+import { generatePDF } from "../utils/professionalReportPdf";
 import { saveClinicalReportDocument } from "../services/savedClinicalReportsService";
 import { generateReport, mapDropdownToPipelineType, pipelineTypeToDropdown } from "../services/clinicalReportPipeline";
 import { legacyReportToUnified } from "../services/reportEngine";
@@ -52,6 +53,70 @@ const cardStyle = {
   marginBottom: 12,
   boxShadow: "0 1px 2px rgba(15, 23, 42, 0.06)",
 };
+
+function buildProfessionalSections(reportType, unifiedSections, sectionFallback) {
+  const getByNeedle = (needles) => {
+    const keys = (Array.isArray(needles) ? needles : []).map((x) => String(x).toLowerCase());
+    const hit = (unifiedSections ?? []).find((s) =>
+      keys.some((k) => String(s?.heading ?? "").toLowerCase().includes(k))
+    );
+    return String(hit?.content ?? "").trim() || null;
+  };
+
+  if (reportType === "CPA") {
+    return [
+      "Current Presentation",
+      "Physical Health",
+      "Risk",
+      "Engagement",
+      "Recommendation",
+    ].map((title, idx) => ({
+      heading: title,
+      content:
+        getByNeedle([title, title.toLowerCase()]) ||
+        sectionFallback(title, idx) ||
+        "No information recorded.",
+    }));
+  }
+
+  if (reportType === "MDT_SUMMARY") {
+    return [
+      "Nursing Summary",
+      "Psychiatry Summary",
+      "Psychology Summary",
+      "OT Summary",
+      "SALT Summary",
+      "Overall MDT Summary",
+    ].map((title, idx) => ({
+      heading: title,
+      content:
+        getByNeedle([title, title.replace(" Summary", ""), title.toLowerCase()]) ||
+        sectionFallback(title, idx) ||
+        "No information recorded.",
+    }));
+  }
+
+  if (reportType === "Tribunal") {
+    return [
+      "Mental State",
+      "Risk Summary",
+      "Medication Adherence",
+      "Legal Status",
+      "Recommendation",
+    ].map((title, idx) => ({
+      heading: title,
+      content:
+        getByNeedle([title, title.toLowerCase()]) ||
+        sectionFallback(title, idx) ||
+        "No information recorded.",
+    }));
+  }
+
+  return (unifiedSections ?? []).map((s) => ({
+    heading: String(s?.heading ?? "Section"),
+    content: String(s?.content ?? "").trim() || "No information recorded.",
+  }));
+}
 
 export default function ClinicalAiReports() {
   const [searchParams] = useSearchParams();
@@ -373,7 +438,30 @@ export default function ClinicalAiReports() {
     setPdfBusy(true);
     try {
       const base = `${selectedPatientLabel}_${lastGenerated?.reportType ?? reportType}`.replace(/[^a-z0-9-_]/gi, "_");
-      await exportToPDF("clinical-ai-report-export", `${base}.pdf`);
+      if (unified) {
+        const sectionsForPdf = buildProfessionalSections(
+          reportType,
+          unifiedSectionsForRender,
+          (title, idx) => resolveTemplateSectionContent(title, idx)
+        );
+        generatePDF({
+          fileName: `${base}.pdf`,
+          reportType: reportType === "MDT_SUMMARY" ? "MDT Summary" : reportType,
+          organisationName: organisationName || "SanctumCare Demo org",
+          hospitalName: selectedPatient?.hospitalName || "SanctumCare Main Hospital",
+          wardName: selectedPatient?.wardName || "PICU Ward",
+          patientName: selectedPatientLabel || "Patient",
+          nhsNumber: selectedPatient?.nhsNumber ?? null,
+          generatedAt:
+            reportMeta?.at ??
+            new Date().toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }),
+          title: unified.title || "Clinical Report",
+          summary: unified.summary || "",
+          sections: sectionsForPdf,
+        });
+      } else {
+        await exportToPDF("clinical-ai-report-export", `${base}.pdf`);
+      }
     } finally {
       setPdfBusy(false);
     }
@@ -709,6 +797,21 @@ export default function ClinicalAiReports() {
           </div>
 
           <div id="clinical-ai-report-export" style={{ background: "#f8fafc", padding: 20, borderRadius: 12, border: "1px solid #e2e8f0" }}>
+            <div style={{ ...cardStyle, marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 900 }}>Report Header</h3>
+              <div style={{ marginTop: 10, color: "#334155", fontSize: 13, lineHeight: 1.7 }}>
+                <div><strong>Organisation Name:</strong> {organisationName || "SanctumCare Demo org"}</div>
+                <div><strong>Hospital:</strong> {selectedPatient?.hospitalName || "SanctumCare Main Hospital"}</div>
+                <div><strong>Ward:</strong> {selectedPatient?.wardName || "PICU Ward"}</div>
+                <div><strong>Patient Name:</strong> {selectedPatientLabel || "Patient"}</div>
+                <div><strong>NHS No:</strong> {selectedPatient?.nhsNumber || "Not recorded"}</div>
+                <div>
+                  <strong>Date:</strong>{" "}
+                  {reportMeta?.at ?? new Date().toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })}
+                </div>
+                <div><strong>Report Type:</strong> {reportType === "MDT_SUMMARY" ? "MDT Summary" : reportType}</div>
+              </div>
+            </div>
             {reportMeta ? (
               <div
                 style={{
@@ -746,15 +849,19 @@ export default function ClinicalAiReports() {
               </div>
             ) : null}
 
-            {templateSections.map((sectionTitle, idx) => {
-              const content = resolveTemplateSectionContent(sectionTitle, idx);
+            {buildProfessionalSections(
+              reportType,
+              unifiedSectionsForRender,
+              (sectionTitle, idx) => resolveTemplateSectionContent(sectionTitle, idx)
+            ).map((section, idx) => {
+              const content = section.content;
               return (
-                <div key={`${sectionTitle}-${idx}`} style={cardStyle} className="report-section">
+                <div key={`${section.heading}-${idx}`} style={cardStyle} className="report-section">
                   <h3
                     className="report-section-heading"
                     style={{ margin: "0 0 10px", fontSize: "1.05rem", color: "#0f172a", fontWeight: 800 }}
                   >
-                    {sectionTitle}
+                    {section.heading}
                   </h3>
                   <p
                     className="report-section-body"

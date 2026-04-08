@@ -17,6 +17,30 @@ export const KNOWN_FEATURE_KEYS = [
   "tasks",
 ];
 
+/** Organisation-type presentation/default profile (non-blocking; does not hide system modules). */
+export const ORG_TYPE_PROFILES = {
+  hospital: {
+    label: "Hospital (Full System)",
+    summary: "Full system enabled with complete clinical workflows.",
+    defaults: { careModel: "full_system", clinicalFocus: "balanced" },
+  },
+  care_home: {
+    label: "Care Home",
+    summary: "Care-home defaults with reduced psychiatry emphasis in wording.",
+    defaults: { careModel: "care_home", clinicalFocus: "no_psychiatry_default" },
+  },
+  nursing_home: {
+    label: "Nursing Home",
+    summary: "Nursing-home defaults prioritising physical health context.",
+    defaults: { careModel: "nursing_home", clinicalFocus: "physical_health_first" },
+  },
+  supported_living: {
+    label: "Supported Living",
+    summary: "Simplified defaults for supported living workflows.",
+    defaults: { careModel: "supported_living", clinicalFocus: "simplified" },
+  },
+};
+
 // Baseline feature state for all templates:
 // - optional modules default to `false` (unless the template explicitly enables them)
 // - audit is always enabled (core capability)
@@ -104,21 +128,9 @@ export function getRolesForOrganisationType(type) {
 }
 
 export function getFeaturesForOrganisationType(type) {
-  const care = getCareTemplate(type);
-  if (care?.features) {
-    return {
-      ...DEFAULT_ORG_FEATURES,
-      ...care.features,
-      audit: true,
-    };
-  }
-  const t = normalizeLegacyOrgType(type) ?? "GENERAL";
-  const template = ORG_TEMPLATES[t] ?? ORG_TEMPLATES.GENERAL;
-  const featuresFromTemplate = template?.features && typeof template.features === "object" ? template.features : {};
-
+  // System-wide safe default: keep features available; org type should shape defaults/labels, not hide system.
   return {
-    ...DEFAULT_ORG_FEATURES,
-    ...featuresFromTemplate,
+    ...Object.fromEntries(KNOWN_FEATURE_KEYS.map((k) => [k, true])),
     audit: true,
   };
 }
@@ -129,5 +141,11 @@ export function getUiModeForOrganisationType(type, storedUiMode) {
     return storedUiMode;
   }
   return getCareTemplate(type)?.uiMode ?? "CLINICAL";
+}
+
+/** Non-blocking profile for labels/defaults by organisation type. */
+export function getOrganisationTypeProfile(type) {
+  const key = String(type ?? "hospital").trim().toLowerCase();
+  return ORG_TYPE_PROFILES[key] ?? ORG_TYPE_PROFILES.hospital;
 }
 

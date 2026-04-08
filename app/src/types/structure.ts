@@ -5,6 +5,7 @@
 export type Organisation = {
   id: string;
   name: string;
+  type: "hospital" | "care_home" | "nursing_home" | "supported_living";
   plan: string;
 };
 
@@ -19,4 +20,5 @@ export type Ward = {
   name: string;
   hospitalId: string;
   organisationId: string;
+  type: "acute" | "picu" | "rehab" | "low_secure" | "medium_secure";
 };

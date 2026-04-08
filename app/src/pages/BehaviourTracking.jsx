@@ -9,7 +9,6 @@ import {
 import { addABCEntry, getABCLogsForPatient } from "../services/abcService";
 import { useRole } from "../context/RoleContext";
 import { useOrganisation } from "../context/OrganisationContext";
-import { usePermissions } from "../hooks/usePermissions";
 import { useAuth } from "../context/AuthContext";
 import { getBehaviourLogInsights, calculateCqcScore } from "../engine/inspectionInsights";
 import { calculateBehaviourRiskFromLogs } from "../utils/riskEngine";
@@ -119,8 +118,19 @@ function formatBehaviourLogTimestamp(entry) {
 export default function BehaviourTracking() {
   const { organisationId, hospitalId, wardId, hasFeature } = useOrganisation();
   const { user } = useAuth();
-  const { isInspectorRole } = useRole();
-  const permissions = usePermissions();
+  const { isInspectorRole, role } = useRole();
+  const roleUpper = String(role ?? "").trim().toUpperCase();
+  const allowedRoles = [
+    "ADMIN",
+    "SUPER_ADMIN",
+    "WARD_MANAGER",
+    "SENIOR_NURSE",
+    "NURSE",
+    "SUPPORT_WORKER",
+  ];
+  const canAccessBehaviourByRole = roleUpper
+    ? allowedRoles.includes(roleUpper)
+    : import.meta.env.DEV === true;
 
   const { data: patients = [], loading: patientsLoading, error: patientsError } = usePatients();
 
@@ -328,7 +338,7 @@ export default function BehaviourTracking() {
   async function handleSubmitABC(e) {
     e.preventDefault();
     setAbcError(null);
-    if (!permissions?.canAccessBehaviour) {
+    if (!canAccessBehaviourByRole) {
       const msg = "Your role does not have access to behaviour tracking.";
       setAbcError(msg);
       showToast(msg);
@@ -400,7 +410,7 @@ export default function BehaviourTracking() {
     >
       <h1 style={{ marginTop: 0 }}>Behaviour Tracking</h1>
 
-      {!permissions?.canAccessBehaviour ? (
+      {!canAccessBehaviourByRole ? (
         <div style={{ background: "#fef2f2", border: "1px solid #fecaca", padding: "12px 14px", borderRadius: 10, color: "#991b1b", marginBottom: 14 }}>
           Your role does not have access to behaviour tracking.
         </div>
@@ -498,7 +508,7 @@ export default function BehaviourTracking() {
             Antecedent–behaviour–consequence entries are stored as structured data and used as the primary source in CPA
             behavioural and risk sections.
           </p>
-          {!permissions?.canAccessBehaviour ? (
+          {!canAccessBehaviourByRole ? (
             <p style={{ color: "#991b1b", fontWeight: 600 }}>Your role cannot save ABC entries.</p>
           ) : (
             <form onSubmit={handleSubmitABC}>

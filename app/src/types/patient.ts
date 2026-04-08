@@ -9,7 +9,7 @@ export type PatientRecord = {
   /** Optional legacy / secondary scope */
   serviceId?: string | null;
   /** Learning disability pathway — drives PBS / communication framing in AI context. */
-  hasLD?: boolean;
+  hasLD: boolean;
   /** Mental health pathway — drives diagnosis / MSE / medication framing in AI context. */
-  hasMentalHealth?: boolean;
+  hasMentalHealth: boolean;
 };

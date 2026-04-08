@@ -27,7 +27,7 @@ export function RoleProvider({ children }) {
   const { userProfile, loading: orgLoading, organisationId } = useOrganisation();
 
   /** First resolved role from Firestore profile — avoids STAFF→Admin flicker while claims load. */
-  const [lockedRole, setLockedRole] = useState(null);
+  const [lockedRole, setLockedRole] = useState(import.meta.env.DEV ? "SUPER_ADMIN" : null);
 
   const [claimRole, setClaimRole] = useState(null);
   useEffect(() => {
@@ -53,7 +53,7 @@ export function RoleProvider({ children }) {
 
   useEffect(() => {
     if (!user) {
-      setLockedRole(null);
+      setLockedRole(import.meta.env.DEV ? "SUPER_ADMIN" : null);
       return;
     }
     setLockedRole((prev) => {

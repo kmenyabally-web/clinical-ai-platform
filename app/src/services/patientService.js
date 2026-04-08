@@ -31,6 +31,7 @@ import { logManagementAudit } from "./managementAuditLog";
 
 const PATIENTS_COLLECTION = "patients";
 const MAX_ORG_WIDE_PATIENTS = 500;
+const DEV_FORCE_VISIBLE_PATIENT_DATA = import.meta.env.DEV === true;
 
 function normalizeStompMedication(raw) {
   const item = raw && typeof raw === "object" ? raw : {};
@@ -71,6 +72,18 @@ function assertRequiredWriteContext({ organisationId, hospitalId, userId }) {
   if (!userId) throw new Error("Missing user");
 }
 
+function hasRequiredPatientLinks(row) {
+  return Boolean(
+    row &&
+      typeof row.organisationId === "string" &&
+      row.organisationId.trim() &&
+      typeof row.hospitalId === "string" &&
+      row.hospitalId.trim() &&
+      typeof row.wardId === "string" &&
+      row.wardId.trim()
+  );
+}
+
 /**
  * @param {Record<string, unknown>} filters
  * @param {string} [filters.hospitalId]
@@ -99,13 +112,13 @@ export async function listPatientMetadata(filters = {}) {
 
   let snapshot;
   let devUnscoped = false;
-  if (!organisationId) {
-    if (!import.meta.env.DEV) {
+  if (!organisationId || DEV_FORCE_VISIBLE_PATIENT_DATA) {
+    if (!import.meta.env.DEV && !organisationId) {
       throw new Error(GENERIC_USER_ERROR_MESSAGE);
     }
-    console.warn("No orgId — fallback loading all (dev only)");
+    console.warn("Fallback: loading all data");
     devUnscoped = true;
-    snapshot = await getDocs(query(collection(db, PATIENTS_COLLECTION), limit(MAX_ORG_WIDE_PATIENTS)));
+    snapshot = await getDocs(collection(db, PATIENTS_COLLECTION));
   } else if (allInOrganisation) {
     const q = query(
       collection(db, PATIENTS_COLLECTION),
@@ -161,6 +174,7 @@ export async function listPatientMetadata(filters = {}) {
 
     return {
       id: d?.id ?? "",
+      organisationId: typeof data.organisationId === "string" ? data.organisationId : "",
       firstName: typeof data.firstName === "string" ? data.firstName : "",
       lastName: typeof data.lastName === "string" ? data.lastName : "",
       dob: data.dob ?? data.dateOfBirth ?? null,
@@ -177,6 +191,9 @@ export async function listPatientMetadata(filters = {}) {
       hasMentalHealth: data.hasMentalHealth === true,
     };
   });
+  if (!DEV_FORCE_VISIBLE_PATIENT_DATA) {
+    results = results.filter(hasRequiredPatientLinks);
+  }
 
   if (devUnscoped) {
     const hospitalId =
@@ -194,6 +211,11 @@ export async function listPatientMetadata(filters = {}) {
   // hospitalId/wardId filtering is enforced in Firestore query constraints above.
   if (serviceId) {
     results = results.filter((p) => !p.serviceId || p.serviceId === serviceId);
+  }
+
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log("PATIENTS LOADED", results);
   }
 
   await logAuditEventNonBlocking({
@@ -255,7 +277,8 @@ export async function getPatientsByOrganisation(organisationId, options = {}) {
     .map((d) => {
       const data = d.data() ?? {};
       return { ...data, id: d.id };
-    });
+    })
+    .filter(hasRequiredPatientLinks);
   await logAuditEventNonBlocking({
     action: "METADATA_READ_LIST",
     entityType: "PATIENT",
@@ -302,6 +325,7 @@ export async function createPatient(params) {
     : ctx.wardId != null
       ? String(ctx.wardId).trim()
       : "";
+  if (!resolvedWardId) throw new Error("Missing ward");
 
   if (!resolvedHospitalId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
   assertRequiredWriteContext({
@@ -318,7 +342,7 @@ export async function createPatient(params) {
     ...safeModeFields(),
     organisationId,
     hospitalId: resolvedHospitalId,
-    wardId: resolvedWardId || "",
+    wardId: resolvedWardId,
     name,
     hospitalName: (params.hospitalName ?? "").toString().trim(),
     wardName: (params.wardName ?? "").toString().trim(),
@@ -411,6 +435,16 @@ export async function getPatientById(id) {
   }
 
   if (data.organisationId) assertPatientOrganisationMatch(data.organisationId, organisationId);
+  if (
+    typeof data.organisationId !== "string" ||
+    !data.organisationId.trim() ||
+    typeof data.hospitalId !== "string" ||
+    !data.hospitalId.trim() ||
+    typeof data.wardId !== "string" ||
+    !data.wardId.trim()
+  ) {
+    throw new Error("Patient record is missing required organisation/hospital/ward links.");
+  }
 
   // Firestore rules already enforce tenant access on patient reads. Do not require profile
   // hospital/ward to match the patient record — profile may be UNASSIGNED or a different site

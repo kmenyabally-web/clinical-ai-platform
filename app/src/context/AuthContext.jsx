@@ -9,6 +9,13 @@ import { productionLogger } from "../lib/productionLogger";
 import { DEV_AUTH_BYPASS } from "../config/devAuth";
 
 const AuthContext = createContext();
+const DEV_RECOVERY_USER = {
+  uid: "dev-user",
+  email: "developer@local.dev",
+  displayName: "Development User",
+  role: "admin",
+  organisationId: "dev-organisation",
+};
 
 export function useAuth() {
   return useContext(AuthContext);
@@ -21,13 +28,7 @@ export function AuthProvider({ children }) {
   function login(email, password) {
     if (DEV_AUTH_BYPASS) {
       // Simulate a successful login in dev mode.
-      const mockUser = {
-        uid: "dev-user",
-        email: "developer@local.dev",
-        displayName: "Development User",
-        role: "admin",
-        organisationId: "dev-organisation",
-      };
+      const mockUser = DEV_RECOVERY_USER;
       setUser(mockUser);
       setLoading(false);
       return Promise.resolve({ user: mockUser });
@@ -57,13 +58,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     if (DEV_AUTH_BYPASS) {
-      const mockUser = {
-        uid: "dev-user",
-        email: "developer@local.dev",
-        displayName: "Development User",
-        role: "admin",
-        organisationId: "dev-organisation",
-      };
+      const mockUser = DEV_RECOVERY_USER;
       // eslint-disable-next-line no-console
       console.warn("⚠ DEV AUTH BYPASS ENABLED — NOT FOR PRODUCTION");
       setUser(mockUser);
@@ -79,10 +74,6 @@ export function AuthProvider({ children }) {
         }
         setUser(currentUser);
       } else {
-        if (import.meta.env.DEV) {
-          // eslint-disable-next-line no-console
-          console.warn("Debug: no auth session");
-        }
         setUser(null);
       }
       setLoading(false);

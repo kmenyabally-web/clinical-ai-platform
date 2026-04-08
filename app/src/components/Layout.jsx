@@ -9,8 +9,8 @@ import { APP_CONFIG } from "../config/appConfig";
 
 export default function Layout() {
   const { user } = useAuth();
-  const { organisationId, hospitalId, isPlatformAdmin, loading, userProfile, groupId } = useOrganisation();
-  const { isSuperAdmin, isGroupAdmin } = useRole();
+  const { organisationId, hospitalId, isPlatformAdmin, loading, userProfile, groupId, organisation } = useOrganisation();
+  const { isSuperAdmin, isGroupAdmin, role } = useRole();
   const showEnterpriseLink =
     organisationId && (isSuperAdmin || (isGroupAdmin && groupId));
   const location = useLocation();
@@ -154,6 +154,33 @@ export default function Layout() {
                   Create Hospital
                 </button>
               </div>
+            </div>
+          ) : null}
+          {import.meta.env.DEV ? (
+            <div
+              style={{
+                marginBottom: 12,
+                padding: "10px 12px",
+                borderRadius: 8,
+                border: "1px dashed var(--border)",
+                background: "var(--surface)",
+                fontSize: 12,
+                color: "var(--text-muted)",
+              }}
+            >
+              <strong>Recovery Debug</strong>
+              <pre style={{ margin: "8px 0 0", whiteSpace: "pre-wrap" }}>
+                {JSON.stringify(
+                  {
+                    activeOrgId: organisationId,
+                    role,
+                    user: user ? { uid: user.uid, email: user.email ?? null } : null,
+                    featureFlags: organisation?.features ?? null,
+                  },
+                  null,
+                  2
+                )}
+              </pre>
             </div>
           ) : null}
           <Outlet />

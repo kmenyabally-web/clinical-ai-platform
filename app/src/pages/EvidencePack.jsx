@@ -5,13 +5,18 @@ import { Link } from "react-router-dom";
 import { useOrganisation } from "../context/OrganisationContext";
 import { getPatientsByOrg } from "../services/patientService";
 import { getUserContext } from "../services/authService";
-import { buildEvidencePackZip, generateInspectionEnginePack } from "../services/evidencePackService";
+import {
+  buildEvidencePackZip,
+  generateCqcEvidencePackDocument,
+  generateInspectionEnginePack,
+} from "../services/evidencePackService";
 import CqcInspectionPackView from "../components/evidence/CqcInspectionPackView";
 import { logAuditEvent } from "../services/auditService";
 import { getSubscription } from "../services/subscriptionService";
 import { hasFeature } from "../utils/featureAccess.js";
 import ActionBar from "../components/ActionBar";
 import { APP_CONFIG } from "../config/appConfig";
+import { generatePDF } from "../utils/professionalReportPdf";
 
 export default function EvidencePack() {
   const { organisationId, organisation } = useOrganisation();
@@ -30,6 +35,7 @@ export default function EvidencePack() {
   const [lastSummary, setLastSummary] = useState(null);
   const [pack, setPack] = useState(null);
   const [packGeneratedAt, setPackGeneratedAt] = useState("");
+  const [inspectionDoc, setInspectionDoc] = useState(null);
 
   const selectedPatient = useMemo(
     () => patients.find((p) => p.id === selectedPatientId) ?? null,
@@ -194,19 +200,50 @@ export default function EvidencePack() {
     try {
       const { organisationId } = await getUserContext();
       if (!organisationId) throw new Error("organisationId required");
-      const data = await generateInspectionEnginePack({
-        organisationId,
-        patientId: selectedPatientId.trim() || null,
-      });
+      const [data, docData] = await Promise.all([
+        generateInspectionEnginePack({
+          organisationId,
+          patientId: selectedPatientId.trim() || null,
+        }),
+        selectedPatientId.trim()
+          ? generateCqcEvidencePackDocument({
+              organisationId,
+              patientId: selectedPatientId.trim(),
+            })
+          : Promise.resolve(null),
+      ]);
       setPack(data);
+      setInspectionDoc(docData);
       setPackGeneratedAt(new Date().toLocaleString());
     } catch (e) {
       setError(e?.message ?? "Failed to generate evidence pack.");
       setPack(null);
+      setInspectionDoc(null);
       setPackGeneratedAt("");
     } finally {
       setPackLoading(false);
     }
+  }
+
+  function handleExportInspectionPdf() {
+    if (!inspectionDoc) return;
+    generatePDF({
+      fileName: `CQC_Evidence_Pack_${inspectionDoc.patientId}_${new Date().toISOString().slice(0, 10)}.pdf`,
+      reportType: "CQC Evidence Pack",
+      organisationName: organisation?.name ?? inspectionDoc.organisationId,
+      hospitalName: selectedPatient?.hospitalName || selectedPatient?.hospitalId || "Not recorded",
+      wardName: selectedPatient?.wardName || selectedPatient?.wardId || "Not recorded",
+      patientName: inspectionDoc.patientName,
+      nhsNumber: selectedPatient?.nhsNumber ?? null,
+      generatedAt: new Date(inspectionDoc.generatedAt).toLocaleString("en-GB"),
+      title: "CQC Evidence Pack V1",
+      summary:
+        "Inspection-ready evidence pack summarising patient overview, risk, trends, concerns, and care quality.",
+      sections: inspectionDoc.sections.map((s) => ({
+        heading: s.title,
+        content: [s.summary, ...(s.keyPoints ?? []).map((p) => `- ${p}`)].filter(Boolean).join("\n\n"),
+      })),
+    });
   }
 
   return (
@@ -411,6 +448,65 @@ export default function EvidencePack() {
           </p>
 
           <CqcInspectionPackView pack={pack} />
+
+          {inspectionDoc ? (
+            <section
+              id="cqc-evidence-pack-v1"
+              style={{
+                marginTop: 18,
+                background: "#fff",
+                border: "1px solid #e2e8f0",
+                borderRadius: 12,
+                padding: "1rem 1.1rem",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 900, color: "#0f172a" }}>
+                  CQC Evidence Pack V1
+                </h3>
+                <button
+                  type="button"
+                  onClick={handleExportInspectionPdf}
+                  style={{
+                    padding: "8px 14px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: "#0f172a",
+                    color: "#fff",
+                    fontWeight: 800,
+                    cursor: "pointer",
+                  }}
+                >
+                  Export CQC PDF
+                </button>
+              </div>
+              <p style={{ margin: "0 0 12px 0", color: "#64748b", fontSize: 13 }}>
+                Single inspector-ready document with patient, risk, trends, concerns, and care-quality indicators.
+              </p>
+              {inspectionDoc.sections.map((section) => (
+                <div
+                  key={section.title}
+                  style={{
+                    marginBottom: 12,
+                    padding: "10px 12px",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: 10,
+                    background: "#f8fafc",
+                  }}
+                >
+                  <h4 style={{ margin: 0, fontSize: 14, fontWeight: 900, color: "#0f172a" }}>{section.title}</h4>
+                  <p style={{ margin: "8px 0 8px 0", color: "#334155", fontSize: 14, lineHeight: 1.5 }}>
+                    {section.summary}
+                  </p>
+                  <ul style={{ margin: 0, paddingLeft: 18, color: "#475569", fontSize: 13 }}>
+                    {(section.keyPoints ?? []).map((point, idx) => (
+                      <li key={`${section.title}-${idx}`}>{point}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </section>
+          ) : null}
 
           <section
             style={{
