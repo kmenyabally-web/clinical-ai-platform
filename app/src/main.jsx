@@ -7,6 +7,7 @@ import { AuthProvider } from "./context/AuthContext";
 import { OrganisationProvider } from "./context/OrganisationContext";
 import { StructureProvider } from "./context/StructureContext";
 import { RoleProvider } from "./context/RoleContext";
+import { AppProvider } from "./context/AppContext";
 import { ServiceProvider } from "./context/ServiceContext";
 import { initErrorMonitoring } from "./lib/errorMonitoring";
 import { runFirestoreTestWriteOnce } from "./services/firestoreTestWrite";
@@ -26,9 +27,11 @@ ReactDOM.createRoot(document.getElementById("root")).render(
       <OrganisationProvider>
         <StructureProvider>
           <RoleProvider>
-            <ServiceProvider>
-              <App />
-            </ServiceProvider>
+            <AppProvider>
+              <ServiceProvider>
+                <App />
+              </ServiceProvider>
+            </AppProvider>
           </RoleProvider>
         </StructureProvider>
       </OrganisationProvider>

@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, getDocs, query, where } from "firebase/firestore";
-import { db } from "../firebase";
 import { useOrganisation } from "../context/OrganisationContext";
+import { getPatientsByOrganisation } from "../services/patientService";
 
 /**
  * Central patient source for all modules.
  * Tenant scope: organisationId + active records only.
  */
 export function usePatients() {
-  const { organisationId } = useOrganisation();
+  const { organisationId, scopeRevision } = useOrganisation();
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -16,7 +15,7 @@ export function usePatients() {
   useEffect(() => {
     if (!organisationId) {
       setPatients([]);
-      setLoading(true);
+      setLoading(false);
       setError(null);
       return;
     }
@@ -25,20 +24,10 @@ export function usePatients() {
       setLoading(true);
       setError(null);
       try {
-        const q = query(
-          collection(db, "patients"),
-          where("organisationId", "==", organisationId)
-        );
-        const snapshot = await getDocs(q);
+        const rows = await getPatientsByOrganisation(organisationId, { includeArchived: false });
         if (cancelled) return;
-        const rows = snapshot.docs
-          .map((d) => ({
-          id: d.id,
-          ...(d.data() ?? {}),
-          }))
-          // Align with the app's "active document" logic: treat missing `isDeleted` as active.
-          .filter((p) => p.isDeleted !== true);
-        setPatients(rows);
+        const list = Array.isArray(rows) ? rows : [];
+        setPatients(list.filter((p) => p.isDeleted !== true));
       } catch (e) {
         if (cancelled) return;
         setError(e?.message ?? "Failed to load patients.");
@@ -51,7 +40,7 @@ export function usePatients() {
     return () => {
       cancelled = true;
     };
-  }, [organisationId]);
+  }, [organisationId, scopeRevision]);
 
   return useMemo(
     () => ({

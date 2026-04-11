@@ -12,6 +12,7 @@ import {
   serverTimestamp,
   updateDoc,
   where,
+  type DocumentReference,
 } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { logAction, logAudit, logAuditEvent, logEntityAudit } from "./auditService";
@@ -27,6 +28,7 @@ import { BEHAVIOURS_COLLECTION, extractBehaviourFromNote } from "./behaviourServ
 import { processClinicalNote } from "./geminiAiService.js";
 import { evaluateRisk } from "./riskEngine.js";
 import { assertTenantContext, normalizeHospitalScopeId } from "../utils/tenantContext.js";
+import { orgNotesCollection, orgNoteDocumentRef } from "../utils/tenantCollections";
 import type { ClinicalNoteAddendumEntry, ClinicalNoteVersionEntry } from "../types/clinical";
 import type {
   ClinicalCareFolder,
@@ -41,6 +43,23 @@ import type {
 /** Primary collection for clinical notes (Firestore source of truth). */
 export const NOTES_COLLECTION = "notes";
 export const NOTE_ADDENDUMS_COLLECTION = "note_addendums";
+
+async function resolveClinicalNoteDocumentRef(organisationId: string, noteId: string): Promise<DocumentReference> {
+  const id = (noteId ?? "").toString().trim();
+  if (!id) throw new Error("noteId is required.");
+  const org = (organisationId ?? "").toString().trim();
+  if (!org) throw new Error("Governance Error: organisationId is missing.");
+  const nested = orgNoteDocumentRef(db, org, id);
+  const nSnap = await getDoc(nested);
+  if (nSnap.exists()) return nested;
+  const root = doc(db, NOTES_COLLECTION, id);
+  const rSnap = await getDoc(root);
+  if (!rSnap.exists()) throw new Error("Note not found.");
+  const row = rSnap.data() ?? {};
+  const noteOrg = typeof row.organisationId === "string" ? row.organisationId.trim() : "";
+  if (noteOrg && noteOrg !== org) throw new Error("403 Forbidden: organisation scope mismatch");
+  return root;
+}
 
 /** Firestore rejects `undefined` anywhere in document data. */
 function omitUndefinedFields(obj: Record<string, unknown>): Record<string, unknown> {
@@ -453,7 +472,10 @@ export async function addClinicalNote(
 
   assertTenantContext(organisationId, hospitalId);
 
-  const noteSnap = await addDoc(collection(db, NOTES_COLLECTION), omitUndefinedFields(noteDoc));
+  const noteSnap = await addDoc(
+    orgNotesCollection(db, organisationId),
+    omitUndefinedFields(noteDoc)
+  );
 
   try {
     await addDoc(collection(db, "risk_alerts"), {
@@ -564,7 +586,7 @@ export async function deleteClinicalNote(noteId: string): Promise<void> {
   const uid = auth.currentUser?.uid ?? null;
   if (!uid) throw new Error("Missing user.");
 
-  const noteRef = doc(db, NOTES_COLLECTION, id);
+  const noteRef = await resolveClinicalNoteDocumentRef(organisationId, id);
   const noteSnap = await getDoc(noteRef);
   if (!noteSnap.exists()) throw new Error("Note not found.");
   const note = noteSnap.data() as Record<string, unknown>;
@@ -625,7 +647,7 @@ export async function softDeleteClinicalNoteAsAuthor(noteId: string): Promise<vo
   const uid = auth.currentUser?.uid ?? null;
   if (!uid) throw new Error("Missing user.");
 
-  const noteRef = doc(db, NOTES_COLLECTION, id);
+  const noteRef = await resolveClinicalNoteDocumentRef(organisationId, id);
   const noteSnap = await getDoc(noteRef);
   if (!noteSnap.exists()) throw new Error("Note not found.");
   const note = noteSnap.data() as Record<string, unknown>;
@@ -698,7 +720,7 @@ export async function finalizeClinicalNote(noteId: string): Promise<void> {
   const uid = auth.currentUser?.uid ?? null;
   if (!uid) throw new Error("Missing user.");
 
-  const noteRef = doc(db, NOTES_COLLECTION, id);
+  const noteRef = await resolveClinicalNoteDocumentRef(organisationId, id);
   const noteSnap = await getDoc(noteRef);
   if (!noteSnap.exists()) throw new Error("Note not found.");
   const note = noteSnap.data() as Record<string, unknown>;
@@ -782,7 +804,7 @@ export async function updateDraftClinicalNoteContent(noteId: string, content: st
   const uid = auth.currentUser?.uid ?? null;
   if (!uid) throw new Error("Missing user.");
 
-  const noteRef = doc(db, NOTES_COLLECTION, id);
+  const noteRef = await resolveClinicalNoteDocumentRef(organisationId, id);
   const noteSnap = await getDoc(noteRef);
   if (!noteSnap.exists()) throw new Error("Note not found.");
   const note = noteSnap.data() as Record<string, unknown>;
@@ -894,7 +916,7 @@ export async function approveClinicalNote(noteId: string): Promise<void> {
   const profile = auth.currentUser?.uid ? await getCurrentUserProfile(auth.currentUser.uid) : null;
   const approverMdt = profile?.mdtRole != null ? String(profile.mdtRole).trim() : "";
 
-  const noteRef = doc(db, NOTES_COLLECTION, id);
+  const noteRef = await resolveClinicalNoteDocumentRef(organisationId, id);
   const noteSnap = await getDoc(noteRef);
   if (!noteSnap.exists()) throw new Error("Note not found.");
   const note = noteSnap.data() as Record<string, unknown>;
@@ -983,16 +1005,42 @@ function sortNoteDocsByCreatedAtDesc<T extends { createdAt?: unknown }>(data: T[
 }
 
 /**
- * Internal: one collection, org scope, primary query with index or fallback without orderBy.
+ * Internal: canonical `notes` merge organisations/{orgId}/notes + root `notes` (legacy).
+ * Other collection names use root-only reads.
  */
 async function getOrganisationNoteDocuments(
   collectionName: string,
   organisationId: string,
   fetchCap: number
 ): Promise<Array<{ id: string } & Record<string, unknown>>> {
-  const col = collection(db, collectionName);
   const capped = Math.min(1000, Math.max(1, fetchCap));
+  const merged = new Map<string, { id: string } & Record<string, unknown>>();
 
+  const addFromSnap = (snap: { docs: Array<{ id: string; data: () => Record<string, unknown> }> }) => {
+    for (const d of snap.docs) {
+      if (!merged.has(d.id)) merged.set(d.id, { ...d.data(), id: d.id });
+    }
+  };
+
+  if (collectionName === NOTES_COLLECTION) {
+    try {
+      const nCol = orgNotesCollection(db, organisationId);
+      try {
+        const q = query(nCol, orderBy("createdAt", "desc"), limit(capped));
+        const snap = await getDocs(q);
+        addFromSnap(snap);
+      } catch (err) {
+        console.warn("Nested notes orderBy failed, using limit-only", err);
+        const q2 = query(nCol, limit(capped));
+        const snap = await getDocs(q2);
+        addFromSnap(snap);
+      }
+    } catch (e) {
+      console.warn("[noteService] nested notes read skipped", e);
+    }
+  }
+
+  const col = collection(db, collectionName);
   try {
     const q = query(
       col,
@@ -1001,14 +1049,16 @@ async function getOrganisationNoteDocuments(
       limit(capped)
     );
     const snap = await getDocs(q);
-    return snap.docs.map((d) => ({ ...d.data(), id: d.id }));
+    addFromSnap(snap);
   } catch (err) {
-    console.warn("Primary query failed, using fallback", err);
+    console.warn("Primary root notes query failed, using fallback", err);
     const qFallback = query(col, where("organisationId", "==", organisationId), limit(capped));
     const snap = await getDocs(qFallback);
-    const data = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
-    return sortNoteDocsByCreatedAtDesc(data);
+    addFromSnap(snap);
   }
+
+  const sorted = sortNoteDocsByCreatedAtDesc([...merged.values()]);
+  return sorted.slice(0, capped);
 }
 
 /**
@@ -1115,15 +1165,14 @@ export async function fetchClinicalNotesForOrganisation({
 
     const hospitalByPatientId = new Map<string, string | null>();
     await Promise.all(
-      uniquePatientIds.map(async (pid) => {
+      uniquePatientIds.map(async (pPatientId) => {
         try {
-          const snap = await getDoc(doc(db, "patients", pid));
-          const x = snap?.data?.() ?? {};
-          const orgOk = x.organisationId ? x.organisationId === organisationId : x.organisationId === organisationId;
-          const hosp = typeof x.hospitalId === "string" ? x.hospitalId : null;
-          hospitalByPatientId.set(pid, orgOk ? hosp : null);
+          const p = await getPatientById(pPatientId);
+          const orgOk = (p.organisationId ?? "") === organisationId;
+          const hosp = typeof p.hospitalId === "string" ? p.hospitalId : null;
+          hospitalByPatientId.set(pPatientId, orgOk ? hosp : null);
         } catch {
-          hospitalByPatientId.set(pid, null);
+          hospitalByPatientId.set(pPatientId, null);
         }
       })
     );
@@ -1241,7 +1290,7 @@ export async function saveClinicalNote(note: ClinicalNote): Promise<{ id: string
 
   assertTenantContext(organisationId, hospitalId);
 
-  const noteSnap = await addDoc(collection(db, NOTES_COLLECTION), {
+  const noteSnap = await addDoc(orgNotesCollection(db, organisationId), {
     ...createPayload,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -1351,7 +1400,7 @@ export async function addAddendum(noteId: string, text: string): Promise<{ id: s
   if (!organisationId) throw new Error("Missing organisation");
   if (!userId) throw new Error("Missing user");
 
-  const noteRef = doc(db, NOTES_COLLECTION, id);
+  const noteRef = await resolveClinicalNoteDocumentRef(organisationId, id);
   const noteSnap = await getDoc(noteRef);
   if (!noteSnap.exists()) throw new Error("Note not found.");
   const note = noteSnap.data() as Record<string, unknown>;
@@ -1478,7 +1527,7 @@ export async function fetchAddendumsForNote(noteId: string): Promise<
   const { organisationId, hospitalId } = await getUserContext();
   if (!organisationId) return [];
 
-  const noteRef = doc(db, NOTES_COLLECTION, id);
+  const noteRef = await resolveClinicalNoteDocumentRef(organisationId, id);
   const noteSnap = await getDoc(noteRef);
   const embedded: Array<{
     id: string;

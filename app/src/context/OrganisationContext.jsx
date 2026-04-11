@@ -62,7 +62,10 @@ export function OrganisationProvider({ children }) {
   const { user } = useAuth();
   const [organisationId, setOrganisationId] = useState(null);
   /** First resolved tenant id after auth — kept stable (not cleared when transient loads flicker). */
-  const [activeOrgId, setActiveOrgId] = useState(import.meta.env.DEV ? "demo-org" : null);
+  const [activeOrgId, setActiveOrgId] = useState(null);
+  /** Bumps when tenant scope finishes resolving — consumers refetch patients / notes / incidents. */
+  const [scopeRevision, setScopeRevision] = useState(0);
+  const prevTenantKeyRef = useRef(null);
   const [organisation, setOrganisation] = useState(null);
   const [subscription, setSubscription] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
@@ -72,6 +75,37 @@ export function OrganisationProvider({ children }) {
   const [needsSetup, setNeedsSetup] = useState(false);
 
   const lastLoadedUidRef = useRef(null);
+
+  const loadGuestDevOrganisation = useCallback(async () => {
+    if (!import.meta.env.DEV) return;
+    const demoId = "demo-org";
+    setLoading(true);
+    setError(null);
+    setNeedsSetup(false);
+    try {
+      const orgSnap = await getDoc(doc(db, "organisations", demoId));
+      setOrganisationId(demoId);
+      setActiveOrgId(demoId);
+      setUserProfile(null);
+      setSubscription(null);
+      if (orgSnap.exists()) {
+        const org = await getOrganisation(demoId);
+        setOrganisation(applyDevOrganisationFeatures(org));
+        setError(null);
+      } else {
+        setOrganisation(null);
+        setError("⚠️ Organisation not found");
+      }
+    } catch {
+      setOrganisationId(demoId);
+      setActiveOrgId(demoId);
+      setOrganisation(null);
+      setError("⚠️ Organisation not found");
+    } finally {
+      setLoading(false);
+      lastLoadedUidRef.current = null;
+    }
+  }, []);
 
   const loadOrganisation = useCallback(async (uid) => {
     if (DEV_AUTH_BYPASS) {
@@ -106,8 +140,12 @@ export function OrganisationProvider({ children }) {
       return;
     }
     if (!uid) {
+      if (import.meta.env.DEV) {
+        await loadGuestDevOrganisation();
+        return;
+      }
       setOrganisationId(null);
-      setActiveOrgId(import.meta.env.DEV ? "demo-org" : null);
+      setActiveOrgId(null);
       setOrganisation(null);
       setSubscription(null);
       setUserProfile(null);
@@ -219,6 +257,7 @@ export function OrganisationProvider({ children }) {
                 });
                 const platformAdmin = await isPlatformAdmin(uid);
                 setOrganisationId(orgIdFromClaims);
+                setActiveOrgId(orgIdFromClaims);
                 setOrganisation(null);
                 setSubscription(null);
                 setUserProfile({
@@ -235,9 +274,7 @@ export function OrganisationProvider({ children }) {
                 } else {
                   console.warn("⚠️ No organisation found — entering setup mode");
                   setNeedsSetup(true);
-                  setError(
-                    "Your profile references an organisation that does not exist in the database. Create the organisation record from Management → Organisations (admin) or contact support."
-                  );
+                  setError("⚠️ Organisation not found");
                 }
                 setLoading(false);
                 lastLoadedUidRef.current = uid;
@@ -246,6 +283,7 @@ export function OrganisationProvider({ children }) {
               const org = await getOrganisation(orgIdFromClaims);
               const platformAdmin = await isPlatformAdmin(uid);
               setOrganisationId(orgIdFromClaims);
+              setActiveOrgId(orgIdFromClaims);
               setOrganisation(org);
               setSubscription(null);
               setUserProfile({
@@ -363,6 +401,7 @@ export function OrganisationProvider({ children }) {
             };
             setUserProfile(resolvedProfile);
             setOrganisationId(orgIdToLoad);
+            setActiveOrgId(orgIdToLoad);
           }
         } catch (e) {
           // ignore and continue with existing fallback below
@@ -383,9 +422,7 @@ export function OrganisationProvider({ children }) {
         } else {
           console.warn("⚠️ No organisation found — entering setup mode");
           setNeedsSetup(true);
-          setError(
-            "Your profile references an organisation that does not exist in the database. Create the organisation record from Management → Organisations (admin) or contact support."
-          );
+          setError("⚠️ Organisation not found");
         }
         setLoading(false);
         lastLoadedUidRef.current = uid;
@@ -393,6 +430,7 @@ export function OrganisationProvider({ children }) {
       }
 
       setOrganisationId(orgIdToLoad);
+      setActiveOrgId(orgIdToLoad);
       const org = await getOrganisation(orgIdToLoad);
       if (!org) {
         const platformAdmin = await isPlatformAdmin(uid);
@@ -404,9 +442,7 @@ export function OrganisationProvider({ children }) {
         } else {
           console.warn("⚠️ No organisation found — entering setup mode");
           setNeedsSetup(true);
-          setError(
-            "Organisation record could not be loaded. Check Firestore or contact support."
-          );
+          setError("⚠️ Organisation not found");
         }
         setLoading(false);
         lastLoadedUidRef.current = uid;
@@ -443,7 +479,7 @@ export function OrganisationProvider({ children }) {
       lastLoadedUidRef.current = uid;
       setLoading(false);
     }
-  }, []);
+  }, [loadGuestDevOrganisation]);
 
   // Load tenant profile from the same auth source Firebase uses (avoids races with React context).
   useEffect(() => {
@@ -453,8 +489,12 @@ export function OrganisationProvider({ children }) {
     }
     const unsubscribe = onAuthStateChanged(auth, (authUser) => {
       if (!authUser) {
+        if (import.meta.env.DEV) {
+          void loadGuestDevOrganisation();
+          return;
+        }
         setOrganisationId(null);
-        setActiveOrgId(import.meta.env.DEV ? "demo-org" : null);
+        setActiveOrgId(null);
         setOrganisation(null);
         setSubscription(null);
         setUserProfile(null);
@@ -472,7 +512,7 @@ export function OrganisationProvider({ children }) {
       loadOrganisation(uid);
     });
     return () => unsubscribe();
-  }, [loadOrganisation]);
+  }, [loadOrganisation, loadGuestDevOrganisation]);
 
   const effectivePlanKey = useMemo(
     () => normalizePlanKey(organisation?.plan ?? subscription?.planName ?? "BASIC"),
@@ -520,12 +560,14 @@ export function OrganisationProvider({ children }) {
   }, [organisationId]);
 
   useEffect(() => {
-    console.log("ORG DEBUG", {
-      activeOrgId: effectiveOrganisationId,
-      role: userProfile?.role ?? userProfile?.systemRole,
-      userOrg: userProfile?.organisationId ?? userProfile?.orgId,
-    });
-  }, [effectiveOrganisationId, userProfile?.role, userProfile?.systemRole, userProfile?.organisationId, userProfile?.orgId]);
+    if (loading) return;
+    const key = effectiveOrganisationId ?? "";
+    if (key && key !== prevTenantKeyRef.current) {
+      prevTenantKeyRef.current = key;
+      setScopeRevision((x) => x + 1);
+    }
+    if (!key) prevTenantKeyRef.current = null;
+  }, [loading, effectiveOrganisationId]);
 
   const value = {
     profile: userProfile,
@@ -546,6 +588,7 @@ export function OrganisationProvider({ children }) {
     error: error ?? null,
     needsSetup,
     isPlatformAdmin: !!userProfile?.isPlatformAdmin,
+    scopeRevision,
     reload: () => {
       if (user?.uid) {
         lastLoadedUidRef.current = null;

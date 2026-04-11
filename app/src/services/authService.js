@@ -27,6 +27,16 @@ export async function getUserContext() {
   const user = auth.currentUser;
 
   if (!user) {
+    if (import.meta.env.DEV) {
+      // Match OrganisationContext guest dev tenant so Firestore services (notes, patients) stay scoped.
+      return {
+        role: "SUPER_ADMIN",
+        organisationId: "demo-org",
+        hospitalId: null,
+        wardId: null,
+        serviceIds: null,
+      };
+    }
     return {
       role: null,
       organisationId: null,
@@ -92,8 +102,13 @@ export async function getUserContext() {
   if (!wardId && profileWardId) wardId = profileWardId;
 
   if (!organisationId) {
-    console.error("Governance context missing: organisationId");
-    throw new Error(GENERIC_USER_ERROR_MESSAGE);
+    if (import.meta.env.DEV && user) {
+      // Dev stabilisation: signed-in but claims/profile not yet backfilled — avoid hard 403 loops.
+      organisationId = "demo-org";
+    } else {
+      console.error("Governance context missing: organisationId");
+      throw new Error(GENERIC_USER_ERROR_MESSAGE);
+    }
   }
 
   return {

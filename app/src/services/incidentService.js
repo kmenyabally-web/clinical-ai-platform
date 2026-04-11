@@ -26,8 +26,33 @@ import {
   GENERIC_USER_ERROR_MESSAGE,
   normalizeHospitalScopeId,
 } from "../utils/tenantContext";
+import { orgIncidentsCollection, orgIncidentDocumentRef } from "../utils/tenantCollections";
 
 const INCIDENTS_COLLECTION = "incidents";
+
+function mergeIncidentDocsById(snapA, snapB) {
+  const map = new Map();
+  for (const d of [...(snapA?.docs ?? []), ...(snapB?.docs ?? [])]) {
+    if (d?.id && !map.has(d.id)) map.set(d.id, d);
+  }
+  return [...map.values()];
+}
+
+async function resolveIncidentWriteRef(organisationId, incidentId) {
+  const id = (incidentId ?? "").toString().trim();
+  if (!id) throw new Error("incidentId is required.");
+  const nested = orgIncidentDocumentRef(db, organisationId, id);
+  const nSnap = await getDoc(nested);
+  if (nSnap?.exists?.()) return nested;
+  const root = doc(db, INCIDENTS_COLLECTION, id);
+  const rSnap = await getDoc(root);
+  if (!rSnap?.exists?.()) throw new Error("Incident not found.");
+  const cur = rSnap.data() ?? {};
+  if ((cur.organisationId ?? "").toString().trim() !== (organisationId ?? "").toString().trim()) {
+    throw new Error("Organisation scope mismatch.");
+  }
+  return root;
+}
 const PATIENT_TIMELINE_COLLECTION = "patientTimeline";
 
 function assertRequiredWriteContext({ organisationId, hospitalId, userId }) {
@@ -108,7 +133,7 @@ export async function createIncidentLegacy({
   });
   assertTenantContext(organisationId, hospitalId);
 
-  const incidentsRef = collection(db, INCIDENTS_COLLECTION);
+  const incidentsRef = orgIncidentsCollection(db, organisationId);
   const now = serverTimestamp();
 
   const incidentDoc = {
@@ -224,7 +249,7 @@ export async function createIncident(incidentData) {
     status: "open",
   };
 
-  const incidentsRef = collection(db, INCIDENTS_COLLECTION);
+  const incidentsRef = orgIncidentsCollection(db, orgId);
   const snap = await addDoc(incidentsRef, incidentDoc);
 
   await logAuditEventNonBlocking({
@@ -285,7 +310,7 @@ export async function createIncidentReport({
   });
   assertTenantContext(organisationId, hospitalId);
 
-  const incidentsRef = collection(db, INCIDENTS_COLLECTION);
+  const incidentsRef = orgIncidentsCollection(db, organisationId);
   const incidentDoc = {
     incidentId: "",
     organisationId,
@@ -330,17 +355,43 @@ export async function fetchIncidentsForPatient(patientId, { limitCount = 20 } = 
   // Validate tenant scope for this patient (organisation + hospital).
   await getPatientById(patientId.trim());
 
-  const ref = collection(db, INCIDENTS_COLLECTION);
-  const q = query(
-    ref,
-    where("organisationId", "==", organisationId),
-    where("patientId", "==", patientId.trim()),
-    orderBy("createdAt", "desc"),
-    limit(typeof limitCount === "number" ? limitCount : 20)
-  );
-
-  const snapshot = await getDocs(q);
-  const docs = snapshot?.docs ?? [];
+  const lim = typeof limitCount === "number" ? limitCount : 20;
+  const nestedRef = orgIncidentsCollection(db, organisationId);
+  const rootRef = collection(db, INCIDENTS_COLLECTION);
+  let nestedSnap = { docs: [] };
+  try {
+    nestedSnap = await getDocs(
+      query(
+        nestedRef,
+        where("patientId", "==", patientId.trim()),
+        orderBy("createdAt", "desc"),
+        limit(lim)
+      )
+    );
+  } catch (e) {
+    try {
+      nestedSnap = await getDocs(query(nestedRef, where("patientId", "==", patientId.trim()), limit(lim)));
+    } catch (e2) {
+      console.warn("[incidentService] nested patient incidents skipped", e2);
+    }
+  }
+  let rootSnap = { docs: [] };
+  try {
+    rootSnap = await getDocs(
+      query(
+        rootRef,
+        where("organisationId", "==", organisationId),
+        where("patientId", "==", patientId.trim()),
+        orderBy("createdAt", "desc"),
+        limit(lim)
+      )
+    );
+  } catch {
+    rootSnap = await getDocs(
+      query(rootRef, where("organisationId", "==", organisationId), where("patientId", "==", patientId.trim()), limit(lim))
+    );
+  }
+  const docs = mergeIncidentDocsById(nestedSnap, rootSnap);
   return docs.map((d) => {
     const x = d?.data?.() ?? {};
     return {
@@ -382,9 +433,10 @@ export async function fetchIncidents(organisationId, filters = {}) {
     roleUpper === "GROUP_ADMIN" ||
     profile?.isGlobalAdmin === true;
 
-  const ref = collection(db, INCIDENTS_COLLECTION);
+  const rootRef = collection(db, INCIDENTS_COLLECTION);
+  const nestedRef = orgIncidentsCollection(db, organisationId);
 
-  const buildConstraints = (includeOrderBy) => {
+  const buildRootConstraints = (includeOrderBy) => {
     const c = [where("organisationId", "==", organisationId)];
     if (severity) c.push(where("severity", "==", severity));
     if (status) c.push(where("status", "==", status));
@@ -393,14 +445,35 @@ export async function fetchIncidents(organisationId, filters = {}) {
     return c;
   };
 
-  let snapshot;
+  const buildNestedConstraints = (includeOrderBy) => {
+    const c = [];
+    if (severity) c.push(where("severity", "==", severity));
+    if (status) c.push(where("status", "==", status));
+    if (includeOrderBy) c.push(orderBy("reportedAt", "desc"));
+    c.push(limit(500));
+    return c;
+  };
+
+  let nestedSnap = { docs: [] };
   try {
-    snapshot = await getDocs(query(ref, ...buildConstraints(true)));
+    nestedSnap = await getDocs(query(nestedRef, ...buildNestedConstraints(true)));
+  } catch (err) {
+    console.warn("Nested incidents query failed; using fallback without orderBy", err);
+    try {
+      nestedSnap = await getDocs(query(nestedRef, ...buildNestedConstraints(false)));
+    } catch (e2) {
+      console.warn("[incidentService] nested incidents list skipped", e2);
+    }
+  }
+
+  let rootSnap;
+  try {
+    rootSnap = await getDocs(query(rootRef, ...buildRootConstraints(true)));
   } catch (err) {
     console.warn("Primary incidents query failed; using fallback without orderBy", err);
-    snapshot = await getDocs(query(ref, ...buildConstraints(false)));
+    rootSnap = await getDocs(query(rootRef, ...buildRootConstraints(false)));
   }
-  const docs = snapshot?.docs ?? [];
+  const docs = mergeIncidentDocsById(nestedSnap, rootSnap);
 
   let mapped = docs.map((d) => {
     const x = d?.data?.() ?? {};
@@ -441,10 +514,9 @@ export async function fetchIncidents(organisationId, filters = {}) {
     await Promise.all(
       uniquePatientIds.map(async (pid) => {
         try {
-          const snap = await getDoc(doc(db, "patients", pid));
-          const x = snap?.data?.() ?? {};
-          const orgOk = x.organisationId ? x.organisationId === organisationId : true;
-          const hosp = typeof x.hospitalId === "string" ? x.hospitalId : null;
+          const p = await getPatientById(pid);
+          const orgOk = (p.organisationId ?? "") === organisationId;
+          const hosp = typeof p.hospitalId === "string" ? p.hospitalId : null;
           hospitalByPatientId.set(pid, orgOk ? hosp : null);
         } catch {
           hospitalByPatientId.set(pid, null);
@@ -471,7 +543,7 @@ export async function updateIncident(incidentId, updates = {}) {
   if (!orgId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
   if (!uid) throw new Error("You must be signed in.");
 
-  const ref = doc(db, INCIDENTS_COLLECTION, id);
+  const ref = await resolveIncidentWriteRef(orgId, id);
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error("Incident not found.");
   const cur = snap.data() ?? {};
@@ -532,7 +604,7 @@ export async function closeIncident(incidentId, { closureNote = "" } = {}) {
   if (!orgId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
   if (!uid) throw new Error("You must be signed in.");
 
-  const ref = doc(db, INCIDENTS_COLLECTION, id);
+  const ref = await resolveIncidentWriteRef(orgId, id);
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error("Incident not found.");
   const cur = snap.data() ?? {};

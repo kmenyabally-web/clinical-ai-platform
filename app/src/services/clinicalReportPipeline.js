@@ -150,6 +150,20 @@ export async function generateReport({
   userSystemRole,
   privilegedDisciplinePicker,
 }) {
+  const pid = String(patientId ?? "").trim();
+  const oid = String(organisationId ?? "").trim();
+  if (!pid || !oid) {
+    const missing = legacyReportToUnified(
+      {
+        kind: "simpleText",
+        title: "Report",
+        text: "Missing required data",
+      },
+      String(type)
+    );
+    return enrichUnifiedReportWithExecutiveLayers(missing, organisationId ?? null, patientId ?? null);
+  }
+
   const notes = await resolveNotes(notesOverride, patientId);
   const orgType = resolveOrganisationType(organisation ?? null);
 

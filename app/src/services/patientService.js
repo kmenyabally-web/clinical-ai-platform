@@ -28,10 +28,35 @@ import {
 import { isDocumentActive } from "../utils/auditSchema";
 import { assertManagementWrite } from "./managementPermissions";
 import { logManagementAudit } from "./managementAuditLog";
+import { orgPatientsCollection, orgPatientDocumentRef } from "../utils/tenantCollections";
 
 const PATIENTS_COLLECTION = "patients";
 const MAX_ORG_WIDE_PATIENTS = 500;
-const DEV_FORCE_VISIBLE_PATIENT_DATA = import.meta.env.DEV === true;
+
+function mergePatientDocsById(snapA, snapB) {
+  const map = new Map();
+  for (const d of [...(snapA?.docs ?? []), ...(snapB?.docs ?? [])]) {
+    if (d?.id && !map.has(d.id)) map.set(d.id, d);
+  }
+  return [...map.values()];
+}
+
+async function resolvePatientWriteRef(organisationId, patientId) {
+  const id = requirePatientId(patientId);
+  const nested = orgPatientDocumentRef(db, organisationId, id);
+  const nSnap = await getDoc(nested);
+  if (nSnap?.exists?.()) return nested;
+  const root = doc(db, PATIENTS_COLLECTION, id);
+  const rSnap = await getDoc(root);
+  if (!rSnap?.exists?.()) {
+    const err = new Error("Patient not found.");
+    err.status = 404;
+    throw err;
+  }
+  const cur = rSnap.data?.() ?? {};
+  assertPatientOrganisationMatch(cur.organisationId, organisationId);
+  return root;
+}
 
 function normalizeStompMedication(raw) {
   const item = raw && typeof raw === "object" ? raw : {};
@@ -103,6 +128,13 @@ export async function listPatientMetadata(filters = {}) {
     organisationId = null;
   }
 
+  if (!organisationId && import.meta.env.DEV) {
+    organisationId = "demo-org";
+  }
+  if (!organisationId) {
+    throw new Error(GENERIC_USER_ERROR_MESSAGE);
+  }
+
   const allInOrganisation =
     filters.allInOrganisation === true ||
     filters.scope === "organisation" ||
@@ -110,22 +142,20 @@ export async function listPatientMetadata(filters = {}) {
 
   const serviceId = filters.serviceId != null ? String(filters.serviceId).trim() : "";
 
-  let snapshot;
-  let devUnscoped = false;
-  if (!organisationId || DEV_FORCE_VISIBLE_PATIENT_DATA) {
-    if (!import.meta.env.DEV && !organisationId) {
-      throw new Error(GENERIC_USER_ERROR_MESSAGE);
+  const nestedCol = orgPatientsCollection(db, organisationId);
+  const rootCol = collection(db, PATIENTS_COLLECTION);
+  let nestedSnap = { docs: [] };
+  let rootSnap = { docs: [] };
+
+  if (allInOrganisation) {
+    try {
+      nestedSnap = await getDocs(query(nestedCol, limit(MAX_ORG_WIDE_PATIENTS)));
+    } catch (e) {
+      console.warn("[patientService] nested patients list skipped:", e);
     }
-    console.warn("Fallback: loading all data");
-    devUnscoped = true;
-    snapshot = await getDocs(collection(db, PATIENTS_COLLECTION));
-  } else if (allInOrganisation) {
-    const q = query(
-      collection(db, PATIENTS_COLLECTION),
-      where("organisationId", "==", organisationId),
-      limit(MAX_ORG_WIDE_PATIENTS)
+    rootSnap = await getDocs(
+      query(rootCol, where("organisationId", "==", organisationId), limit(MAX_ORG_WIDE_PATIENTS))
     );
-    snapshot = await getDocs(q);
   } else {
     const hospitalId =
       filters.hospitalId != null
@@ -140,14 +170,21 @@ export async function listPatientMetadata(filters = {}) {
       throw new Error("hospitalId is required for multi-tenant patient queries.");
     }
 
-    const constraints = [where("organisationId", "==", organisationId), where("hospitalId", "==", hospitalId)];
-    if (wardId) constraints.push(where("wardId", "==", wardId));
-
-    const q = query(collection(db, PATIENTS_COLLECTION), ...constraints);
-    snapshot = await getDocs(q);
+    const nestedConstraints = [where("hospitalId", "==", hospitalId)];
+    if (wardId) nestedConstraints.push(where("wardId", "==", wardId));
+    try {
+      nestedSnap = await getDocs(query(nestedCol, ...nestedConstraints, limit(MAX_ORG_WIDE_PATIENTS)));
+    } catch (e) {
+      console.warn("[patientService] nested scoped patients skipped:", e);
+    }
+    const rootConstraints = [where("organisationId", "==", organisationId), where("hospitalId", "==", hospitalId)];
+    if (wardId) rootConstraints.push(where("wardId", "==", wardId));
+    rootSnap = await getDocs(query(rootCol, ...rootConstraints, limit(MAX_ORG_WIDE_PATIENTS)));
   }
 
-  const docs = (snapshot?.docs ?? []).filter((d) => isDocumentActive(d.data() ?? {}));
+  const mergedDocs = mergePatientDocsById(nestedSnap, rootSnap);
+  const docs = mergedDocs.filter((d) => isDocumentActive(d.data() ?? {}));
+  const devUnscoped = false;
 
   let results = docs.map((d) => {
     const data = d?.data?.() ?? {};
@@ -191,9 +228,7 @@ export async function listPatientMetadata(filters = {}) {
       hasMentalHealth: data.hasMentalHealth === true,
     };
   });
-  if (!DEV_FORCE_VISIBLE_PATIENT_DATA) {
-    results = results.filter(hasRequiredPatientLinks);
-  }
+  results = results.filter(hasRequiredPatientLinks);
 
   if (devUnscoped) {
     const hospitalId =
@@ -211,11 +246,6 @@ export async function listPatientMetadata(filters = {}) {
   // hospitalId/wardId filtering is enforced in Firestore query constraints above.
   if (serviceId) {
     results = results.filter((p) => !p.serviceId || p.serviceId === serviceId);
-  }
-
-  if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
-    console.log("PATIENTS LOADED", results);
   }
 
   await logAuditEventNonBlocking({
@@ -270,12 +300,21 @@ export async function getPatientsByOrganisation(organisationId, options = {}) {
     throw new Error(GENERIC_USER_ERROR_MESSAGE);
   }
   const includeArchived = options.includeArchived === true;
-  const q = query(collection(db, PATIENTS_COLLECTION), where("organisationId", "==", org));
-  const snap = await getDocs(q);
-  const rows = snap.docs
+  const nestedCol = orgPatientsCollection(db, org);
+  let nestedSnap = { docs: [] };
+  try {
+    nestedSnap = await getDocs(query(nestedCol, limit(MAX_ORG_WIDE_PATIENTS)));
+  } catch (e) {
+    console.warn("[patientService] nested getPatientsByOrganisation skipped:", e);
+  }
+  const rootSnap = await getDocs(
+    query(collection(db, PATIENTS_COLLECTION), where("organisationId", "==", org), limit(MAX_ORG_WIDE_PATIENTS))
+  );
+  const merged = mergePatientDocsById(nestedSnap, rootSnap);
+  const rows = merged
     .filter((d) => (includeArchived ? true : isDocumentActive(d.data() ?? {})))
     .map((d) => {
-      const data = d.data() ?? {};
+      const data = d.data?.() ?? {};
       return { ...data, id: d.id };
     })
     .filter(hasRequiredPatientLinks);
@@ -365,9 +404,10 @@ export async function createPatient(params) {
     ...(auth.currentUser?.uid ? { createdBy: auth.currentUser.uid, updatedBy: auth.currentUser.uid } : {}),
   };
   const docRef = await addDocLogged(
-    collection(db, PATIENTS_COLLECTION),
+    orgPatientsCollection(db, organisationId),
     patientPayload,
-    "patients"
+    "patients",
+    organisationId
   );
 
   await logAuditEventNonBlocking({
@@ -417,8 +457,11 @@ export async function getPatientById(id) {
   const { organisationId } = await getUserContext();
   if (!organisationId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
 
-  const ref = doc(db, PATIENTS_COLLECTION, patientId);
-  const snap = await getDoc(ref);
+  const nestedRef = orgPatientDocumentRef(db, organisationId, patientId);
+  let snap = await getDoc(nestedRef);
+  if (!snap.exists()) {
+    snap = await getDoc(doc(db, PATIENTS_COLLECTION, patientId));
+  }
 
   if (!snap.exists()) {
     const err = new Error("Patient not found.");
@@ -501,7 +544,7 @@ export async function updatePatientStomp(patientId, payload) {
   const { organisationId } = await getUserContext();
   if (!organisationId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
 
-  const ref = doc(db, PATIENTS_COLLECTION, id);
+  const ref = await resolvePatientWriteRef(organisationId, id);
   const snap = await getDoc(ref);
   if (!snap?.exists?.()) throw new Error("Patient not found.");
   const current = snap.data?.() ?? {};
@@ -539,10 +582,10 @@ export async function updatePatientDemographics(patientId, updates) {
   await assertManagementWrite();
   const { organisationId } = await getUserContext();
   if (!organisationId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
-  const ref = doc(db, PATIENTS_COLLECTION, id);
+  const ref = await resolvePatientWriteRef(organisationId, id);
   const snap = await getDoc(ref);
   if (!snap?.exists?.()) throw new Error("Patient not found.");
-  const cur = snap.data() ?? {};
+  const cur = snap.data?.() ?? {};
   assertPatientOrganisationMatch(cur.organisationId, organisationId);
   if (cur.isDeleted === true) throw new Error("Patient has been deleted.");
   const uid = auth.currentUser?.uid ?? null;
@@ -590,10 +633,10 @@ export async function softDeletePatient(patientId) {
   await assertManagementWrite();
   const { organisationId } = await getUserContext();
   if (!organisationId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
-  const ref = doc(db, PATIENTS_COLLECTION, id);
+  const ref = await resolvePatientWriteRef(organisationId, id);
   const snap = await getDoc(ref);
   if (!snap?.exists?.()) throw new Error("Patient not found.");
-  const cur = snap.data() ?? {};
+  const cur = snap.data?.() ?? {};
   assertPatientOrganisationMatch(cur.organisationId, organisationId);
   if (cur.isDeleted === true) throw new Error("Patient has already been deleted.");
   const uid = auth.currentUser?.uid ?? null;
@@ -622,7 +665,7 @@ export async function restorePatient(patientId) {
   await assertManagementWrite();
   const { organisationId } = await getUserContext();
   if (!organisationId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
-  const ref = doc(db, PATIENTS_COLLECTION, id);
+  const ref = await resolvePatientWriteRef(organisationId, id);
   const snap = await getDoc(ref);
   if (!snap?.exists?.()) throw new Error("Patient not found.");
   const cur = snap.data() ?? {};

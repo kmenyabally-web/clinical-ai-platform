@@ -147,6 +147,13 @@ export async function createOrganisationUserAccount(payload) {
   if (!platform && !hasPermission(ctx.role, "CREATE_USER")) {
     throw new Error("Permission denied");
   }
+  const targetOrg = (payload?.organisationId ?? "").toString().trim();
+  const activeOrg = (ctx?.organisationId ?? "").toString().trim();
+  if (targetOrg && activeOrg && targetOrg !== activeOrg) {
+    if (!(platform && import.meta.env.DEV)) {
+      throw new Error("403 Forbidden: organisation scope mismatch");
+    }
+  }
   await ensureAuthTokenForCallable();
   const fn = httpsCallable(functions, "createOrganisationUser");
   const res = await fn(payload);
