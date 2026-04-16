@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useOrganisation } from "../context/OrganisationContext";
+import { useAppContext } from "../context/AppContext";
 import { getPatientsByOrg } from "../services/patientService";
 import { getUserContext } from "../services/authService";
 import {
@@ -20,6 +21,8 @@ import { generatePDF } from "../utils/professionalReportPdf";
 
 export default function EvidencePack() {
   const { organisationId, organisation } = useOrganisation();
+  const { demoMode, patientId: appPatientId } = useAppContext();
+  const DEMO_PATIENT_ID = appPatientId ?? "patient001";
   const [subscription, setSubscription] = useState(null);
   const [subscriptionLoading, setSubscriptionLoading] = useState(true);
   const canAccess =
@@ -28,7 +31,7 @@ export default function EvidencePack() {
   const [loadingPatients, setLoadingPatients] = useState(true);
   const [patientsError, setPatientsError] = useState(null);
 
-  const [selectedPatientId, setSelectedPatientId] = useState("");
+  const [selectedPatientId, setSelectedPatientId] = useState(() => (demoMode ? DEMO_PATIENT_ID : ""));
   const [generating, setGenerating] = useState(false);
   const [packLoading, setPackLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -36,6 +39,13 @@ export default function EvidencePack() {
   const [pack, setPack] = useState(null);
   const [packGeneratedAt, setPackGeneratedAt] = useState("");
   const [inspectionDoc, setInspectionDoc] = useState(null);
+
+  // Demo: keep patient scope pinned so the "inspection engine" action is always enabled.
+  useEffect(() => {
+    if (!demoMode) return;
+    if (!DEMO_PATIENT_ID) return;
+    setSelectedPatientId(DEMO_PATIENT_ID);
+  }, [demoMode, DEMO_PATIENT_ID]);
 
   const selectedPatient = useMemo(
     () => patients.find((p) => p.id === selectedPatientId) ?? null,
@@ -271,11 +281,13 @@ export default function EvidencePack() {
             label: "⚡ Generate Evidence Pack",
             type: "generate",
             onClick: () => generateZipEvidencePack(),
+            demoGuideId: "generate-evidence-pack-zip",
           },
           {
             label: packLoading ? "Running inspection engine…" : "Run CQC inspection engine",
             type: "secondary",
             onClick: () => handleGeneratePack(),
+            demoGuideId: "evidence-pack-run-engine",
           },
         ]}
       />

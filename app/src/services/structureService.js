@@ -45,6 +45,8 @@ function normalizeWardType(raw) {
 export async function listHospitals(organisationId) {
   if (!organisationId?.trim()) return [];
   await assertSameOrganisation(organisationId);
+  const nestedRows = await listNestedHospitals(organisationId).catch(() => []);
+  if (nestedRows.length > 0) return nestedRows;
   const q = query(
     collection(db, HOSPITALS_COLLECTION),
     where("organisationId", "==", organisationId),
@@ -129,6 +131,41 @@ async function listNestedWards(organisationId, hospitalId) {
   const rows = mapWardDocs(snap?.docs ?? []);
   rows.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   return rows;
+}
+
+/**
+ * All wards for a tenant (any hospital). Used when UI scope is "All hospitals".
+ * @param {string} organisationId
+ * @returns {Promise<Array<{ id: string, name: string, hospitalId: string, organisationId: string, type: string, wardType: string }>>}
+ */
+export async function listWardsForOrganisation(organisationId) {
+  if (!organisationId?.trim()) return [];
+  await assertSameOrganisation(organisationId);
+  const org = organisationId.trim();
+  try {
+    const nested = collection(db, "organisations", org, "wards");
+    const snap = await getDocs(nested);
+    const rows = mapWardDocs(snap?.docs ?? []);
+    if (rows.length > 0) {
+      rows.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+      return rows;
+    }
+  } catch {
+    /* fall through to root collection */
+  }
+  try {
+    const q = query(collection(db, WARDS_COLLECTION), where("organisationId", "==", org), orderBy("name"));
+    const snap = await getDocs(q);
+    const rows = mapWardDocs(snap?.docs ?? []);
+    rows.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    return rows;
+  } catch {
+    const q2 = query(collection(db, WARDS_COLLECTION), where("organisationId", "==", org));
+    const snap = await getDocs(q2);
+    const rows = mapWardDocs(snap?.docs ?? []);
+    rows.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    return rows;
+  }
 }
 
 function mapWardDocs(docs) {

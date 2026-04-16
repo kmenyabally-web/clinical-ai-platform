@@ -1,6 +1,7 @@
 import JSZip from "jszip";
-import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, limit, query, where } from "firebase/firestore";
 import { db } from "../firebase";
+import { orgPatientsCollection, orgPatientDocumentRef } from "../utils/tenantCollections";
 import { fetchClinicalNotesForPatient } from "./noteService";
 import { listCarePlansForPatient, listCarePlansForOrganisation } from "./carePlanManagementService";
 import { fetchDocuments } from "./documentService";
@@ -233,7 +234,7 @@ export async function generateEvidencePack({ organisationId }) {
     getDocs(query(collection(db, "notes"), where("organisationId", "==", org))),
     getDocs(query(collection(db, "audit_logs"), where("organisationId", "==", org))),
     getDocs(query(collection(db, "inspection_reports"), where("organisationId", "==", org))),
-    getDocs(query(collection(db, "patients"), where("organisationId", "==", org))),
+    getDocs(query(orgPatientsCollection(db, org), limit(1000))),
     getDocs(query(collection(db, "inspection_scores"), where("organisationId", "==", org))),
   ]);
 
@@ -299,7 +300,7 @@ export async function generateInspectionEnginePack({ organisationId, patientId =
     getDocs(query(collection(db, "notes"), where("organisationId", "==", org))),
     getDocs(query(collection(db, "audit_logs"), where("organisationId", "==", org))),
     getDocs(query(collection(db, "inspection_reports"), where("organisationId", "==", org))),
-    getDocs(query(collection(db, "patients"), where("organisationId", "==", org))),
+    getDocs(query(orgPatientsCollection(db, org), limit(1000))),
     getDocs(query(collection(db, "inspection_scores"), where("organisationId", "==", org))),
     fetchDocuments(org, { limitCount: 150 }),
     fetchIncidents(org, {}).catch(() => []),
@@ -490,7 +491,7 @@ export async function generateCqcEvidencePackDocument({ organisationId, patientI
 
   const [enginePack, patientSnap] = await Promise.all([
     generateInspectionEnginePack({ organisationId: org, patientId: pid }),
-    getDoc(doc(db, "patients", pid)),
+    getDoc(orgPatientDocumentRef(db, org, pid)),
   ]);
 
   const patient =

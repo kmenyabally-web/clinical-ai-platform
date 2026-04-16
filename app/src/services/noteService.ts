@@ -27,7 +27,7 @@ import { getCurrentUserProfile } from "./organisation";
 import { BEHAVIOURS_COLLECTION, extractBehaviourFromNote } from "./behaviourService";
 import { processClinicalNote } from "./geminiAiService.js";
 import { evaluateRisk } from "./riskEngine.js";
-import { assertTenantContext, normalizeHospitalScopeId } from "../utils/tenantContext.js";
+import { assertWardTenantContext, normalizeHospitalScopeId } from "../utils/tenantContext.js";
 import { orgNotesCollection, orgNoteDocumentRef } from "../utils/tenantCollections";
 import type { ClinicalNoteAddendumEntry, ClinicalNoteVersionEntry } from "../types/clinical";
 import type {
@@ -59,6 +59,20 @@ async function resolveClinicalNoteDocumentRef(organisationId: string, noteId: st
   const noteOrg = typeof row.organisationId === "string" ? row.organisationId.trim() : "";
   if (noteOrg && noteOrg !== org) throw new Error("403 Forbidden: organisation scope mismatch");
   return root;
+}
+
+/** Resolve display name from master patient record fields (notes denormalise this on write). */
+function patientDisplayNameFromRecord(p: {
+  name?: string;
+  firstName?: string;
+  lastName?: string;
+}): string {
+  const n = typeof p.name === "string" ? p.name.trim() : "";
+  if (n) return n;
+  const fn = typeof p.firstName === "string" ? p.firstName : "";
+  const ln = typeof p.lastName === "string" ? p.lastName : "";
+  const composed = `${fn} ${ln}`.trim();
+  return composed || "Unknown Patient";
 }
 
 /** Firestore rejects `undefined` anywhere in document data. */
@@ -403,6 +417,7 @@ export async function addClinicalNote(
   // Denormalise patient tenant scope onto the note document so Firestore
   // security rules can enforce hospital scoping without cross-document reads.
   const patient = await getPatientById(targetPatientId);
+  const patientName = patientDisplayNameFromRecord(patient);
   const hospitalId = patient.hospitalId || (ctxHospitalId ? String(ctxHospitalId) : "");
   const wardId = patient.wardId || (ctxWardId ? String(ctxWardId) : "");
 
@@ -434,6 +449,7 @@ export async function addClinicalNote(
     ...safeModeFields(),
     organisationId,
     patientId: targetPatientId,
+    patientName,
     hospitalId,
     wardId,
     originalText: content,
@@ -470,7 +486,7 @@ export async function addClinicalNote(
   if (reports) noteDoc.reports = reports;
   if (careFolder) noteDoc.careFolder = careFolder;
 
-  assertTenantContext(organisationId, hospitalId);
+  assertWardTenantContext(organisationId, hospitalId, wardId);
 
   const noteSnap = await addDoc(
     orgNotesCollection(db, organisationId),
@@ -1236,6 +1252,7 @@ export async function saveClinicalNote(note: ClinicalNote): Promise<{ id: string
   const careFolder = safeCareFolder(note.careFolder) ?? null;
 
   const patient = await getPatientById(patientId);
+  const patientNameSave = patientDisplayNameFromRecord(patient);
   const hospitalId = patient.hospitalId || (ctxHospitalId ? String(ctxHospitalId) : "");
   const wardId = patient.wardId || (ctxWardId ? String(ctxWardId) : "");
   if (!hospitalId) throw new Error("hospitalId is required to save clinical notes.");
@@ -1249,6 +1266,7 @@ export async function saveClinicalNote(note: ClinicalNote): Promise<{ id: string
   const updatePayload: Record<string, unknown> = {
     organisationId,
     patientId,
+    patientName: patientNameSave,
     hospitalId,
     wardId,
     discipline,
@@ -1288,7 +1306,7 @@ export async function saveClinicalNote(note: ClinicalNote): Promise<{ id: string
     throw new Error("This record cannot be edited. Add addendum instead.");
   }
 
-  assertTenantContext(organisationId, hospitalId);
+  assertWardTenantContext(organisationId, hospitalId, wardId);
 
   const noteSnap = await addDoc(orgNotesCollection(db, organisationId), {
     ...createPayload,

@@ -10,6 +10,7 @@ import {
   limit,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { orgPatientsCollection } from "../utils/tenantCollections";
 import { fetchIncidents } from "./incidentService";
 import { fetchEvidence } from "./evidenceService";
 import { fetchComplianceActions } from "./complianceService";
@@ -53,9 +54,9 @@ async function fetchScoringData(organisationId, serviceId) {
   let stompMonitoredCount = 0;
   let stompCompliantCount = 0;
   try {
-    const patientsRef = collection(db, "patients");
-    const patientsConstraints = [where("organisationId", "==", organisationId), limit(1000)];
-    if (serviceId) patientsConstraints.push(where("serviceId", "==", serviceId));
+    const patientsRef = orgPatientsCollection(db, organisationId);
+    const patientsConstraints = [limit(1000)];
+    if (serviceId) patientsConstraints.unshift(where("serviceId", "==", serviceId));
     const patientsQ = query(patientsRef, ...patientsConstraints);
     const patientsSnap = await getDocs(patientsQ);
     (patientsSnap?.docs ?? []).forEach((d) => {

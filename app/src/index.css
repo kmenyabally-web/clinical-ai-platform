@@ -2,30 +2,37 @@
 
 :root {
   --primary: #2563eb;
-  --background: #f3f4f6;
-  --surface: #ffffff;
-  --text-primary: #111827;
-  --border: #dbe1ea;
-  --surface-muted: #f8fafc;
-  --text-muted: #4b5563;
-  --border-strong: #c3ccd8;
   --primary-hover: #1d4ed8;
-  --danger: #b91c1c;
+  --background: #f8fafc;
+  --surface: #ffffff;
+  --surface-muted: #f1f5f9;
+  --text-primary: #0f172a;
+  --text-muted: #475569;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --success: #16a34a;
+  --warning: #f59e0b;
+  --danger: #dc2626;
+  --danger-hover: #b91c1c;
+  --shadow-card: 0 1px 3px rgba(15, 23, 42, 0.06), 0 4px 12px rgba(15, 23, 42, 0.04);
   --radius-sm: 6px;
   --radius-md: 8px;
+  --radius-card: 12px;
 }
 
 * {
   box-sizing: border-box;
 }
 
-html, body, #root {
+html,
+body,
+#root {
   height: 100%;
 }
 
 body {
   margin: 0;
-  font-family: Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  font-family: Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-size: 15px;
   line-height: 1.45;
   color: var(--text-primary);
@@ -34,8 +41,28 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-h1, h2, h3 {
+h1,
+h2,
+h3 {
   letter-spacing: -0.01em;
+}
+
+/* Page titles — large, bold, consistent rhythm */
+.page-title {
+  font-size: clamp(1.5rem, 2.2vw, 1.75rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.75rem 0;
+  color: var(--text-primary);
+  line-height: 1.25;
+}
+
+.clinical-section {
+  margin-bottom: 1.5rem;
+}
+
+.clinical-section:last-child {
+  margin-bottom: 0;
 }
 
 input,
@@ -57,31 +84,128 @@ textarea {
 input:focus,
 select:focus,
 textarea:focus {
-  outline: 2px solid rgba(0, 94, 184, 0.25);
+  outline: 2px solid rgba(37, 99, 235, 0.28);
   outline-offset: 1px;
   border-color: var(--primary);
 }
 
 button {
-  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.05s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease,
+    transform 0.05s ease;
 }
 
 button:active {
   transform: translateY(1px);
 }
 
+/* Cards — sections live inside cards */
 .card {
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 16px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  background: var(--surface);
+  border-radius: var(--radius-card);
+  padding: 20px;
+  box-shadow: var(--shadow-card);
+  border: 1px solid var(--border);
 }
 
 .alert.warning {
-  background: #fff4e5;
-  padding: 10px;
-  border-left: 4px solid orange;
-  border-radius: 8px;
-  color: #9a3412;
+  background: #fffbeb;
+  padding: 12px 14px;
+  border-left: 4px solid var(--warning);
+  border-radius: var(--radius-card);
+  color: #92400e;
+  font-weight: 600;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.625rem 1rem;
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  font-size: 0.875rem;
+  line-height: 1.2;
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+.btn-primary:hover {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+
+.btn-secondary {
+  background: var(--surface);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.btn-secondary:hover {
+  background: var(--surface-muted);
+}
+
+.btn-danger {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+}
+
+.btn-danger:hover {
+  background: var(--danger-hover);
+  border-color: var(--danger-hover);
+}
+
+/* Risk status tags */
+.tag-risk {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.625rem;
+  border-radius: 6px;
+  font-size: 0.6875rem;
   font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+.tag-risk--low {
+  background: #dcfce7;
+  color: var(--success);
+}
+
+.tag-risk--medium {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.tag-risk--high {
+  background: #fee2e2;
+  color: var(--danger);
+}
+
+.tag-risk--unknown {
+  background: var(--surface-muted);
+  color: var(--text-muted);
+}
+
+/* Empty states */
+.clinical-empty {
+  margin: 0;
+  padding: 1.25rem 1.5rem;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+  line-height: 1.55;
 }

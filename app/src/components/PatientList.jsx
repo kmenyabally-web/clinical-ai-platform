@@ -1,9 +1,8 @@
 /** [ENABLEMENT GATE: STAGE 3 - PERSON-IDENTIFIABLE READ ONLY] + hospital / ward scope */
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import {
-  listPatients,
   createPatient,
   updatePatientDemographics,
   softDeletePatient,
@@ -11,12 +10,13 @@ import {
   restorePatient,
 } from "../services/patientService";
 import { showToast } from "../utils/toast";
-import { listWards } from "../services/structureService";
+import { listWards, listWardsForOrganisation } from "../services/structureService";
 import { logAuditEventNonBlocking } from "../services/auditService";
 import { useOrganisation } from "../context/OrganisationContext";
 import { isOrganisationAdminRole } from "../utils/organisationAdmin";
 import { useStructure } from "../context/StructureContext";
 import { useRole } from "../context/RoleContext";
+import { patientMatchesHospitalFilter, patientMatchesWardFilter } from "../utils/patientScopeMatch";
 
 export default function PatientList() {
   const { organisationId, organisation, isPlatformAdmin } = useOrganisation();
@@ -26,6 +26,8 @@ export default function PatientList() {
     wards,
     currentHospitalId,
     currentWardId,
+    currentHospital,
+    currentWard,
     setCurrentHospitalId,
     setCurrentWardId,
     loading: structureLoading,
@@ -47,6 +49,8 @@ export default function PatientList() {
   const [showArchived, setShowArchived] = useState(false);
   const [archiveConfirmPatient, setArchiveConfirmPatient] = useState(null);
   const [restoreConfirmPatient, setRestoreConfirmPatient] = useState(null);
+  /** Full org ward list — used to resolve wardId → label even when the ward filter is narrowed. */
+  const [allOrgWards, setAllOrgWards] = useState([]);
 
   const canManagePatients = isOrganisationAdminRole(role) || Boolean(isPlatformAdmin);
 
@@ -64,15 +68,25 @@ export default function PatientList() {
       if (showArchived && canManagePatients) {
         const all = await getPatientsByOrganisation(organisationId, { includeArchived: true });
         let list = Array.isArray(all) ? all.filter((p) => p.isDeleted === true) : [];
-        if (currentHospitalId) list = list.filter((p) => (p.hospitalId ?? "") === currentHospitalId);
-        if (currentWardId) list = list.filter((p) => (p.wardId ?? "") === currentWardId);
+        if (currentHospitalId) {
+          list = list.filter((p) => patientMatchesHospitalFilter(p, currentHospitalId, currentHospital?.name));
+        }
+        if (currentWardId) {
+          list = list.filter((p) => patientMatchesWardFilter(p, currentWardId, currentWard?.name));
+        }
         setRows(list);
       } else {
-        const filters = {};
-        if (currentHospitalId) filters.hospitalId = currentHospitalId;
-        if (currentWardId) filters.wardId = currentWardId;
-        const data = await listPatients(filters);
-        setRows(Array.isArray(data) ? data : []);
+        // Org-wide read then client-side hospital/ward filter — same source as Clinical Notes / dropdowns.
+        // Avoids Firestore hospitalId queries on the org subcollection that can return empty while notes still load.
+        const all = await getPatientsByOrganisation(organisationId, { includeArchived: false });
+        let list = Array.isArray(all) ? all.filter((p) => p.isDeleted !== true) : [];
+        if (currentHospitalId) {
+          list = list.filter((p) => patientMatchesHospitalFilter(p, currentHospitalId, currentHospital?.name));
+        }
+        if (currentWardId) {
+          list = list.filter((p) => patientMatchesWardFilter(p, currentWardId, currentWard?.name));
+        }
+        setRows(list);
       }
     } catch (err) {
       setError(err);
@@ -80,12 +94,47 @@ export default function PatientList() {
     } finally {
       setIsLoading(false);
     }
-  }, [organisationId, currentHospitalId, currentWardId, showArchived, canManagePatients]);
+  }, [organisationId, currentHospitalId, currentWardId, currentHospital, currentWard, showArchived, canManagePatients]);
 
   useEffect(() => {
     if (structureLoading) return;
     load();
   }, [load, structureLoading]);
+
+  useEffect(() => {
+    if (!organisationId) {
+      setAllOrgWards([]);
+      return;
+    }
+    let cancelled = false;
+    listWardsForOrganisation(organisationId)
+      .then((list) => {
+        if (!cancelled) setAllOrgWards(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (!cancelled) setAllOrgWards([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [organisationId]);
+
+  const hospitalDisplayById = useMemo(() => {
+    const m = new Map();
+    for (const h of hospitals) {
+      if (h?.id) m.set(String(h.id), String(h.name || "").trim() || String(h.id));
+    }
+    return m;
+  }, [hospitals]);
+
+  const wardDisplayById = useMemo(() => {
+    const m = new Map();
+    const source = allOrgWards.length > 0 ? allOrgWards : wards;
+    for (const w of source) {
+      if (w?.id) m.set(String(w.id), String(w.name || "").trim() || String(w.id));
+    }
+    return m;
+  }, [allOrgWards, wards]);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -102,7 +151,12 @@ export default function PatientList() {
     : rows.filter((r) => {
         const first = (r.firstName || "").toString().toLowerCase();
         const last = (r.lastName || "").toString().toLowerCase();
-        return first.includes(normalizedTerm) || last.includes(normalizedTerm);
+        const fullName = (r.name || "").toString().toLowerCase();
+        return (
+          first.includes(normalizedTerm) ||
+          last.includes(normalizedTerm) ||
+          fullName.includes(normalizedTerm)
+        );
       });
 
   useEffect(() => {
@@ -178,15 +232,21 @@ export default function PatientList() {
               <select
                 value={currentWardId ?? ""}
                 onChange={(e) => setCurrentWardId(e.target.value || null)}
-                disabled={!currentHospitalId}
+                disabled={structureLoading}
                 style={styles.select}
               >
-                <option value="">{currentHospitalId ? "All wards in hospital" : "Select hospital first"}</option>
-                {wards.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name || w.id}
-                  </option>
-                ))}
+                <option value="">
+                  {currentHospitalId ? "All wards in hospital" : "All wards in organisation"}
+                </option>
+                {wards.map((w) => {
+                  const h = hospitals.find((x) => x.id === w.hospitalId);
+                  const suffix = !currentHospitalId && h?.name ? ` · ${h.name}` : "";
+                  return (
+                    <option key={w.id} value={w.id}>
+                      {(w.name || w.id) + suffix}
+                    </option>
+                  );
+                })}
               </select>
             </label>
           </div>
@@ -227,7 +287,7 @@ export default function PatientList() {
           }}
         >
           No patients found for current organisation. If you expect data here, confirm each patient document includes a
-          matching <code style={{ fontSize: 13 }}>organisationId</code> (for example your tenant id such as demo-org).
+          matching <code style={{ fontSize: 13 }}>organisationId</code> (for example your tenant id).
           <div style={{ marginTop: 6 }}>⚠️ No patients — check data path</div>
         </div>
       ) : null}
@@ -278,8 +338,18 @@ export default function PatientList() {
                     {r.lastName}
                   </Link>
                 </td>
-                <td style={styles.td}>{r.hospitalName || r.hospitalId || "—"}</td>
-                <td style={styles.td}>{r.wardName || r.wardId || "—"}</td>
+                <td style={styles.td}>
+                  {(r.hospitalName || "").trim() ||
+                    hospitalDisplayById.get(String(r.hospitalId || "").trim()) ||
+                    r.hospitalId ||
+                    "—"}
+                </td>
+                <td style={styles.td}>
+                  {(r.wardName || "").trim() ||
+                    wardDisplayById.get(String(r.wardId || "").trim()) ||
+                    r.wardId ||
+                    "—"}
+                </td>
                 <td style={styles.td}>{formatDob(r.dob)}</td>
                 {canManagePatients ? (
                   <td style={styles.td}>

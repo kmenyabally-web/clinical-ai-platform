@@ -119,7 +119,9 @@ export async function fetchPatientsForEvidencePack(organisationId, serviceId = n
   if (!organisationId) return [];
   const constraints = [where("organisationId", "==", organisationId), orderBy("createdAt", "desc"), limit(MAX_ITEMS)];
   if (serviceId) constraints.push(where("serviceId", "==", serviceId));
-  const snap = await getDocs(query(collection(db, "patients"), ...constraints));
+  const snap = await getDocs(
+    query(collection(db, "organisations", organisationId, "patients"), ...constraints)
+  );
   return (snap.docs ?? []).map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
 }
 

@@ -49,7 +49,7 @@ export default function QuickNoteBox({ patients = [], patientsLoading = false })
   }
 
   return (
-    <div className="card" style={{ padding: 16 }}>
+    <div className="card">
       <h2 style={{ margin: "0 0 10px 0", fontSize: 16, fontWeight: 900 }}>Quick note</h2>
       <form onSubmit={handleSubmit}>
         <label style={{ display: "block", fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#334155" }}>

@@ -1,6 +1,6 @@
 /** [ENABLEMENT GATE: STAGE 11 - CLINICAL NOTES SYSTEM] */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
@@ -35,6 +35,7 @@ import { fetchIncidents } from "../services/incidentService";
 import { getInspectionInsights } from "../engine/inspectionInsights";
 import { canApproveNote } from "../utils/clinicalNoteApproval";
 import { showToast } from "../utils/toast";
+import { generateAIContent } from "../services/geminiAiService";
 
 function ConfirmDialog({ title, body, confirmLabel, danger, onCancel, onConfirm }) {
   return (
@@ -107,6 +108,21 @@ function noteCreatedByLabel(n) {
 function noteRoleLabel(n) {
   if (!n || typeof n !== "object") return "—";
   return n.role || n.discipline || "—";
+}
+
+/** Show human name from denormalised note field or master patient list; link still uses patientId. */
+function patientLabelForNote(note, patientById) {
+  if (!note || typeof note !== "object") return "";
+  const pid = (note.patientId ?? "").toString().trim();
+  if (!pid) return "";
+  const stored = typeof note.patientName === "string" ? note.patientName.trim() : "";
+  if (stored) return stored;
+  const p = patientById.get(pid);
+  if (p) {
+    const label = (p.name ?? `${p.firstName ?? ""} ${p.lastName ?? ""}`).trim();
+    if (label) return label;
+  }
+  return pid;
 }
 
 function NoteStatusBadge({ status }) {
@@ -206,6 +222,11 @@ export default function ClinicalNotes() {
   const [noteEditError, setNoteEditError] = useState(null);
   const [historyNote, setHistoryNote] = useState(null);
   const [deleteNoteTarget, setDeleteNoteTarget] = useState(null);
+  const [summaryModalOpen, setSummaryModalOpen] = useState(false);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryText, setSummaryText] = useState("");
+  const [summaryError, setSummaryError] = useState(null);
+  const summaryRequestId = useRef(0);
 
   const load = useCallback(() => {
     if (!organisationId) {
@@ -295,6 +316,14 @@ export default function ClinicalNotes() {
   });
   const hasSafeRisk = noteInsights.some((i) => i.domain === "SAFE");
 
+  const patientById = useMemo(() => {
+    const m = new Map();
+    for (const p of patients) {
+      if (p?.id != null) m.set(String(p.id), p);
+    }
+    return m;
+  }, [patients]);
+
   const currentServiceName =
     currentServiceId && Array.isArray(services)
       ? services.find((s) => s?.id === currentServiceId)?.serviceName ||
@@ -323,11 +352,49 @@ export default function ClinicalNotes() {
     return owner === uid;
   }
 
-  function generatePatientSummary() {
-    if (import.meta.env.DEV) {
-      console.log("Debug:", { patientSummary: "generate" });
+  const generatePatientSummary = useCallback(async () => {
+    const scoped = notes.filter((n) => n && !n.isDeleted);
+    if (scoped.length === 0) {
+      showToast("No clinical notes loaded to summarise yet.", "info");
+      return;
     }
-  }
+    const rid = ++summaryRequestId.current;
+    setSummaryModalOpen(true);
+    setSummaryLoading(true);
+    setSummaryError(null);
+    setSummaryText("");
+    const m = new Map();
+    for (const p of patients) {
+      if (p?.id != null) m.set(String(p.id), p);
+    }
+    try {
+      const chunks = scoped.slice(0, 50).map((n, i) => {
+        const label = patientLabelForNote(n, m);
+        const body = String(n.content ?? n.correctedText ?? "").trim();
+        return `--- Note ${i + 1} | Patient: ${label} | ${formatDate(n.createdAt)} | Role: ${n.discipline || n.role || "—"} ---\n${body.slice(0, 3500)}`;
+      });
+      const bundle = chunks.join("\n\n").slice(0, 120000);
+      const prompt = `You are a clinical documentation assistant for UK health and social care. Produce a concise handover-style summary from the clinical notes below.
+
+Rules:
+- Use short headings and bullet points where helpful.
+- Do not invent clinical facts; only use what appears in the notes.
+- Call out medication, safeguarding, or risk themes if present in the text.
+- If the supplied notes are insufficient for a topic, write "Not documented in supplied notes."
+
+Clinical notes:
+${bundle}`;
+
+      const text = await generateAIContent(prompt, { temperature: 0.2 });
+      if (rid !== summaryRequestId.current) return;
+      setSummaryText(String(text || "").trim() || "No summary text returned.");
+    } catch (e) {
+      if (rid !== summaryRequestId.current) return;
+      setSummaryError(e instanceof Error ? e.message : "Could not generate summary.");
+    } finally {
+      if (rid === summaryRequestId.current) setSummaryLoading(false);
+    }
+  }, [notes, patients]);
 
   if (roleLoading) {
     return (
@@ -569,7 +636,8 @@ export default function ClinicalNotes() {
               ) : null}
               {n.patientId && (
                 <p style={{ margin: "4px 0 0 0", fontSize: "0.875rem", color: "#475569" }}>
-                  Patient: <Link to={`/patients/${n.patientId}`}>{n.patientId}</Link>
+                  Patient:{" "}
+                  <Link to={`/patients/${n.patientId}`}>{patientLabelForNote(n, patientById)}</Link>
                 </p>
               )}
               {n.structured?.summary && (
@@ -1154,6 +1222,129 @@ export default function ClinicalNotes() {
                 </li>
               ))}
             </ol>
+          </div>
+        </div>
+      ) : null}
+
+      {summaryModalOpen ? (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 75,
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 12,
+              padding: "1.25rem 1.5rem",
+              maxWidth: 720,
+              width: "100%",
+              maxHeight: "85vh",
+              overflow: "auto",
+              boxShadow: "0 12px 40px rgba(0,0,0,0.2)",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 12 }}>
+              <h2 style={{ margin: 0, fontSize: "1.1rem" }}>Clinical notes summary</h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setSummaryModalOpen(false);
+                  setSummaryError(null);
+                  setSummaryText("");
+                }}
+                style={{ border: "none", background: "none", cursor: "pointer", fontSize: "1.35rem", lineHeight: 1 }}
+                aria-label="Close summary"
+              >
+                ×
+              </button>
+            </div>
+            {summaryLoading ? (
+              <p style={{ color: "#475569", margin: 0 }}>Generating summary from loaded notes…</p>
+            ) : null}
+            {summaryError ? (
+              <div
+                role="alert"
+                style={{
+                  padding: "12px 14px",
+                  background: "#fef2f2",
+                  border: "1px solid #fecaca",
+                  borderRadius: 8,
+                  color: "#991b1b",
+                  fontSize: 14,
+                  marginBottom: 12,
+                }}
+              >
+                {summaryError}
+              </div>
+            ) : null}
+            {summaryText ? (
+              <pre
+                style={{
+                  margin: 0,
+                  whiteSpace: "pre-wrap",
+                  fontFamily: "inherit",
+                  fontSize: 14,
+                  lineHeight: 1.55,
+                  color: "#1e293b",
+                }}
+              >
+                {summaryText}
+              </pre>
+            ) : null}
+            {!summaryLoading && !summaryError && !summaryText ? (
+              <p style={{ color: "#64748b", margin: 0 }}>No output.</p>
+            ) : null}
+            <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (summaryText) {
+                    void navigator.clipboard?.writeText(summaryText).then(
+                      () => showToast("Summary copied", "success"),
+                      () => showToast("Copy not available", "info")
+                    );
+                  }
+                }}
+                disabled={!summaryText}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  border: "1px solid #cbd5e1",
+                  background: "#f8fafc",
+                  fontWeight: 600,
+                  cursor: summaryText ? "pointer" : "not-allowed",
+                }}
+              >
+                Copy
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSummaryModalOpen(false);
+                  setSummaryError(null);
+                  setSummaryText("");
+                }}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: "#2563eb",
+                  color: "#fff",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

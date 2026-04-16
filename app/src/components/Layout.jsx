@@ -1,23 +1,19 @@
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 import { useOrganisation } from "../context/OrganisationContext";
-import { useAuth } from "../context/AuthContext";
 import { useRole } from "../context/RoleContext";
-import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
+import ContextGuard from "./ContextGuard";
+import { Link, Outlet, useLocation } from "react-router-dom";
 import SystemStatus from "./SystemStatus";
 import { APP_CONFIG } from "../config/appConfig";
+import DemoGuide from "./DemoGuide";
 
 export default function Layout() {
-  const { user } = useAuth();
-  const { organisationId, hospitalId, isPlatformAdmin, loading, userProfile, groupId, organisation } = useOrganisation();
-  const { isSuperAdmin, isGroupAdmin, role } = useRole();
+  const { organisationId, groupId } = useOrganisation();
+  const { isSuperAdmin, isGroupAdmin } = useRole();
   const showEnterpriseLink =
     organisationId && (isSuperAdmin || (isGroupAdmin && groupId));
   const location = useLocation();
-  const navigate = useNavigate();
-  const missingOrganisation = !loading && user && !organisationId;
-
-  const showHospitalWarning = !loading && !!organisationId && !hospitalId && !isPlatformAdmin;
 
   const appName = APP_CONFIG?.name || "SanctumCare";
   const appTagline = APP_CONFIG?.tagline || "Clinical Intelligence & Compliance Platform";
@@ -29,15 +25,7 @@ export default function Layout() {
         <Header />
         <div style={layoutStyles.content}>
           <div style={layoutStyles.productHeader}>
-            <h1
-              style={{
-                fontWeight: 700,
-                fontSize: "22px",
-                letterSpacing: "-0.02em",
-                margin: 0,
-                color: "var(--text-primary)",
-              }}
-            >
+            <h1 className="page-title" style={{ marginBottom: "0.35rem" }}>
               {appName}
             </h1>
             <p
@@ -92,98 +80,10 @@ export default function Layout() {
               </Link>
             ) : null}
           </div>
-          {missingOrganisation ? (
-            <>
-              <div
-                style={{
-                  background: "var(--background)",
-                  color: "var(--text-muted)",
-                  padding: "12px",
-                  borderRadius: "6px",
-                  border: "1px solid var(--border)",
-                  marginBottom: "10px",
-                }}
-              >
-                ⚠️ No organisation assigned. You are in recovery mode.
-              </div>
-              <button
-                onClick={() => navigate("/system-admin/create-organisation")}
-                style={{
-                  background: "var(--primary)",
-                  color: "white",
-                  padding: "10px 16px",
-                  borderRadius: "6px",
-                  marginTop: "10px",
-                  marginBottom: "10px",
-                  border: "none",
-                  cursor: "pointer",
-                }}
-              >
-                ➕ Create Organisation
-              </button>
-            </>
-          ) : null}
-          {showHospitalWarning ? (
-            <div
-              role="status"
-              style={{
-                marginBottom: 12,
-                padding: "10px 14px",
-                borderRadius: 6,
-                border: "1px solid var(--border)",
-                background: "var(--surface)",
-                color: "var(--text-muted)",
-                fontSize: "0.875rem",
-              }}
-            >
-              <strong>No hospital assigned.</strong> Some features need a hospital — contact admin if
-              required.
-              <div style={{ marginTop: 10 }}>
-                <button
-                  type="button"
-                  onClick={() => navigate("/management/hospitals")}
-                  style={{
-                    background: "var(--primary)",
-                    color: "white",
-                    padding: "8px 12px",
-                    borderRadius: "6px",
-                    border: "none",
-                    cursor: "pointer",
-                  }}
-                >
-                  Create Hospital
-                </button>
-              </div>
-            </div>
-          ) : null}
-          {import.meta.env.DEV ? (
-            <div
-              style={{
-                marginBottom: 12,
-                padding: "10px 12px",
-                borderRadius: 8,
-                border: "1px dashed var(--border)",
-                background: "var(--surface)",
-                fontSize: 12,
-                color: "var(--text-muted)",
-              }}
-            >
-              <strong>Recovery Debug</strong>
-              <pre style={{ margin: "8px 0 0", whiteSpace: "pre-wrap" }}>
-                {JSON.stringify(
-                  {
-                    activeOrgId: organisationId,
-                    role,
-                    user: user ? { uid: user.uid, email: user.email ?? null } : null,
-                    featureFlags: organisation?.features ?? null,
-                  },
-                  null,
-                  2
-                )}
-              </pre>
-            </div>
-          ) : null}
-          <Outlet />
+          <ContextGuard>
+            <Outlet />
+          </ContextGuard>
+          <DemoGuide />
           <footer style={layoutStyles.footer}>
             © {new Date().getFullYear()} {appName}. All rights reserved.
           </footer>

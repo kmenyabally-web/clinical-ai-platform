@@ -1,13 +1,18 @@
 import { Link } from "react-router-dom";
 import { useOrganisation } from "../context/OrganisationContext";
 import { APP_CONFIG } from "../config/appConfig";
+import { useAppContext } from "../context/AppContext";
 
 export default function FeatureGate({ feature, children }) {
   const { organisation, loading } = useOrganisation();
+  const { demoMode } = useAppContext();
 
   if (loading) {
     return <div style={{ padding: 24 }}>Loading...</div>;
   }
+
+  // Guided demo experience: allow gated routes regardless of org feature toggles.
+  if (demoMode) return children;
 
   // DEV: allow all gated routes without Firestore feature toggles (production still enforced below).
   if (import.meta.env.DEV) {

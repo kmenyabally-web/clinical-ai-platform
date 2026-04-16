@@ -15,13 +15,14 @@ import {
 import { db } from "../firebase";
 import { logAuditEventNonBlocking } from "./auditService";
 import { getUserContext } from "./authService";
-import { assertTenantContext, tenantFieldsFromContext } from "../utils/tenantContext";
+import { assertWardTenantContext, tenantFieldsFromContext } from "../utils/tenantContext";
 import { createComplianceAction } from "./complianceService";
 import { createNotification, NOTIFICATION_TYPES } from "./notificationService";
 import { fetchDocumentCountsByDomain } from "./documentService";
 import { DOMAIN_TO_STATS_FIELD } from "../config/documentDomains";
 import { CQC_KEY_QUESTIONS } from "../config/inspectionDomains";
 import { getInspectionRiskLevel } from "../config/inspectionDomains";
+import { orgPatientsCollection } from "../utils/tenantCollections";
 
 const QUESTIONS_COLLECTION = "inspection_questions";
 const SESSIONS_COLLECTION = "inspection_sessions";
@@ -81,7 +82,7 @@ export async function createSession(organisationId, userId, auditContext, servic
     hospitalId: ctx.hospitalId,
     wardId: ctx.wardId,
   });
-  assertTenantContext(tenant.organisationId, tenant.hospitalId);
+  assertWardTenantContext(tenant.organisationId, tenant.hospitalId, tenant.wardId);
   const ref = collection(db, SESSIONS_COLLECTION);
   const docData = {
     organisationId,
@@ -202,9 +203,11 @@ export function calculateInspectionScore(responses, questions) {
 async function getStompInspectionAdjustment(organisationId, serviceId) {
   if (!organisationId?.trim()) return 0;
   try {
-    const constraints = [where("organisationId", "==", organisationId), limit(1000)];
+    const col = orgPatientsCollection(db, organisationId);
+    const constraints = [];
     if (serviceId) constraints.push(where("serviceId", "==", serviceId));
-    const snap = await getDocs(query(collection(db, "patients"), ...constraints));
+    constraints.push(limit(1000));
+    const snap = await getDocs(query(col, ...constraints));
     let monitored = 0;
     let compliant = 0;
     (snap?.docs ?? []).forEach((d) => {

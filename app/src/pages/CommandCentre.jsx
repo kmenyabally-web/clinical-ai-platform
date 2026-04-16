@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { getDocs, limit, query, where } from "firebase/firestore";
 import { useOrganisation } from "../context/OrganisationContext";
 import { useRole } from "../context/RoleContext";
 import { useService } from "../context/ServiceContext";
@@ -9,6 +9,7 @@ import DomainScoreCards from "../components/DomainScoreCards";
 import InspectionTrendChart from "../components/InspectionTrendChart";
 import InspectionPredictionCard from "../components/InspectionPredictionCard";
 import { db } from "../firebase";
+import { orgPatientsCollection } from "../utils/tenantCollections";
 import { getUserContext } from "../services/authService";
 import { getGroupOrganisations } from "../services/groupService";
 import { fetchClinicalNotesForOrganisation } from "../services/noteService";
@@ -24,8 +25,6 @@ import {
 import { explainPrediction, predictInspectionRisk } from "../engine/inspectionPredictor";
 import { getTrend } from "../utils/inspectionTrend";
 import { getStompAlerts } from "../utils/stompAlerts";
-
-const PATIENTS_COLLECTION = "patients";
 
 function wardLabel(p) {
   const w = (p?.wardName ?? "").toString().trim();
@@ -53,11 +52,13 @@ async function loadPatientsWithStomp(filters = {}) {
     filters.hospitalId != null ? String(filters.hospitalId).trim() : String(ctx.hospitalId ?? "").trim();
   const serviceId = filters.serviceId != null ? String(filters.serviceId).trim() : "";
 
-  const constraints = [where("organisationId", "==", orgId)];
+  const col = orgPatientsCollection(db, orgId);
+  const constraints = [];
   if (!skipHospital) {
     constraints.push(where("hospitalId", "==", hospitalId));
   }
-  const snap = await getDocs(query(collection(db, PATIENTS_COLLECTION), ...constraints));
+  constraints.push(limit(500));
+  const snap = await getDocs(query(col, ...constraints));
   let rows = (snap?.docs ?? []).map((d) => {
     const data = d.data() ?? {};
     return {

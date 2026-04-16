@@ -1,5 +1,6 @@
 import { CQC_DOCUMENT_DOMAINS, DOCUMENT_TYPES } from "../config/documentDomains";
 import { formatUkDate } from "../utils/dateFormat";
+import { CLINICAL_EMPTY_PATIENT } from "../constants/clinicalCopy";
 
 function formatDate(value) {
   return formatUkDate(value, "—");
@@ -19,7 +20,9 @@ export default function DocumentTable({
 }) {
   if (documents.length === 0) {
     return (
-      <p style={{ color: "#64748b", padding: "2rem", background: "#f8fafc", borderRadius: 12 }}>No records yet</p>
+      <p className="clinical-empty" style={{ padding: "2rem" }}>
+        {CLINICAL_EMPTY_PATIENT}
+      </p>
     );
   }
 

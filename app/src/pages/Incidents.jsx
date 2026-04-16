@@ -499,8 +499,8 @@ export default function Incidents() {
         )}
 
         {!loading && !error && incidents.length === 0 && (
-          <p style={{ marginTop: "0.75rem", fontSize: "0.9rem", color: "#64748b", padding: "2rem", background: "#f8fafc", borderRadius: 12 }}>
-            No records yet
+          <p className="clinical-empty" style={{ marginTop: "0.75rem", fontSize: "0.9rem", padding: "2rem" }}>
+            ⚠️ No incident records on file yet.
           </p>
         )}
 

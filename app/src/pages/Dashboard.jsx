@@ -42,6 +42,7 @@ import { useRole } from "../context/RoleContext";
 import { getInspectionSimulationSnapshot } from "../services/inspectionSimulationService";
 import { collection, getDocs, limit, orderBy, query, where } from "firebase/firestore";
 import { db } from "../firebase";
+import { useAppContext } from "../context/AppContext";
 
 function earlyWarningCardStyle(severity) {
   const s = String(severity ?? "").toLowerCase();
@@ -54,14 +55,106 @@ export default function Dashboard() {
   const { organisationId, organisation } = useOrganisation();
   const { currentServiceId, services } = useService();
   const { mdtRole, role: rbacRole, enterpriseRoleCode } = useRole();
+  const { demoMode } = useAppContext();
 
-  const [incidentStatsLoading, setIncidentStatsLoading] = useState(true);
-  const [incidentStats, setIncidentStats] = useState({
-    totalIncidents: 0,
-    highSeverityIncidents: 0,
-    pendingActions: 0,
-  });
-  const [recentIncidents, setRecentIncidents] = useState([]);
+  const DEMO_PATIENT_ID = "patient001";
+  const DEMO_ORG_ID = "demo-org";
+
+  const DEMO_RISK_SCORE_FEED = [
+    {
+      id: "demo-risk-1",
+      patientId: DEMO_PATIENT_ID,
+      organisationId: DEMO_ORG_ID,
+      overallRisk: "High",
+      score: 92,
+      trend: "improving",
+      drivers: ["High incident density", "Safeguarding vulnerability"],
+      behaviourRisk: 30,
+      incidentRisk: 32,
+      clinicalRisk: 30,
+      createdAt: "2026-04-16T12:00:00.000Z",
+    },
+    {
+      id: "demo-risk-2",
+      patientId: DEMO_PATIENT_ID,
+      organisationId: DEMO_ORG_ID,
+      overallRisk: "Medium",
+      score: 78,
+      trend: "deteriorating",
+      drivers: ["Medication non-adherence", "ABC escalation signals"],
+      behaviourRisk: 26,
+      incidentRisk: 28,
+      clinicalRisk: 24,
+      createdAt: "2026-04-16T06:00:00.000Z",
+    },
+  ];
+
+  const DEMO_ALERT_FEED = [
+    {
+      id: "demo-alert-snap-1",
+      patientId: DEMO_PATIENT_ID,
+      organisationId: DEMO_ORG_ID,
+      createdAt: "2026-04-16T12:00:00.000Z",
+      alerts: [
+        {
+          id: "demo-alert-a1",
+          type: "verbal_aggression",
+          severity: "high",
+          message: "Daniel K shows recurrent verbal aggression incidents without effective de-escalation.",
+          source: "nursing",
+        },
+      ],
+    },
+  ];
+
+  const DEMO_INSPECTION_READINESS = {
+    overallScore: 82,
+    rating: "Good",
+    domains: {
+      Safe: 86,
+      Effective: 80,
+      Caring: 74,
+      Responsive: 68,
+      WellLed: 66,
+    },
+    warnings: ["Review safeguarding documentation completeness for the last 30 days."],
+  };
+
+  const DEMO_COMPLIANCE_SCORE = {
+    overallScore: 68,
+    safeScore: 65,
+    effectiveScore: 66,
+    caringScore: 69,
+    responsiveScore: 68,
+    wellLedScore: 60,
+  };
+
+  const DEMO_RECENT_INCIDENTS = [
+    {
+      id: "demo-incident-1",
+      title: "Aggression episode (verbal) — Daniel K",
+      severity: "high",
+      status: "open",
+      createdAt: "2026-04-16T12:00:00.000Z",
+      patientId: DEMO_PATIENT_ID,
+    },
+    {
+      id: "demo-incident-2",
+      title: "Safeguarding concern — Daniel K",
+      severity: "medium",
+      status: "open",
+      createdAt: "2026-04-16T06:00:00.000Z",
+      patientId: DEMO_PATIENT_ID,
+    },
+  ];
+
+  const [incidentStatsLoading, setIncidentStatsLoading] = useState(demoMode ? false : true);
+  const [incidentStats, setIncidentStats] = useState(
+    demoMode
+      ? { totalIncidents: DEMO_RECENT_INCIDENTS.length, highSeverityIncidents: 1, pendingActions: 2 }
+      : { totalIncidents: 0, highSeverityIncidents: 0, pendingActions: 0 }
+  );
+  const [recentIncidents, setRecentIncidents] = useState(demoMode ? DEMO_RECENT_INCIDENTS : []);
   const [auditLogsCountLoading, setAuditLogsCountLoading] = useState(true);
   const [auditLogsCount, setAuditLogsCount] = useState(0);
 
@@ -73,13 +166,13 @@ export default function Dashboard() {
     documentsUploaded: 0,
     carePlansDue: 0,
   });
-  const [complianceScore, setComplianceScore] = useState(null);
-  const [complianceLoading, setComplianceLoading] = useState(true);
+  const [complianceScore, setComplianceScore] = useState(demoMode ? DEMO_COMPLIANCE_SCORE : null);
+  const [complianceLoading, setComplianceLoading] = useState(demoMode ? false : true);
   const [complianceError, setComplianceError] = useState(null);
   const [inspectionRiskLevel, setInspectionRiskLevel] = useState(null);
   const [inspectionDataLoading, setInspectionDataLoading] = useState(true);
-  const [inspectionReadiness, setInspectionReadiness] = useState(null);
-  const [inspectionReadinessLoading, setInspectionReadinessLoading] = useState(true);
+  const [inspectionReadiness, setInspectionReadiness] = useState(demoMode ? DEMO_INSPECTION_READINESS : null);
+  const [inspectionReadinessLoading, setInspectionReadinessLoading] = useState(demoMode ? false : true);
   const [inspectionData, setInspectionData] = useState({
     patient: null,
     notes: [],
@@ -90,10 +183,10 @@ export default function Dashboard() {
   const [scoreHistory, setScoreHistory] = useState([]);
   const [savingScore, setSavingScore] = useState(false);
 
-  const [riskScoreFeed, setRiskScoreFeed] = useState([]);
+  const [riskScoreFeed, setRiskScoreFeed] = useState(demoMode ? DEMO_RISK_SCORE_FEED : []);
   const [riskScoreFeedLoading, setRiskScoreFeedLoading] = useState(false);
 
-  const [alertFeed, setAlertFeed] = useState([]);
+  const [alertFeed, setAlertFeed] = useState(demoMode ? DEMO_ALERT_FEED : []);
   const [alertFeedLoading, setAlertFeedLoading] = useState(false);
 
   const currentServiceName =
@@ -110,16 +203,19 @@ export default function Dashboard() {
     let cancelled = false;
     async function loadRiskFeed() {
       if (!organisationId) {
-        setRiskScoreFeed([]);
+        setRiskScoreFeed(demoMode ? DEMO_RISK_SCORE_FEED : []);
         setRiskScoreFeedLoading(false);
         return;
       }
       setRiskScoreFeedLoading(true);
       try {
         const rows = await listRecentRiskScoreSnapshots(organisationId, { limitCount: 20 });
-        if (!cancelled) setRiskScoreFeed(Array.isArray(rows) ? rows : []);
+        if (!cancelled) {
+          const list = Array.isArray(rows) ? rows : [];
+          setRiskScoreFeed(list.length ? list : demoMode ? DEMO_RISK_SCORE_FEED : []);
+        }
       } catch {
-        if (!cancelled) setRiskScoreFeed([]);
+        if (!cancelled) setRiskScoreFeed(demoMode ? DEMO_RISK_SCORE_FEED : []);
       } finally {
         if (!cancelled) setRiskScoreFeedLoading(false);
       }
@@ -134,16 +230,19 @@ export default function Dashboard() {
     let cancelled = false;
     async function loadAlertFeed() {
       if (!organisationId) {
-        setAlertFeed([]);
+        setAlertFeed(demoMode ? DEMO_ALERT_FEED : []);
         setAlertFeedLoading(false);
         return;
       }
       setAlertFeedLoading(true);
       try {
         const rows = await listRecentAlertSnapshots(organisationId, { limitCount: 15 });
-        if (!cancelled) setAlertFeed(Array.isArray(rows) ? rows : []);
+        if (!cancelled) {
+          const list = Array.isArray(rows) ? rows : [];
+          setAlertFeed(list.length ? list : demoMode ? DEMO_ALERT_FEED : []);
+        }
       } catch {
-        if (!cancelled) setAlertFeed([]);
+        if (!cancelled) setAlertFeed(demoMode ? DEMO_ALERT_FEED : []);
       } finally {
         if (!cancelled) setAlertFeedLoading(false);
       }
@@ -159,16 +258,16 @@ export default function Dashboard() {
 
     async function loadInspectionReadiness() {
       if (!organisationId) {
-        setInspectionReadiness(null);
+        setInspectionReadiness(demoMode ? DEMO_INSPECTION_READINESS : null);
         setInspectionReadinessLoading(false);
         return;
       }
       setInspectionReadinessLoading(true);
       try {
         const snap = await getInspectionSimulationSnapshot(organisationId);
-        if (!cancelled) setInspectionReadiness(snap);
+        if (!cancelled) setInspectionReadiness(snap ?? (demoMode ? DEMO_INSPECTION_READINESS : null));
       } catch {
-        if (!cancelled) setInspectionReadiness(null);
+        if (!cancelled) setInspectionReadiness(demoMode ? DEMO_INSPECTION_READINESS : null);
       } finally {
         if (!cancelled) setInspectionReadinessLoading(false);
       }
@@ -192,8 +291,12 @@ export default function Dashboard() {
 
     async function loadIncidentStats() {
       if (!organisationId) {
-        setIncidentStats({ totalIncidents: 0, highSeverityIncidents: 0, pendingActions: 0 });
-        setRecentIncidents([]);
+        setIncidentStats(
+          demoMode
+            ? { totalIncidents: DEMO_RECENT_INCIDENTS.length, highSeverityIncidents: 1, pendingActions: 2 }
+            : { totalIncidents: 0, highSeverityIncidents: 0, pendingActions: 0 }
+        );
+        setRecentIncidents(demoMode ? DEMO_RECENT_INCIDENTS : []);
         setIncidentStatsLoading(false);
         return;
       }
@@ -250,13 +353,20 @@ export default function Dashboard() {
           }));
 
         if (!cancelled) {
-          setIncidentStats({ totalIncidents, highSeverityIncidents, pendingActions });
-          setRecentIncidents(recent);
+          const totalForRender = demoMode && totalIncidents === 0 ? DEMO_RECENT_INCIDENTS.length : totalIncidents;
+          const highForRender = demoMode && totalIncidents === 0 ? 1 : highSeverityIncidents;
+          const pendingForRender = demoMode && totalIncidents === 0 ? 2 : pendingActions;
+          setIncidentStats({ totalIncidents: totalForRender, highSeverityIncidents: highForRender, pendingActions: pendingForRender });
+          setRecentIncidents(recent.length ? recent : demoMode ? DEMO_RECENT_INCIDENTS : []);
         }
       } catch (err) {
         if (!cancelled) {
-          setIncidentStats({ totalIncidents: 0, highSeverityIncidents: 0, pendingActions: 0 });
-          setRecentIncidents([]);
+          setIncidentStats(
+            demoMode
+              ? { totalIncidents: DEMO_RECENT_INCIDENTS.length, highSeverityIncidents: 1, pendingActions: 2 }
+              : { totalIncidents: 0, highSeverityIncidents: 0, pendingActions: 0 }
+          );
+          setRecentIncidents(demoMode ? DEMO_RECENT_INCIDENTS : []);
         }
       } finally {
         if (!cancelled) setIncidentStatsLoading(false);
@@ -365,9 +475,9 @@ export default function Dashboard() {
         if (cancelled) return;
         const patientList = Array.isArray(patients) ? patients : [];
         const focusPatient =
-          patientList.find((p) => p?.stompMonitoring === true) ??
-          patientList[0] ??
-          null;
+          demoMode
+            ? patientList.find((p) => String(p?.id ?? "") === DEMO_PATIENT_ID) ?? patientList[0] ?? null
+            : patientList.find((p) => p?.stompMonitoring === true) ?? patientList[0] ?? null;
         setInspectionData({
           patient: focusPatient,
           notes: Array.isArray(notes) ? notes : [],
@@ -468,7 +578,7 @@ export default function Dashboard() {
 
     async function loadCompliance() {
       if (!organisationId) {
-        setComplianceScore(null);
+        setComplianceScore(demoMode ? DEMO_COMPLIANCE_SCORE : null);
         setComplianceLoading(false);
         return;
       }
@@ -479,12 +589,12 @@ export default function Dashboard() {
           calculateIfMissing: true,
         });
         if (!cancelled) {
-          setComplianceScore(score);
+          setComplianceScore(score ?? (demoMode ? DEMO_COMPLIANCE_SCORE : null));
         }
       } catch (err) {
         console.error("Dashboard compliance score error:", err);
         if (!cancelled) {
-          setComplianceScore(null);
+          setComplianceScore(demoMode ? DEMO_COMPLIANCE_SCORE : null);
           setComplianceError(isIndexError(err) ? INDEX_ERROR_MESSAGE : (err?.message ?? "Failed to load compliance score."));
         }
       } finally {
@@ -588,7 +698,9 @@ export default function Dashboard() {
           flex-shrink: 0;
         }
       `}</style>
-      <h1 style={styles.title}>Compliance Dashboard</h1>
+      <h1 style={styles.title} data-demo-guide="dashboard-overview">
+        Compliance Dashboard
+      </h1>
       {organisation?.name && (
         <p style={styles.subtitle}>
           {organisation.name}
@@ -950,7 +1062,11 @@ export default function Dashboard() {
               <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "#334155", lineHeight: 1.5 }}>
                 {riskScoreFeed.slice(0, 5).map((r) => (
                   <li key={r.id} style={{ marginBottom: 8 }}>
-                    <Link to={`/patients/${encodeURIComponent(r.patientId)}`} style={{ fontWeight: 700, color: "#1d4ed8" }}>
+                    <Link
+                      to={`/patients/${encodeURIComponent(r.patientId)}`}
+                      style={{ fontWeight: 700, color: "#1d4ed8" }}
+                      data-demo-guide={demoMode && r?.patientId === DEMO_PATIENT_ID ? "dashboard-daniel-k-link" : undefined}
+                    >
                       Patient {r.patientId.slice(0, 8)}…
                     </Link>
                     <span style={{ marginLeft: 8 }}>

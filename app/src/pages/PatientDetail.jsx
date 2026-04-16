@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { useOrganisation } from "../context/OrganisationContext";
 import { getPatientSummary } from "../services/patientService";
 import { formatUkDate } from "../utils/dateFormat";
+import { CLINICAL_EMPTY_PATIENT } from "../constants/clinicalCopy";
 
 function formatDate(value) {
   return formatUkDate(value, "—");
@@ -38,7 +39,7 @@ export default function PatientDetail() {
   if (!patient) {
     return (
       <div style={{ padding: 40 }}>
-        <p style={{ color: "#64748b" }}>No records yet</p>
+        <p className="clinical-empty">{CLINICAL_EMPTY_PATIENT}</p>
         <Link to="/patients" style={{ color: "#2563eb", marginTop: 8, display: "inline-block" }}>
           ← Back to patients
         </Link>
@@ -48,7 +49,9 @@ export default function PatientDetail() {
 
   return (
     <div style={{ padding: 40 }}>
-      <h1 style={{ marginTop: 0 }}>{patient.name || "Unnamed patient"}</h1>
+      <h1 className="page-title" style={{ marginTop: 0 }} data-demo-guide="patient-detail-title">
+        {patient.name || "Unnamed patient"}
+      </h1>
       <p style={{ margin: "0 0 1rem 0", color: "#555", fontSize: "0.95rem" }}>
         DOB: {formatDate(patient.dateOfBirth)}
       </p>

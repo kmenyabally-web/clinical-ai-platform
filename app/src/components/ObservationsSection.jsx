@@ -14,9 +14,9 @@ import { formatUkDateTime } from "../utils/dateFormat";
 const card = {
   background: "#fff",
   borderRadius: 12,
-  padding: "1.25rem 1.5rem",
+  padding: "20px",
   marginBottom: "1rem",
-  boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+  boxShadow: "0 1px 3px rgba(15, 23, 42, 0.06), 0 4px 12px rgba(15, 23, 42, 0.04)",
   border: "1px solid #e2e8f0",
 };
 
@@ -364,7 +364,9 @@ export default function ObservationsSection({ organisationId, selectedPatientId,
         {historyLoading ? <p aria-live="polite">Loading…</p> : null}
         {historyError ? <p style={{ color: "#b91c1c" }}>{historyError}</p> : null}
         {!historyLoading && !history.length ? (
-          <p style={{ color: "#64748b" }}>No observations yet for this patient. Click Add Observation to record the first entry.</p>
+          <p className="clinical-empty">
+            ⚠️ No observation data available for this patient yet. Click Add Observation to record the first entry.
+          </p>
         ) : null}
 
         {historySortedDesc.length > 0 ? (

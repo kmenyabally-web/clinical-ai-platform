@@ -60,6 +60,14 @@ export function useOrganisation() {
 
 export function OrganisationProvider({ children }) {
   const { user } = useAuth();
+
+  // Guided demo experience (fixed tenant + ward).
+  // Note: this is intentionally hard-locked to keep demo navigation deterministic.
+  const DEMO_MODE = true;
+  const DEMO_ORG_ID = "demo-org";
+  const DEMO_HOSPITAL_ID = "hospital001";
+  const DEMO_WARD_ID = "ward_picu";
+
   const [organisationId, setOrganisationId] = useState(null);
   /** First resolved tenant id after auth — kept stable (not cleared when transient loads flicker). */
   const [activeOrgId, setActiveOrgId] = useState(null);
@@ -76,35 +84,71 @@ export function OrganisationProvider({ children }) {
 
   const lastLoadedUidRef = useRef(null);
 
+  // Demo mode: load organisation + userProfile immediately, without requiring Firebase Auth.
+  useEffect(() => {
+    if (!DEMO_MODE) return;
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      setNeedsSetup(false);
+      try {
+        const org = await getOrganisation(DEMO_ORG_ID);
+        if (cancelled) return;
+        const demoProfile = {
+          orgId: DEMO_ORG_ID,
+          organisationId: DEMO_ORG_ID,
+          role: "Admin",
+          systemRole: "Admin",
+          mdtRole: "Nurse",
+          status: "active",
+          isPlatformAdmin: true,
+          hospitalId: DEMO_HOSPITAL_ID,
+          wardId: DEMO_WARD_ID,
+          email: "demo@sanctumcare.local",
+          displayName: "Demo User",
+          groupId: null,
+        };
+
+        setOrganisationId(DEMO_ORG_ID);
+        setActiveOrgId(DEMO_ORG_ID);
+        setOrganisation(applyDevOrganisationFeatures(org));
+        setSubscription(null);
+        setUserProfile(demoProfile);
+        setNeedsSetup(false);
+        setError(null);
+        lastLoadedUidRef.current = "demo-user";
+        setLoading(false);
+      } catch (e) {
+        if (cancelled) return;
+        setOrganisationId(null);
+        setActiveOrgId(null);
+        setOrganisation(null);
+        setSubscription(null);
+        setUserProfile(null);
+        setNeedsSetup(false);
+        setError(e?.message ?? "Failed to load demo organisation.");
+        setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const loadGuestDevOrganisation = useCallback(async () => {
     if (!import.meta.env.DEV) return;
-    const demoId = "demo-org";
-    setLoading(true);
-    setError(null);
+    // Strict mode: do not provide a default tenant. Let ContextGuard block until
+    // organisation/hospital are explicitly selected.
+    setLoading(false);
+    setOrganisationId(null);
+    setActiveOrgId(null);
+    setOrganisation(null);
+    setSubscription(null);
+    setUserProfile(null);
     setNeedsSetup(false);
-    try {
-      const orgSnap = await getDoc(doc(db, "organisations", demoId));
-      setOrganisationId(demoId);
-      setActiveOrgId(demoId);
-      setUserProfile(null);
-      setSubscription(null);
-      if (orgSnap.exists()) {
-        const org = await getOrganisation(demoId);
-        setOrganisation(applyDevOrganisationFeatures(org));
-        setError(null);
-      } else {
-        setOrganisation(null);
-        setError("⚠️ Organisation not found");
-      }
-    } catch {
-      setOrganisationId(demoId);
-      setActiveOrgId(demoId);
-      setOrganisation(null);
-      setError("⚠️ Organisation not found");
-    } finally {
-      setLoading(false);
-      lastLoadedUidRef.current = null;
-    }
+    setError(null);
+    lastLoadedUidRef.current = null;
   }, []);
 
   const loadOrganisation = useCallback(async (uid) => {
@@ -483,6 +527,7 @@ export function OrganisationProvider({ children }) {
 
   // Load tenant profile from the same auth source Firebase uses (avoids races with React context).
   useEffect(() => {
+    if (DEMO_MODE) return;
     if (DEV_AUTH_BYPASS) {
       loadOrganisation("dev-user");
       return;

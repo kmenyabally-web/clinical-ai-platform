@@ -12,7 +12,7 @@ import {
 import { db } from "../firebase";
 import { addTimelineEntry } from "./patientTimelineService";
 import { getPatientById } from "./patientService";
-import { assertTenantContext, TENANT_UNSCOPED_WARD } from "../utils/tenantContext";
+import { assertTenantContext } from "../utils/tenantContext";
 import { recalculateComplianceScoreAsync } from "./complianceEngine";
 
 const CARE_PLANS_COLLECTION = "carePlans";
@@ -79,7 +79,8 @@ export async function createCarePlan({
 
   const patient = await getPatientById(patientId.trim());
   const hospitalId = (patient.hospitalId && String(patient.hospitalId).trim()) || "";
-  const wardId = (patient.wardId && String(patient.wardId).trim()) || TENANT_UNSCOPED_WARD;
+  const wardId = (patient.wardId && String(patient.wardId).trim()) || "";
+  if (!wardId) throw new Error("Missing required context: wardId");
   assertTenantContext(organisationId, hospitalId);
 
   const ref = collection(db, CARE_PLANS_COLLECTION);
@@ -184,7 +185,8 @@ export async function updateCarePlan({
 
   const patientU = await getPatientById(patientId.trim());
   const hospitalIdU = (patientU.hospitalId && String(patientU.hospitalId).trim()) || "";
-  const wardIdU = (patientU.wardId && String(patientU.wardId).trim()) || TENANT_UNSCOPED_WARD;
+  const wardIdU = (patientU.wardId && String(patientU.wardId).trim()) || "";
+  if (!wardIdU) throw new Error("Missing required context: wardId");
 
   await addTimelineEntry({
     organisationId,
@@ -215,7 +217,8 @@ async function addTimelineEvent({
 }) {
   const patient = await getPatientById(patientId.trim());
   const hospitalId = (patient.hospitalId && String(patient.hospitalId).trim()) || "";
-  const wardId = (patient.wardId && String(patient.wardId).trim()) || TENANT_UNSCOPED_WARD;
+  const wardId = (patient.wardId && String(patient.wardId).trim()) || "";
+  if (!wardId) throw new Error("Missing required context: wardId");
   assertTenantContext(organisationId, hospitalId);
 
   const ref = collection(db, PATIENT_TIMELINE_COLLECTION);

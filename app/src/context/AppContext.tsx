@@ -7,16 +7,19 @@ import {
 import { useAuth } from "./AuthContext";
 import { useOrganisation } from "./OrganisationContext";
 import { useRole } from "./RoleContext";
+import { useStructure } from "./StructureContext";
 
 export type AppTenantContextValue = {
   organisationId: string | null;
   hospitalId: string | null;
   wardId: string | null;
+  patientId: string | null;
   userId: string | null;
   role: string;
   authLoading: boolean;
   orgLoading: boolean;
   scopeRevision: number;
+  demoMode: boolean;
 };
 
 const AppContext = createContext<AppTenantContextValue | null>(null);
@@ -37,25 +40,59 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const { user, loading: authLoading } = useAuth();
   const {
     organisationId,
-    hospitalId,
-    wardId,
+    hospitalId: profileHospitalId,
+    wardId: profileWardId,
     loading: orgLoading,
     scopeRevision,
   } = useOrganisation();
+  const { currentHospitalId, currentWardId } = useStructure();
   const { role } = useRole();
+
+  // Guided demo experience (fixed tenant + patient).
+  const demoMode = true;
+  const lockedOrganisationId = "demo-org";
+  const lockedHospitalId = "hospital001";
+  const lockedWardId = "ward_picu";
+  const lockedPatientId = "patient001";
 
   const value = useMemo(
     () => ({
-      organisationId: organisationId ?? null,
-      hospitalId: hospitalId != null && String(hospitalId).trim() ? String(hospitalId).trim() : null,
-      wardId: wardId != null && String(wardId).trim() ? String(wardId).trim() : null,
+      organisationId: demoMode ? lockedOrganisationId : organisationId ?? null,
+      hospitalId: demoMode
+        ? lockedHospitalId
+        : currentHospitalId != null && String(currentHospitalId).trim()
+          ? String(currentHospitalId).trim()
+          : profileHospitalId != null && String(profileHospitalId).trim()
+            ? String(profileHospitalId).trim()
+            : null,
+      wardId: demoMode
+        ? lockedWardId
+        : currentWardId != null && String(currentWardId).trim()
+          ? String(currentWardId).trim()
+          : profileWardId != null && String(profileWardId).trim()
+            ? String(profileWardId).trim()
+            : null,
+      patientId: demoMode ? lockedPatientId : null,
       userId: user?.uid ?? null,
       role: role ?? "STAFF",
       authLoading,
       orgLoading,
       scopeRevision,
+      demoMode,
     }),
-    [organisationId, hospitalId, wardId, user?.uid, role, authLoading, orgLoading, scopeRevision]
+    [
+      demoMode,
+      organisationId,
+      currentHospitalId,
+      currentWardId,
+      profileHospitalId,
+      profileWardId,
+      user?.uid,
+      role,
+      authLoading,
+      orgLoading,
+      scopeRevision,
+    ]
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

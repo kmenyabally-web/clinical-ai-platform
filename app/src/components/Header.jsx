@@ -1,20 +1,25 @@
 import { useAuth } from "../context/AuthContext";
 import { useOrganisation } from "../context/OrganisationContext";
 import { useRole } from "../context/RoleContext";
+import { useAppContext } from "../context/AppContext";
 import NotificationBell from "./NotificationBell";
 import ServiceSwitcher from "./ServiceSwitcher";
+import HospitalWardSelector from "./HospitalWardSelector";
 
 export default function Header() {
   const { user, logout } = useAuth();
   const { organisation, organisationId } = useOrganisation();
   const { mdtRole } = useRole();
+  const { demoMode } = useAppContext();
 
   return (
     <div style={styles.header}>
       <div style={styles.orgRow}>
+        {demoMode ? <div style={styles.demoBanner}>🟣 DEMO MODE ACTIVE — Using sample patient data (Daniel K)</div> : null}
         <span style={styles.orgText}>
           {`Organisation: ${organisation?.name?.trim() || "Unknown"}`}
         </span>
+        <HospitalWardSelector locked={demoMode} />
         <ServiceSwitcher />
       </div>
 
@@ -67,6 +72,17 @@ const styles = {
     alignItems: "center",
     gap: "24px",
     flexWrap: "wrap",
+  },
+  demoBanner: {
+    flexBasis: "100%",
+    background: "rgba(109, 40, 217, 0.12)",
+    border: "1px solid rgba(109, 40, 217, 0.35)",
+    color: "#5b21b6",
+    borderRadius: 10,
+    padding: "8px 12px",
+    fontWeight: 900,
+    fontSize: 13,
+    lineHeight: 1.3,
   },
   user: {
     display: "flex",

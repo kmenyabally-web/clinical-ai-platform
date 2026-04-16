@@ -21,6 +21,7 @@ import { getPatientById } from "./patientService";
 import { logAuditEventNonBlocking } from "./auditService";
 import {
   assertTenantContext,
+  assertWardTenantContext,
   tenantFieldsFromContext,
   assertSameOrganisationData,
   GENERIC_USER_ERROR_MESSAGE,
@@ -131,7 +132,7 @@ export async function createIncidentLegacy({
     hospitalId,
     userId: auth.currentUser?.uid ?? reportedBy ?? null,
   });
-  assertTenantContext(organisationId, hospitalId);
+  assertWardTenantContext(organisationId, hospitalId, wardId);
 
   const incidentsRef = orgIncidentsCollection(db, organisationId);
   const now = serverTimestamp();
@@ -238,7 +239,7 @@ export async function createIncident(incidentData) {
     hospitalId: tenant.hospitalId,
     userId: auth.currentUser?.uid ?? null,
   });
-  assertTenantContext(tenant.organisationId, tenant.hospitalId);
+  assertWardTenantContext(tenant.organisationId, tenant.hospitalId, tenant.wardId);
 
   const incidentDoc = {
     ...safePayload,
@@ -308,7 +309,7 @@ export async function createIncidentReport({
     hospitalId,
     userId: reporterId,
   });
-  assertTenantContext(organisationId, hospitalId);
+  assertWardTenantContext(organisationId, hospitalId, wardId);
 
   const incidentsRef = orgIncidentsCollection(db, organisationId);
   const incidentDoc = {

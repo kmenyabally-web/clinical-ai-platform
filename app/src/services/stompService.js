@@ -1,9 +1,8 @@
-import { doc, getDoc, serverTimestamp, updateDoc } from "firebase/firestore";
+import { getDoc, serverTimestamp, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { getUserContext } from "./authService";
 import { logAuditEvent } from "./auditService";
-
-const PATIENTS_COLLECTION = "patients";
+import { orgPatientDocumentRef } from "../utils/tenantCollections";
 
 function requireValue(v, label) {
   const x = String(v ?? "").trim();
@@ -33,7 +32,7 @@ async function loadPatientForStomp(patientId, context) {
   if (!id) throw new Error("patientId is required");
   const ctx = context ?? (await getUserContext());
   if (!ctx?.organisationId) throw new Error("organisationId missing from context");
-  const ref = doc(db, PATIENTS_COLLECTION, id);
+  const ref = orgPatientDocumentRef(db, ctx.organisationId, id);
   const snap = await getDoc(ref);
   if (!snap?.exists?.()) throw new Error("Patient not found");
   const patient = snap.data?.() ?? {};

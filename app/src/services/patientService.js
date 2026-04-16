@@ -4,7 +4,6 @@
  */
 
 import {
-  collection,
   doc,
   getDoc,
   getDocs,
@@ -29,33 +28,18 @@ import { isDocumentActive } from "../utils/auditSchema";
 import { assertManagementWrite } from "./managementPermissions";
 import { logManagementAudit } from "./managementAuditLog";
 import { orgPatientsCollection, orgPatientDocumentRef } from "../utils/tenantCollections";
+import { canonicalHospitalId, canonicalWardId } from "../utils/patientScopeMatch";
 
-const PATIENTS_COLLECTION = "patients";
 const MAX_ORG_WIDE_PATIENTS = 500;
-
-function mergePatientDocsById(snapA, snapB) {
-  const map = new Map();
-  for (const d of [...(snapA?.docs ?? []), ...(snapB?.docs ?? [])]) {
-    if (d?.id && !map.has(d.id)) map.set(d.id, d);
-  }
-  return [...map.values()];
-}
 
 async function resolvePatientWriteRef(organisationId, patientId) {
   const id = requirePatientId(patientId);
   const nested = orgPatientDocumentRef(db, organisationId, id);
   const nSnap = await getDoc(nested);
   if (nSnap?.exists?.()) return nested;
-  const root = doc(db, PATIENTS_COLLECTION, id);
-  const rSnap = await getDoc(root);
-  if (!rSnap?.exists?.()) {
-    const err = new Error("Patient not found.");
-    err.status = 404;
-    throw err;
-  }
-  const cur = rSnap.data?.() ?? {};
-  assertPatientOrganisationMatch(cur.organisationId, organisationId);
-  return root;
+  const err = new Error("Patient not found.");
+  err.status = 404;
+  throw err;
 }
 
 function normalizeStompMedication(raw) {
@@ -110,6 +94,59 @@ function hasRequiredPatientLinks(row) {
 }
 
 /**
+ * Patients under organisations/{orgId}/patients may omit redundant organisationId on older writes.
+ * Derive display names from `name` when first/last are blank so lists and notes stay usable.
+ *
+ * @param {Record<string, unknown>} data
+ * @param {string} docId
+ * @param {string} organisationId
+ */
+function normalizePatientListRow(data, docId, organisationId) {
+  const raw = data && typeof data === "object" ? data : {};
+  const orgFromDoc = typeof raw.organisationId === "string" ? raw.organisationId.trim() : "";
+  const orgId = orgFromDoc || String(organisationId ?? "").trim();
+
+  let firstName = typeof raw.firstName === "string" ? raw.firstName : "";
+  let lastName = typeof raw.lastName === "string" ? raw.lastName : "";
+  const nameField = typeof raw.name === "string" ? raw.name.trim() : "";
+  if (nameField && (!firstName || !lastName)) {
+    const parts = nameField.split(/\s+/).filter(Boolean);
+    if (parts.length === 1) {
+      if (!firstName && !lastName) firstName = parts[0];
+    } else if (parts.length >= 2) {
+      if (!firstName) firstName = parts[0];
+      if (!lastName) lastName = parts.slice(1).join(" ");
+    }
+  }
+
+  const composed = `${firstName} ${lastName}`.trim();
+  const displayName = nameField || composed;
+
+  const rawHosp = typeof raw.hospitalId === "string" ? raw.hospitalId.trim() : "";
+  const rawWard = typeof raw.wardId === "string" ? raw.wardId.trim() : "";
+  const hospitalId = canonicalHospitalId(rawHosp) || rawHosp;
+  const wardId = canonicalWardId(rawWard) || rawWard;
+
+  return {
+    ...raw,
+    id: docId,
+    organisationId: orgId,
+    firstName,
+    lastName,
+    name: displayName,
+    dob: raw.dob ?? raw.dateOfBirth ?? null,
+    dateOfBirth: raw.dateOfBirth ?? raw.dob ?? null,
+    hospitalId,
+    wardId,
+    hospitalName: typeof raw.hospitalName === "string" ? raw.hospitalName : "",
+    wardName: typeof raw.wardName === "string" ? raw.wardName : "",
+    serviceId: typeof raw.serviceId === "string" ? raw.serviceId : null,
+    hasLD: raw.hasLD === true,
+    hasMentalHealth: raw.hasMentalHealth === true,
+  };
+}
+
+/**
  * @param {Record<string, unknown>} filters
  * @param {string} [filters.hospitalId]
  * @param {string} [filters.wardId]
@@ -128,9 +165,6 @@ export async function listPatientMetadata(filters = {}) {
     organisationId = null;
   }
 
-  if (!organisationId && import.meta.env.DEV) {
-    organisationId = "demo-org";
-  }
   if (!organisationId) {
     throw new Error(GENERIC_USER_ERROR_MESSAGE);
   }
@@ -143,19 +177,14 @@ export async function listPatientMetadata(filters = {}) {
   const serviceId = filters.serviceId != null ? String(filters.serviceId).trim() : "";
 
   const nestedCol = orgPatientsCollection(db, organisationId);
-  const rootCol = collection(db, PATIENTS_COLLECTION);
   let nestedSnap = { docs: [] };
-  let rootSnap = { docs: [] };
 
   if (allInOrganisation) {
     try {
       nestedSnap = await getDocs(query(nestedCol, limit(MAX_ORG_WIDE_PATIENTS)));
     } catch (e) {
-      console.warn("[patientService] nested patients list skipped:", e);
+      console.warn("[patientService] org patients list skipped:", e);
     }
-    rootSnap = await getDocs(
-      query(rootCol, where("organisationId", "==", organisationId), limit(MAX_ORG_WIDE_PATIENTS))
-    );
   } else {
     const hospitalId =
       filters.hospitalId != null
@@ -175,25 +204,20 @@ export async function listPatientMetadata(filters = {}) {
     try {
       nestedSnap = await getDocs(query(nestedCol, ...nestedConstraints, limit(MAX_ORG_WIDE_PATIENTS)));
     } catch (e) {
-      console.warn("[patientService] nested scoped patients skipped:", e);
+      console.warn("[patientService] org scoped patients skipped:", e);
     }
-    const rootConstraints = [where("organisationId", "==", organisationId), where("hospitalId", "==", hospitalId)];
-    if (wardId) rootConstraints.push(where("wardId", "==", wardId));
-    rootSnap = await getDocs(query(rootCol, ...rootConstraints, limit(MAX_ORG_WIDE_PATIENTS)));
   }
 
-  const mergedDocs = mergePatientDocsById(nestedSnap, rootSnap);
-  const docs = mergedDocs.filter((d) => isDocumentActive(d.data() ?? {}));
+  const docs = (nestedSnap?.docs ?? []).filter((d) => isDocumentActive(d.data() ?? {}));
   const devUnscoped = false;
 
   let results = docs.map((d) => {
     const data = d?.data?.() ?? {};
 
-    const oid = data.organisationId;
-    if (import.meta.env.DEV && (oid == null || String(oid).trim() === "")) {
+    if (import.meta.env.DEV && (data.organisationId == null || String(data.organisationId).trim() === "")) {
       // eslint-disable-next-line no-console
       console.warn(
-        "Patient document missing organisationId — scoped queries will not return this row:",
+        "Patient document missing organisationId — filled from tenant path for list display:",
         d?.id
       );
     }
@@ -209,24 +233,7 @@ export async function listPatientMetadata(filters = {}) {
       );
     }
 
-    return {
-      id: d?.id ?? "",
-      organisationId: typeof data.organisationId === "string" ? data.organisationId : "",
-      firstName: typeof data.firstName === "string" ? data.firstName : "",
-      lastName: typeof data.lastName === "string" ? data.lastName : "",
-      dob: data.dob ?? data.dateOfBirth ?? null,
-      hospitalId: typeof data.hospitalId === "string" ? data.hospitalId : "",
-      wardId: typeof data.wardId === "string" ? data.wardId : "",
-      hospitalName: typeof data.hospitalName === "string" ? data.hospitalName : "",
-      wardName: typeof data.wardName === "string" ? data.wardName : "",
-      serviceId: typeof data.serviceId === "string" ? data.serviceId : null,
-      name:
-        `${typeof data.firstName === "string" ? data.firstName : ""} ${typeof data.lastName === "string" ? data.lastName : ""}`.trim() ||
-        "",
-      dateOfBirth: data.dateOfBirth ?? data.dob ?? null,
-      hasLD: data.hasLD === true,
-      hasMentalHealth: data.hasMentalHealth === true,
-    };
+    return normalizePatientListRow(data, d?.id ?? "", organisationId);
   });
   results = results.filter(hasRequiredPatientLinks);
 
@@ -305,18 +312,11 @@ export async function getPatientsByOrganisation(organisationId, options = {}) {
   try {
     nestedSnap = await getDocs(query(nestedCol, limit(MAX_ORG_WIDE_PATIENTS)));
   } catch (e) {
-    console.warn("[patientService] nested getPatientsByOrganisation skipped:", e);
+    console.warn("[patientService] org getPatientsByOrganisation skipped:", e);
   }
-  const rootSnap = await getDocs(
-    query(collection(db, PATIENTS_COLLECTION), where("organisationId", "==", org), limit(MAX_ORG_WIDE_PATIENTS))
-  );
-  const merged = mergePatientDocsById(nestedSnap, rootSnap);
-  const rows = merged
+  const rows = (nestedSnap?.docs ?? [])
     .filter((d) => (includeArchived ? true : isDocumentActive(d.data() ?? {})))
-    .map((d) => {
-      const data = d.data?.() ?? {};
-      return { ...data, id: d.id };
-    })
+    .map((d) => normalizePatientListRow(d.data?.() ?? {}, d.id, org))
     .filter(hasRequiredPatientLinks);
   await logAuditEventNonBlocking({
     action: "METADATA_READ_LIST",
@@ -458,35 +458,31 @@ export async function getPatientById(id) {
   if (!organisationId) throw new Error(GENERIC_USER_ERROR_MESSAGE);
 
   const nestedRef = orgPatientDocumentRef(db, organisationId, patientId);
-  let snap = await getDoc(nestedRef);
-  if (!snap.exists()) {
-    snap = await getDoc(doc(db, PATIENTS_COLLECTION, patientId));
-  }
+  const snap = await getDoc(nestedRef);
 
-  if (!snap.exists()) {
-    const err = new Error("Patient not found.");
-    err.status = 404;
-    throw err;
+  if (!snap.exists() || (snap.data()?.isDeleted === true)) {
+    throw new Error("Patient not found.");
   }
 
   const data = snap.data() || {};
 
-  if (data.isDeleted === true) {
-    const err = new Error("Patient not found.");
-    err.status = 404;
-    throw err;
-  }
-
   if (data.organisationId) assertPatientOrganisationMatch(data.organisationId, organisationId);
-  if (
+
+  const firstName = typeof data.firstName === "string" ? data.firstName : "";
+  const lastName = typeof data.lastName === "string" ? data.lastName : "";
+  const nameFromField = typeof data.name === "string" ? data.name.trim() : "";
+  const name = nameFromField || `${firstName} ${lastName}`.trim() || "Unnamed patient";
+
+  const missingLinks =
     typeof data.organisationId !== "string" ||
-    !data.organisationId.trim() ||
+    !String(data.organisationId).trim() ||
     typeof data.hospitalId !== "string" ||
-    !data.hospitalId.trim() ||
+    !String(data.hospitalId).trim() ||
     typeof data.wardId !== "string" ||
-    !data.wardId.trim()
-  ) {
-    throw new Error("Patient record is missing required organisation/hospital/ward links.");
+    !String(data.wardId).trim();
+
+  if (missingLinks) {
+    throw new Error("Patient missing required tenant scope (organisationId/hospitalId/wardId).");
   }
 
   // Firestore rules already enforce tenant access on patient reads. Do not require profile
@@ -512,8 +508,9 @@ export async function getPatientById(id) {
 
   return {
     id: snap.id,
-    firstName: typeof data.firstName === "string" ? data.firstName : "",
-    lastName: typeof data.lastName === "string" ? data.lastName : "",
+    firstName,
+    lastName,
+    name,
     dob: data.dob ?? data.dateOfBirth ?? null,
     address: typeof data.address === "string" ? data.address : "",
     gpName: typeof data.gpName === "string" ? data.gpName : "",
@@ -702,7 +699,9 @@ export async function getPatientSummary(organisationId, patientId) {
   }
   const p = await getPatientById(patientId);
   const name =
-    `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || "Unnamed patient";
+    (typeof p.name === "string" && p.name.trim()) ||
+    `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() ||
+    "Unnamed patient";
   return {
     ...p,
     name,

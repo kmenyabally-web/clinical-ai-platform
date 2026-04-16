@@ -7,6 +7,7 @@ import { listStaffTraining, countValidStaffByTraining } from "../services/staffT
 import { getCompetencyGapWarning } from "../services/aiService";
 import { getPatientById } from "../services/patientService";
 import { formatUkDate } from "../utils/dateFormat";
+import { CLINICAL_EMPTY_PATIENT } from "../constants/clinicalCopy";
 
 function formatDate(value) {
   return formatUkDate(value, "—");
@@ -177,8 +178,8 @@ export default function CarePlanDetails() {
   if (!carePlan) {
     return (
       <div style={{ padding: 40 }}>
-        <p style={{ color: "#64748b", padding: "2rem", background: "#f8fafc", borderRadius: 12 }}>
-          No records yet
+        <p className="clinical-empty" style={{ padding: "2rem" }}>
+          {CLINICAL_EMPTY_PATIENT}
         </p>
       </div>
     );
@@ -186,7 +187,9 @@ export default function CarePlanDetails() {
 
   return (
     <div style={{ padding: 40 }}>
-      <h1 style={{ marginTop: 0 }}>Care Plan Details</h1>
+      <h1 className="page-title" style={{ marginTop: 0 }}>
+        Care Plan Details
+      </h1>
       <p style={{ margin: "0 0 0.5rem 0", color: "#555", fontSize: "0.95rem" }}>
         Patient: <strong>{carePlan.patientId}</strong>
       </p>
@@ -323,7 +326,9 @@ export default function CarePlanDetails() {
         <div>
           <h2 style={{ fontSize: "1rem", marginTop: 0, marginBottom: "0.75rem" }}>Version history</h2>
           {versions.length === 0 ? (
-            <p style={{ color: "#64748b", padding: "1.5rem", background: "#f8fafc", borderRadius: 12 }}>No records yet</p>
+            <p className="clinical-empty" style={{ padding: "1.5rem" }}>
+              ⚠️ No version history recorded yet.
+            </p>
           ) : (
             <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
               {versions.map((v) => (

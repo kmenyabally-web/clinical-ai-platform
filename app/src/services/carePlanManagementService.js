@@ -14,7 +14,7 @@ import {
 import { db } from "../firebase";
 import { addTimelineEntry } from "./patientTimelineService";
 import { getPatientById } from "./patientService";
-import { assertTenantContext, TENANT_UNSCOPED_WARD } from "../utils/tenantContext";
+import { assertWardTenantContext } from "../utils/tenantContext";
 
 const CARE_PLANS_COLLECTION = "care_plans";
 const CARE_PLAN_VERSIONS_COLLECTION = "care_plan_versions";
@@ -72,8 +72,9 @@ export async function saveAiCarePlanDraft({ organisationId, patientId, content }
 
   const patient = await getPatientById(patientId.trim());
   const hospitalId = (patient.hospitalId && String(patient.hospitalId).trim()) || "";
-  const wardId = (patient.wardId && String(patient.wardId).trim()) || TENANT_UNSCOPED_WARD;
-  assertTenantContext(org, hospitalId);
+  const wardId = (patient.wardId && String(patient.wardId).trim()) || "";
+  if (!wardId) throw new Error("wardId is required to create care plan drafts.");
+  assertWardTenantContext(org, hospitalId, wardId);
 
   const ref = collection(db, CARE_PLANS_COLLECTION);
   const payload = {
@@ -244,8 +245,9 @@ export async function createCarePlanRecord({
 
   const patient = await getPatientById(patientId.trim());
   const hospitalId = (patient.hospitalId && String(patient.hospitalId).trim()) || "";
-  const wardId = (patient.wardId && String(patient.wardId).trim()) || TENANT_UNSCOPED_WARD;
-  assertTenantContext(organisationId.trim(), hospitalId);
+  const wardId = (patient.wardId && String(patient.wardId).trim()) || "";
+  if (!wardId) throw new Error("wardId is required to create care plan records.");
+  assertWardTenantContext(organisationId.trim(), hospitalId, wardId);
 
   const now = serverTimestamp();
   const ref = collection(db, CARE_PLANS_COLLECTION);
@@ -342,14 +344,15 @@ export async function updateCarePlanRecord({
   if (!vHid?.trim()) {
     const p = await getPatientById(current.patientId.trim());
     vHid = (p.hospitalId && String(p.hospitalId).trim()) || "";
-    vWid = (p.wardId && String(p.wardId).trim()) || vWid || TENANT_UNSCOPED_WARD;
+    vWid = (p.wardId && String(p.wardId).trim()) || vWid;
   }
-  assertTenantContext(current.organisationId, vHid);
+  if (!vWid?.trim()) throw new Error("wardId is required to update care plan records.");
+  assertWardTenantContext(current.organisationId, vHid, vWid);
 
   await addDoc(collection(db, CARE_PLAN_VERSIONS_COLLECTION), {
     organisationId: current.organisationId,
     hospitalId: vHid,
-    wardId: vWid || TENANT_UNSCOPED_WARD,
+    wardId: vWid,
     serviceId: current.serviceId,
     patientId: current.patientId,
     carePlanId: current.id,
@@ -368,7 +371,7 @@ export async function updateCarePlanRecord({
     organisationId,
     patientId,
     hospitalId: vHid,
-    wardId: vWid || TENANT_UNSCOPED_WARD,
+    wardId: vWid,
     serviceId: serviceId ?? current.serviceId,
     eventType: "care_plan_update",
     eventTitle: "Care plan updated",

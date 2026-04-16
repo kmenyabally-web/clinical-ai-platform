@@ -1,9 +1,10 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useOrganisation } from "../context/OrganisationContext";
 import { useService } from "../context/ServiceContext";
 import { useAuth } from "../context/AuthContext";
 import { useRole } from "../context/RoleContext";
+import { useAppContext } from "../context/AppContext";
 import { generateReadinessReport } from "../services/reportService";
 import { logAuditEvent } from "../services/auditService";
 import { requireAdminRole } from "../lib/requireAdminAction";
@@ -25,6 +26,7 @@ export default function Reports() {
   const { currentServiceId, currentService } = useService();
   const { user } = useAuth();
   const { can, role } = useRole();
+  const { demoMode } = useAppContext();
   const canGenerate = can("audit:update");
   const permissions = usePermissions();
   const canGenerateReports = Boolean(canGenerate && permissions?.canGenerateReports);
@@ -34,6 +36,44 @@ export default function Reports() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const reportRef = useRef(null);
+
+  const DEMO_REPORT = {
+    organisation: { id: "demo-org", name: "SanctumCare Demo org", providerId: "DEMO_PROVIDER" },
+    readinessScore: 82,
+    riskLevel: "MEDIUM RISK",
+    generatedAt: "16 Apr 2026, 14:30",
+    domainSummary: [
+      { domainKey: "safe", name: "Safe", compliancePercent: 82, readinessLevel: "Good" },
+      { domainKey: "effective", name: "Effective", compliancePercent: 78, readinessLevel: "Good" },
+      { domainKey: "caring", name: "Caring", compliancePercent: 74, readinessLevel: "Requires Improvement" },
+    ],
+    actionSummary: {
+      openCount: 5,
+      overdueCount: 2,
+      overdueActions: [
+        { id: "demo-action-1", title: "Overdue: Review safeguarding training completion" },
+        { id: "demo-action-2", title: "Overdue: Update incident investigation templates" },
+      ],
+      highSeverityCount: 1,
+      highSeverityActions: [{ id: "demo-action-3", title: "High severity: Implement de-escalation protocol refresh" }],
+    },
+    evidenceSummary: {
+      totalCount: 18,
+      byDomain: [
+        { domainKey: "safe", label: "Safe", count: 6 },
+        { domainKey: "effective", label: "Effective", count: 5 },
+        { domainKey: "caring", label: "Caring", count: 4 },
+      ],
+    },
+    latestInspection: { overallScore: 84, riskLevel: "MEDIUM RISK" },
+  };
+
+  useEffect(() => {
+    if (!demoMode) return;
+    setReport(DEMO_REPORT);
+    setLoading(false);
+    setError(null);
+  }, [demoMode]);
 
   const auditContext =
     organisationId && user?.uid
@@ -321,8 +361,8 @@ export default function Reports() {
       )}
 
       {hasFeature("reports") && !report && !loading && (
-        <p style={{ color: "#64748b", padding: "1rem 1.25rem", background: "#f8fafc", borderRadius: 12, marginTop: "1rem" }}>
-          No data available. Start by generating a readiness report when you have access.
+        <p className="clinical-empty" style={{ marginTop: "1rem" }}>
+          ⚠️ No readiness report data yet. Start by generating a readiness report when you have access.
         </p>
       )}
     </div>

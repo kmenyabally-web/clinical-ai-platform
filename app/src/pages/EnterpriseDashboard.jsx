@@ -4,6 +4,7 @@ import { Navigate } from "react-router-dom";
 import { useOrganisation } from "../context/OrganisationContext";
 import { useRole } from "../context/RoleContext";
 import { db } from "../firebase";
+import { orgPatientsCollection } from "../utils/tenantCollections";
 import { getGroupOrganisations } from "../services/groupService";
 import { listInspectionScores } from "../services/inspectionScoreService";
 import { fetchIncidents } from "../services/incidentService";
@@ -11,7 +12,6 @@ import { listPhysicalObservationsForOrganisation } from "../services/physicalObs
 
 const HOSPITALS_COLLECTION = "hospitals";
 const WARDS_COLLECTION = "wards";
-const PATIENTS_COLLECTION = "patients";
 const BEHAVIOURS_COLLECTION = "behaviours";
 
 function toMillis(ts) {
@@ -396,8 +396,7 @@ export default function EnterpriseDashboard() {
     if (!orgId || !hospitalId || !wardId) return [];
     const snap = await getDocs(
       query(
-        collection(db, PATIENTS_COLLECTION),
-        where("organisationId", "==", orgId),
+        orgPatientsCollection(db, orgId),
         where("hospitalId", "==", hospitalId),
         where("wardId", "==", wardId),
         limit(120)

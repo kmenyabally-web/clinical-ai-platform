@@ -172,8 +172,9 @@ async function upsertWards() {
 }
 
 async function upsertPatients() {
+  /** Single source of truth: organisations/{orgId}/patients — master clinical records. */
   for (const p of PATIENTS) {
-    const ref = doc(db, "patients", p.id);
+    const ref = doc(db, "organisations", ORG.id, "patients", p.id);
     const name = `${p.firstName} ${p.lastName}`.trim();
     const wardType = WARDS.find((w) => w.id === p.wardId)?.type ?? "acute";
     await setDoc(
@@ -204,29 +205,6 @@ async function upsertPatients() {
       { merge: true }
     );
   }
-
-  // Recovery seed path: force a visible demo patient in BOTH root and org-scoped paths.
-  const demoPatientPayload = {
-    id: "patient001",
-    name: "Daniel K",
-    firstName: "Daniel",
-    lastName: "K",
-    organisationId: "demo-org",
-    hospitalId: "hosp001",
-    wardId: "ward001",
-    hasLD: true,
-    hasMentalHealth: true,
-    wardType: "picu",
-    isDeleted: false,
-    updatedAt: serverTimestamp(),
-    createdAt: serverTimestamp(),
-  };
-  await setDoc(doc(db, "patients", "patient001"), demoPatientPayload, { merge: true });
-  await setDoc(
-    doc(db, "organisations", "demo-org", "patients", "patient001"),
-    demoPatientPayload,
-    { merge: true }
-  );
 }
 
 async function upsertDefaultPolicies() {

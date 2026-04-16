@@ -179,7 +179,6 @@ export default function PatientClinicalIntelligenceTabs({
             notes={notes ?? []}
             loadingNotes={notesLoading}
             formatWhen={formatWhen}
-            emptyNotesMessage="No clinical notes recorded for this patient."
             redactSensitive={redactSensitive}
             noteTextMode="corrected"
           />

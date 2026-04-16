@@ -356,23 +356,17 @@ export default function ComplianceOverview() {
       )}
 
       {!loading && !score && organisationId && (
-        <div style={{ padding: "2rem", background: "#f8fafc", borderRadius: 12, border: "1px solid #e2e8f0" }}>
-          <p style={{ margin: 0, color: "#64748b" }}>
-            No records yet. Scores are calculated when you view the dashboard or this page, and when incidents, care plans or clinical notes are updated.
+        <div className="card clinical-section">
+          <p style={{ margin: 0, color: "var(--text-muted)", lineHeight: 1.55, fontSize: "0.9375rem" }}>
+            ⚠️ No compliance data available yet. Scores are calculated when you view the dashboard or this page, and when
+            incidents, care plans or clinical notes are updated.
           </p>
           <button
             type="button"
             onClick={handleRecalculate}
             disabled={recalculating}
-            style={{
-              marginTop: "1rem",
-              padding: "8px 16px",
-              borderRadius: 8,
-              border: "1px solid #cbd5e1",
-              background: "#fff",
-              fontSize: "0.875rem",
-              cursor: recalculating ? "default" : "pointer",
-            }}
+            className="btn btn-secondary"
+            style={{ marginTop: "1rem" }}
           >
             {recalculating ? "Calculating…" : "Calculate compliance score"}
           </button>

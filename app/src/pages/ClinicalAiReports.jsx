@@ -21,6 +21,7 @@ import { CPA_DISCIPLINE_OPTIONS, mapCanonicalDisciplineToCpaKey } from "../templ
 import { usePatients } from "../hooks/usePatients";
 import { getReportPipelineValuesForOrganisation, isCareLikeOrganisation } from "../config/documentRegistry";
 import { getReportTemplate } from "../utils/reportTemplates";
+import { useAppContext } from "../context/AppContext";
 
 function toIsoMillis(value) {
   if (!value) return "";
@@ -129,13 +130,15 @@ export default function ClinicalAiReports() {
     isPlatformAdmin,
     hasFeature,
   } = useOrganisation();
+  const { demoMode, patientId: appPatientId } = useAppContext();
+  const DEMO_PATIENT_ID = appPatientId ?? "patient001";
 
   const orgType = organisation?.type ?? "hospital";
   const careSetting = isCareLikeOrganisation(orgType);
 
   const { data: patients = [], loading: patientsLoading, error: patientsError } = usePatients();
 
-  const [selectedPatientId, setSelectedPatientId] = useState("");
+  const [selectedPatientId, setSelectedPatientId] = useState(() => (demoMode ? DEMO_PATIENT_ID : ""));
   const [notes, setNotes] = useState([]);
   const [notesLoading, setNotesLoading] = useState(false);
   const [notesError, setNotesError] = useState(null);
@@ -193,11 +196,15 @@ export default function ClinicalAiReports() {
   }, [userDiscipline]);
 
   useEffect(() => {
+    if (demoMode) {
+      setSelectedPatientId(DEMO_PATIENT_ID);
+      return;
+    }
     const p = (searchParams.get("patient") ?? "").trim();
     if (p) setSelectedPatientId(p);
     const rt = (searchParams.get("reportType") ?? searchParams.get("type") ?? "").trim();
     if (rt === "Tribunal" || rt === "Management_Hearing") setReportType(rt);
-  }, [searchParams]);
+  }, [searchParams, demoMode, DEMO_PATIENT_ID]);
 
   useEffect(() => {
     if (reportType !== "Tribunal" && reportType !== "Management_Hearing") return;
@@ -280,9 +287,10 @@ export default function ClinicalAiReports() {
   }, [selectedPatientId]);
 
   const selectedPatientLabel = useMemo(() => {
+    if (demoMode && String(selectedPatientId) === String(DEMO_PATIENT_ID)) return "Daniel K";
     const p = patientOptions.find((x) => x.id === selectedPatientId);
     return p?.label ?? "Patient";
-  }, [patientOptions, selectedPatientId]);
+  }, [patientOptions, selectedPatientId, demoMode, DEMO_PATIENT_ID]);
 
   const selectedPatient = useMemo(
     () => patients.find((p) => String(p?.id ?? "") === String(selectedPatientId)),
@@ -564,19 +572,24 @@ export default function ClinicalAiReports() {
           <select
             value={selectedPatientId}
             onChange={(e) => setSelectedPatientId(e.target.value)}
-            disabled={patientsLoading || patientOptions.length === 0}
+            disabled={demoMode || patientsLoading || patientOptions.length === 0}
             style={{ marginLeft: 10, padding: "6px 10px" }}
           >
             {!organisationId ? (
               <option value="">Loading organisation...</option>
             ) : patientOptions.length ? (
-              patientOptions.map((opt) => (
-                <option key={opt.id} value={opt.id}>
-                  {opt.label}
-                </option>
-              ))
+              <>
+                {demoMode && !patientOptions.some((o) => o.id === DEMO_PATIENT_ID) ? (
+                  <option value={DEMO_PATIENT_ID}>Daniel K</option>
+                ) : null}
+                {patientOptions.map((opt) => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.label}
+                  </option>
+                ))}
+              </>
             ) : (
-              <option value="">No patients registered yet</option>
+              <option value="">{demoMode ? "Daniel K" : "No patients registered yet"}</option>
             )}
           </select>
         </label>
@@ -650,6 +663,7 @@ export default function ClinicalAiReports() {
         <button
           type="button"
           onClick={() => void handleGenerateReport(mapDropdownToPipelineType(reportType))}
+          data-demo-guide="generate-cpa-report"
           disabled={
             generating ||
             !selectedPatientId ||
@@ -689,7 +703,7 @@ export default function ClinicalAiReports() {
           {patientsError}
         </div>
       ) : null}
-      {!patientsLoading && patientOptions.length === 0 && organisationId ? (
+      {!demoMode && !patientsLoading && patientOptions.length === 0 && organisationId ? (
         <div style={{ color: "#64748b", marginTop: 14, fontSize: "0.95rem" }}>
           No patients registered yet. Add a patient first.
         </div>
@@ -708,7 +722,10 @@ export default function ClinicalAiReports() {
       ) : null}
 
       {lastGenerated ? (
-        <div style={{ background: "#ecfdf5", border: "1px solid #bbf7d0", padding: 12, borderRadius: 10, color: "#166534", marginTop: 14 }}>
+        <div
+          data-demo-guide={String(lastGenerated?.reportType ?? "").toLowerCase() === "cpa" ? "generated-cpa-report" : undefined}
+          style={{ background: "#ecfdf5", border: "1px solid #bbf7d0", padding: 12, borderRadius: 10, color: "#166534", marginTop: 14 }}
+        >
           Generated {lastGenerated.reportType} report
           {lastGenerated.savedToNote ? (
             <>
@@ -947,7 +964,9 @@ export default function ClinicalAiReports() {
             </div>
           </div>
         ) : (
-          <div style={{ color: "#64748b" }}>{notesLoading ? "Loading notes…" : "No clinical notes found for this patient."}</div>
+          <div style={{ color: "#64748b" }}>
+            {notesLoading ? "Loading notes…" : demoMode ? "Loading notes…" : "No clinical notes found for this patient."}
+          </div>
         )}
       </div>
     </div>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useOrganisation } from "../context/OrganisationContext";
+import { useStructure } from "../context/StructureContext";
 import { getPatientsByOrganisation } from "../services/patientService";
 
 /**
@@ -8,6 +9,7 @@ import { getPatientsByOrganisation } from "../services/patientService";
  */
 export function usePatients() {
   const { organisationId, scopeRevision } = useOrganisation();
+  const { currentHospitalId, currentWardId, setCurrentHospitalId, setCurrentWardId } = useStructure();
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -27,7 +29,19 @@ export function usePatients() {
         const rows = await getPatientsByOrganisation(organisationId, { includeArchived: false });
         if (cancelled) return;
         const list = Array.isArray(rows) ? rows : [];
-        setPatients(list.filter((p) => p.isDeleted !== true));
+        const active = list.filter((p) => p.isDeleted !== true);
+        if (!currentHospitalId) {
+          const firstScoped = active.find((p) => p?.hospitalId);
+          if (firstScoped?.hospitalId) {
+            setCurrentHospitalId(firstScoped.hospitalId);
+            if (!currentWardId && firstScoped?.wardId) {
+              setCurrentWardId(firstScoped.wardId);
+            }
+          }
+        }
+        // eslint-disable-next-line no-console
+        console.log("PATIENTS:", active);
+        setPatients(active);
       } catch (e) {
         if (cancelled) return;
         setError(e?.message ?? "Failed to load patients.");
@@ -40,7 +54,14 @@ export function usePatients() {
     return () => {
       cancelled = true;
     };
-  }, [organisationId, scopeRevision]);
+  }, [
+    organisationId,
+    scopeRevision,
+    currentHospitalId,
+    currentWardId,
+    setCurrentHospitalId,
+    setCurrentWardId,
+  ]);
 
   return useMemo(
     () => ({

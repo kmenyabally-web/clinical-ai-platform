@@ -7,7 +7,7 @@ import {
   useMemo,
 } from "react";
 import { useOrganisation } from "./OrganisationContext";
-import { listHospitals, listWards } from "../services/structureService";
+import { listHospitals, listWards, listWardsForOrganisation } from "../services/structureService";
 
 const STORAGE_PREFIX = "cqc.structure.";
 
@@ -40,6 +40,7 @@ export function useStructure() {
  */
 export function StructureProvider({ children }) {
   const { organisationId, userProfile } = useOrganisation();
+  const DEMO_MODE = true;
   const [hospitals, setHospitals] = useState([]);
   const [wards, setWards] = useState([]);
   const [currentHospitalId, setCurrentHospitalIdState] = useState(null);
@@ -89,33 +90,40 @@ export function StructureProvider({ children }) {
     }
     if (preferred) {
       setCurrentHospitalIdState(preferred);
-    } else if (hospitals.length === 1) {
-      const only = hospitals[0].id;
-      setCurrentHospitalIdState(only);
-      if (storageKeyHospital) localStorage.setItem(storageKeyHospital, only);
+      if (DEMO_MODE && storageKeyHospital) localStorage.setItem(storageKeyHospital, preferred);
+    } else {
+      const firstAvailableHospital = hospitals[0]?.id ?? null;
+      setCurrentHospitalIdState(firstAvailableHospital);
+      if (storageKeyHospital) {
+        if (firstAvailableHospital) localStorage.setItem(storageKeyHospital, firstAvailableHospital);
+        else localStorage.removeItem(storageKeyHospital);
+      }
     }
   }, [organisationId, hospitals, userProfile?.hospitalId, storageKeyHospital]);
 
   useEffect(() => {
-    if (!organisationId || !currentHospitalId) {
+    if (!organisationId) {
       setWards([]);
       return;
     }
     let mounted = true;
-    listWards(organisationId, currentHospitalId)
-      .then((list) => {
+    (async () => {
+      try {
+        const list = currentHospitalId
+          ? await listWards(organisationId, currentHospitalId)
+          : await listWardsForOrganisation(organisationId);
         if (mounted) setWards(Array.isArray(list) ? list : []);
-      })
-      .catch(() => {
+      } catch {
         if (mounted) setWards([]);
-      });
+      }
+    })();
     return () => {
       mounted = false;
     };
   }, [organisationId, currentHospitalId]);
 
   useEffect(() => {
-    if (!currentHospitalId || wards.length === 0) {
+    if (wards.length === 0) {
       setCurrentWardIdState(null);
       return;
     }
@@ -130,6 +138,7 @@ export function StructureProvider({ children }) {
     }
     if (preferred) {
       setCurrentWardIdState(preferred);
+      if (DEMO_MODE && storageKeyWard) localStorage.setItem(storageKeyWard, preferred);
     } else if (wards.length === 1) {
       const only = wards[0].id;
       setCurrentWardIdState(only);
@@ -141,6 +150,7 @@ export function StructureProvider({ children }) {
 
   const setCurrentHospitalId = useCallback(
     (id) => {
+      if (DEMO_MODE) return;
       const next = id || null;
       setCurrentHospitalIdState(next);
       setCurrentWardIdState(null);
@@ -155,6 +165,7 @@ export function StructureProvider({ children }) {
 
   const setCurrentWardId = useCallback(
     (id) => {
+      if (DEMO_MODE) return;
       const next = id || null;
       setCurrentWardIdState(next);
       if (storageKeyWard) {

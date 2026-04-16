@@ -4,6 +4,7 @@
  */
 
 import React from "react";
+import { CLINICAL_EMPTY_PATIENT } from "../constants/clinicalCopy";
 import type { ClinicalNote } from "../types/clinical";
 
 export type TimelineIncident = {
@@ -196,8 +197,8 @@ export default function PatientTimeline({
   loadingNotes = false,
   loadingIncidents = false,
   formatWhen,
-  emptyNotesMessage = "No clinical notes recorded for this patient.",
-  emptyIncidentsMessage = "No incidents recorded for this patient.",
+  emptyNotesMessage = CLINICAL_EMPTY_PATIENT,
+  emptyIncidentsMessage = "⚠️ No incident data available for this patient yet.",
   redactSensitive = false,
   noteTextMode = "raw",
 }: Props) {
@@ -219,9 +220,25 @@ export default function PatientTimeline({
     redactSensitive,
   });
   if (!items.length) {
-    if (variant === "notes") return <div style={emptyStyle}>{emptyNotesMessage}</div>;
-    if (variant === "incidents") return <div style={emptyStyle}>{emptyIncidentsMessage}</div>;
-    return <div style={emptyStyle}>No timeline events yet.</div>;
+    if (variant === "notes") {
+      return (
+        <div className="clinical-empty" style={{ marginTop: 4 }}>
+          {emptyNotesMessage}
+        </div>
+      );
+    }
+    if (variant === "incidents") {
+      return (
+        <div className="clinical-empty" style={{ marginTop: 4 }}>
+          {emptyIncidentsMessage}
+        </div>
+      );
+    }
+    return (
+      <div className="clinical-empty" style={{ marginTop: 4 }}>
+        ⚠️ No timeline data available for this patient yet.
+      </div>
+    );
   }
 
   const grouped = groupItems(items);
@@ -290,12 +307,6 @@ const roleStyle: React.CSSProperties = {
   padding: "2px 8px",
   borderRadius: 999,
   fontWeight: 800,
-};
-
-const emptyStyle: React.CSSProperties = {
-  padding: "12px 14px",
-  color: "#334155",
-  fontSize: 13,
 };
 
 const metaStyle: React.CSSProperties = {

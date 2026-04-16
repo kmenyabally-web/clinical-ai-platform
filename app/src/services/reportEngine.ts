@@ -314,7 +314,7 @@ function scopeNotesForReport(input: GenerateReportInput): unknown[] {
 
 const NO_DATA_DISCIPLINE: UnifiedReport = {
   kind: "unified",
-  title: "No data",
+  title: "⚠️ No data available for this patient yet",
   summary: "No notes available for this discipline",
   sections: [],
   recommendations: [],
@@ -624,7 +624,7 @@ export async function generateReport(input: GenerateReportInput): Promise<Unifie
   if (!rawList.length) {
     return {
       kind: "unified",
-      title: "No data",
+      title: "⚠️ No data available for this patient yet",
       summary: "No clinical notes available for this patient. Add notes before generating a report.",
       sections: [],
       recommendations: [],
@@ -635,7 +635,7 @@ export async function generateReport(input: GenerateReportInput): Promise<Unifie
   if (input.reportType === "Summary" && !list.length) {
     return {
       kind: "unified",
-      title: "No data",
+      title: "No notes in the selected time window",
       summary: "No notes in the selected time window.",
       sections: [],
       recommendations: [],

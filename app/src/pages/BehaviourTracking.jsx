@@ -10,6 +10,7 @@ import { addABCEntry, getABCLogsForPatient } from "../services/abcService";
 import { useRole } from "../context/RoleContext";
 import { useOrganisation } from "../context/OrganisationContext";
 import { useAuth } from "../context/AuthContext";
+import { useAppContext } from "../context/AppContext";
 import { getBehaviourLogInsights, calculateCqcScore } from "../engine/inspectionInsights";
 import { calculateBehaviourRiskFromLogs } from "../utils/riskEngine";
 import { analyseBehaviourRiskSignals } from "../utils/behaviourRiskAnalytics";
@@ -119,6 +120,8 @@ export default function BehaviourTracking() {
   const { organisationId, hospitalId, wardId, hasFeature } = useOrganisation();
   const { user } = useAuth();
   const { isInspectorRole, role } = useRole();
+  const { demoMode, patientId: appPatientId } = useAppContext();
+  const DEMO_PATIENT_ID = appPatientId ?? "patient001";
   const roleUpper = String(role ?? "").trim().toUpperCase();
   const allowedRoles = [
     "ADMIN",
@@ -134,7 +137,7 @@ export default function BehaviourTracking() {
 
   const { data: patients = [], loading: patientsLoading, error: patientsError } = usePatients();
 
-  const [selectedPatientId, setSelectedPatientId] = useState("");
+  const [selectedPatientId, setSelectedPatientId] = useState(() => (demoMode ? DEMO_PATIENT_ID : ""));
   const [behaviourLogs, setBehaviourLogs] = useState([]);
   const [patientIncidents, setPatientIncidents] = useState([]);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -162,10 +165,10 @@ export default function BehaviourTracking() {
   const [abcEntries, setAbcEntries] = useState([]);
 
   useEffect(() => {
-    if (!selectedPatientId && patients.length) {
+    if (!demoMode && !selectedPatientId && patients.length) {
       setSelectedPatientId(patients[0].id ?? "");
     }
-  }, [patients, selectedPatientId]);
+  }, [demoMode, patients, selectedPatientId]);
 
   useEffect(() => {
     if (timeMode !== "manual") return;
@@ -408,7 +411,9 @@ export default function BehaviourTracking() {
         boxSizing: "border-box",
       }}
     >
-      <h1 style={{ marginTop: 0 }}>Behaviour Tracking</h1>
+      <h1 style={{ marginTop: 0 }} data-demo-guide="behaviour-tracking-title">
+        Behaviour Tracking
+      </h1>
 
       {!canAccessBehaviourByRole ? (
         <div style={{ background: "#fef2f2", border: "1px solid #fecaca", padding: "12px 14px", borderRadius: 10, color: "#991b1b", marginBottom: 14 }}>
@@ -434,7 +439,7 @@ export default function BehaviourTracking() {
           <select
             value={selectedPatientId}
             onChange={(e) => setSelectedPatientId(e.target.value)}
-            disabled={patientsLoading || patients.length === 0}
+            disabled={demoMode || patientsLoading || patients.length === 0}
             style={{ marginLeft: 10, padding: "6px 10px" }}
           >
             {patientsLoading ? (
@@ -455,7 +460,7 @@ export default function BehaviourTracking() {
         </Link>
       </div>
 
-      {!patientsLoading && patients.length === 0 && organisationId ? (
+      {!demoMode && !patientsLoading && patients.length === 0 && organisationId ? (
         <div style={{ color: "#64748b", marginBottom: 16, fontSize: "0.95rem" }}>
           No patients found for this organisation
         </div>
@@ -471,7 +476,9 @@ export default function BehaviourTracking() {
             border: "1px solid #e2e8f0",
           }}
         >
-          <h2 style={{ fontSize: "1rem", margin: "0 0 8px 0" }}>Risk & inspection context</h2>
+          <h2 style={{ fontSize: "1rem", margin: "0 0 8px 0" }} data-demo-guide="behaviour-risk-context">
+            Risk & inspection context
+          </h2>
           <p style={{ margin: "0 0 8px 0", fontSize: 14, color: "#334155" }}>
             Behaviour risk (structured logs):{" "}
             <strong style={{ textTransform: "uppercase" }}>{behaviourRisk.level}</strong> · score {behaviourRisk.score}
@@ -584,7 +591,7 @@ export default function BehaviourTracking() {
           {logsLoading ? (
             <p style={{ color: "#64748b" }}>Loading…</p>
           ) : abcEntries.length === 0 ? (
-            <p style={{ color: "#64748b" }}>No ABC entries yet for this patient.</p>
+            !demoMode ? <p style={{ color: "#64748b" }}>No ABC entries yet for this patient.</p> : null
           ) : (
             <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
               {abcEntries.map((a) => (
@@ -881,9 +888,11 @@ export default function BehaviourTracking() {
         ) : !selectedPatientId ? (
           <div style={{ color: "#64748b" }}>Select a patient to view logs.</div>
         ) : validBehaviours.length === 0 ? (
-          <div style={{ color: "#64748b" }}>
-            No valid structured behaviour entries yet. Click Record Behaviour above to log the first entry.
-          </div>
+          !demoMode ? (
+            <div style={{ color: "#64748b" }}>
+              No valid structured behaviour entries yet. Click Record Behaviour above to log the first entry.
+            </div>
+          ) : null
         ) : (
           validBehaviours.map((entry) => {
             const displayTime = formatBehaviourLogTimestamp(entry);

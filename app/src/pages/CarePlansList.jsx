@@ -161,8 +161,8 @@ export default function CarePlansList() {
       {loading && <p style={{ color: "#666" }}>Loading…</p>}
 
       {!loading && !error && carePlans.length === 0 && (
-        <p style={{ color: "#64748b", padding: "2rem", background: "#f8fafc", borderRadius: 12 }}>
-          No records yet
+        <p className="clinical-empty" style={{ padding: "2rem" }}>
+          ⚠️ No care plans on record yet.
         </p>
       )}
 

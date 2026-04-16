@@ -13,8 +13,6 @@ import { db } from "../firebase";
 import { getPatientById } from "./patientService";
 import {
   assertTenantContext,
-  TENANT_UNSCOPED_HOSPITAL,
-  TENANT_UNSCOPED_WARD,
 } from "../utils/tenantContext";
 
 /** Firestore collection for the unified patient timeline (all event types). */
@@ -75,13 +73,15 @@ export async function addTimelineEntry({
     wardIdParam != null && String(wardIdParam).trim() !== "" ? String(wardIdParam).trim() : "";
   if (!hid) {
     const p = await getPatientById(patientId.trim());
-    hid = (p.hospitalId && String(p.hospitalId).trim()) || TENANT_UNSCOPED_HOSPITAL;
-    wid = (p.wardId && String(p.wardId).trim()) || wid || TENANT_UNSCOPED_WARD;
+    hid = (p.hospitalId && String(p.hospitalId).trim()) || "";
+    wid = (p.wardId && String(p.wardId).trim()) || "";
   } else if (!wid) {
     const p = await getPatientById(patientId.trim());
-    wid = (p.wardId && String(p.wardId).trim()) || TENANT_UNSCOPED_WARD;
+    wid = (p.wardId && String(p.wardId).trim()) || "";
   }
 
+  if (!hid) throw new Error("Missing required context: hospitalId");
+  if (!wid) throw new Error("Missing required context: wardId");
   assertTenantContext(organisationId.trim(), hid);
 
   const ref = collection(db, PATIENT_TIMELINE_COLLECTION);
@@ -89,7 +89,7 @@ export async function addTimelineEntry({
     organisationId: organisationId.trim(),
     patientId: patientId.trim(),
     hospitalId: hid,
-    wardId: wid || TENANT_UNSCOPED_WARD,
+    wardId: wid,
     serviceId: serviceId ?? null,
     eventType: String(eventType),
     eventTitle: String(eventTitle).trim(),

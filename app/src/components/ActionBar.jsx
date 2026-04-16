@@ -15,6 +15,7 @@ export default function ActionBar({ actions = [] }) {
           key={`${action.label ?? "action"}-${i}`}
           type="button"
           onClick={action.onClick}
+          data-demo-guide={action.demoGuideId ?? undefined}
           style={{
             padding: "10px 14px",
             borderRadius: "6px",

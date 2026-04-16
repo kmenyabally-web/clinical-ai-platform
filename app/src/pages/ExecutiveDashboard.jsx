@@ -8,24 +8,26 @@ import {
 } from "../services/executiveService";
 import { ALERT_TYPE_LABEL } from "../services/wardDashboardDataService";
 import { CLINICAL_CONTENT_MAX_WIDTH_PX } from "../config/contentLayout";
+import { CLINICAL_EMPTY_ORG_VIEW } from "../constants/clinicalCopy";
+import RiskLevelTag from "../components/RiskLevelTag";
 
 const card = {
   background: "#ffffff",
   borderRadius: 12,
-  boxShadow: "0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.06)",
+  boxShadow: "0 1px 3px rgba(15, 23, 42, 0.06), 0 4px 12px rgba(15, 23, 42, 0.04)",
   border: "1px solid #e2e8f0",
-  padding: "14px 16px",
+  padding: "20px",
 };
 
 const KPI_KEYS = [
   { label: "Total patients", field: "totalPatients", color: "#0f172a" },
-  { label: "High risk", field: "highRisk", color: "#991b1b" },
-  { label: "Medium risk", field: "mediumRisk", color: "#854d0e" },
-  { label: "Low risk", field: "lowRisk", color: "#166534" },
+  { label: "High risk", field: "highRisk", color: "#dc2626" },
+  { label: "Medium risk", field: "mediumRisk", color: "#f59e0b" },
+  { label: "Low risk", field: "lowRisk", color: "#16a34a" },
   { label: "Active alerts", field: "totalAlertInstances", subtitle: "instances", color: "#7c3aed" },
 ];
 
-const RISK_PIE_COLORS = { high: "#dc2626", medium: "#ca8a04", low: "#16a34a", unknown: "#94a3b8" };
+const RISK_PIE_COLORS = { high: "#dc2626", medium: "#f59e0b", low: "#16a34a", unknown: "#94a3b8" };
 
 const PRIMARY_ALERT_TYPES = [
   "behaviour_escalation",
@@ -176,7 +178,9 @@ export default function ExecutiveDashboard() {
   if (!showRisk) {
     return (
       <div style={{ padding: "2rem", maxWidth: 720 }}>
-        <h1 style={{ marginTop: 0 }}>Executive dashboard</h1>
+        <h1 className="page-title" style={{ marginTop: 0 }}>
+          Executive dashboard
+        </h1>
         <p style={{ color: "#64748b" }}>Risk features are not enabled for this organisation.</p>
       </div>
     );
@@ -194,7 +198,9 @@ export default function ExecutiveDashboard() {
     >
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: "1.5rem" }}>Executive dashboard</h1>
+          <h1 className="page-title" style={{ margin: 0 }}>
+            Executive dashboard
+          </h1>
           <p style={{ margin: "6px 0 0", fontSize: 14, color: "#64748b" }}>
             Organisation: <strong style={{ color: "#334155" }}>{organisationName || organisationId || "—"}</strong>
           </p>
@@ -506,8 +512,8 @@ export default function ExecutiveDashboard() {
                         </td>
                         <td style={{ padding: "10px 14px", color: "#475569" }}>{p.wardName}</td>
                         <td style={{ padding: "10px 14px" }}>{p.aggregateScore}</td>
-                        <td style={{ padding: "10px 14px", textTransform: "uppercase", fontSize: 12, fontWeight: 800 }}>
-                          {p.overallRisk}
+                        <td style={{ padding: "10px 14px" }}>
+                          <RiskLevelTag level={p.overallRisk} />
                         </td>
                         <td style={{ padding: "10px 14px", color: "#64748b", fontSize: 13 }}>
                           {p.drivers?.length ? p.drivers.join(" · ") : "—"}
@@ -558,7 +564,9 @@ export default function ExecutiveDashboard() {
           </section>
         </>
       ) : (
-        <p style={{ marginTop: 24, color: "#64748b" }}>No data.</p>
+        <p className="clinical-empty" style={{ marginTop: 24 }}>
+          {CLINICAL_EMPTY_ORG_VIEW}
+        </p>
       )}
     </div>
   );

@@ -8,6 +8,7 @@ import { useOrganisation } from "../context/OrganisationContext";
 import ActionBar from "../components/ActionBar";
 import { usePermissions } from "../hooks/usePermissions";
 import { usePatients } from "../hooks/usePatients";
+import { useAppContext } from "../context/AppContext";
 import { buildStructuredMdtSummary, disciplineToBucket } from "../utils/mdtSummaryEngine";
 import { formatBehaviourClinicalUk } from "../utils/behaviourClinicalTime";
 
@@ -42,10 +43,12 @@ export default function MdtReviews() {
   const { organisationId } = useOrganisation();
   const { isInspectorRole } = useRole();
   const permissions = usePermissions();
+  const { demoMode, patientId: appPatientId } = useAppContext();
+  const DEMO_PATIENT_ID = appPatientId ?? "patient001";
 
   const { data: patients = [], loading: patientsLoading, error: patientsError } = usePatients();
 
-  const [selectedPatientId, setSelectedPatientId] = useState("");
+  const [selectedPatientId, setSelectedPatientId] = useState(() => (demoMode ? DEMO_PATIENT_ID : ""));
   const [notes, setNotes] = useState([]);
   const [behaviours, setBehaviours] = useState([]);
   const [incidents, setIncidents] = useState([]);
@@ -133,7 +136,9 @@ export default function MdtReviews() {
 
   return (
     <div style={{ padding: "2rem", width: "100%", fontFamily: "sans-serif" }}>
-      <h1 style={{ marginTop: 0 }}>MDT Reviews</h1>
+      <h1 style={{ marginTop: 0 }} data-demo-guide="mdt-reviews-title">
+        MDT Reviews
+      </h1>
 
       {permissions?.canAccessMDT ? (
         <ActionBar
@@ -201,7 +206,9 @@ export default function MdtReviews() {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <section style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: 16 }}>
-            <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>Structured MDT summary</h2>
+            <h2 style={{ marginTop: 0, fontSize: "1.05rem" }} data-demo-guide="mdt-structured-summary">
+              Structured MDT summary
+            </h2>
             {redactSensitive ? (
               <p style={{ color: "#92400e", fontSize: 13 }}>Structured summary restricted for this role.</p>
             ) : (

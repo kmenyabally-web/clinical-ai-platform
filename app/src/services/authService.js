@@ -15,6 +15,30 @@ import { auth } from "../firebase";
 import { getCurrentUserProfile } from "./organisation";
 import { GENERIC_USER_ERROR_MESSAGE } from "../utils/tenantContext";
 
+const STRUCTURE_STORAGE_PREFIX = "cqc.structure.";
+
+function readScopedStorageSelection(organisationId) {
+  if (!organisationId) return { hospitalId: null, wardId: null };
+  if (typeof window === "undefined" || !window?.localStorage) {
+    return { hospitalId: null, wardId: null };
+  }
+  const keyBase = `${STRUCTURE_STORAGE_PREFIX}${organisationId}`;
+  const hospitalRaw = window.localStorage.getItem(`${keyBase}.hospitalId`);
+  const wardRaw = window.localStorage.getItem(`${keyBase}.wardId`);
+  const hospitalId = hospitalRaw != null && String(hospitalRaw).trim() ? String(hospitalRaw).trim() : null;
+  const wardId = wardRaw != null && String(wardRaw).trim() ? String(wardRaw).trim() : null;
+  return { hospitalId, wardId };
+}
+
+// Guided demo experience: provide fixed tenant scope even if Firebase Auth user is not present.
+const DEMO_MODE = true;
+const DEMO_TENANT = {
+  role: "Admin",
+  organisationId: "demo-org",
+  hospitalId: "hospital001",
+  wardId: "ward_picu",
+};
+
 /**
  * getUserContext()
  *
@@ -27,13 +51,12 @@ export async function getUserContext() {
   const user = auth.currentUser;
 
   if (!user) {
-    if (import.meta.env.DEV) {
-      // Match OrganisationContext guest dev tenant so Firestore services (notes, patients) stay scoped.
+    if (DEMO_MODE) {
       return {
-        role: "SUPER_ADMIN",
-        organisationId: "demo-org",
-        hospitalId: null,
-        wardId: null,
+        role: DEMO_TENANT.role,
+        organisationId: DEMO_TENANT.organisationId,
+        hospitalId: DEMO_TENANT.hospitalId,
+        wardId: DEMO_TENANT.wardId,
         serviceIds: null,
       };
     }
@@ -102,13 +125,32 @@ export async function getUserContext() {
   if (!wardId && profileWardId) wardId = profileWardId;
 
   if (!organisationId) {
-    if (import.meta.env.DEV && user) {
-      // Dev stabilisation: signed-in but claims/profile not yet backfilled — avoid hard 403 loops.
-      organisationId = "demo-org";
-    } else {
-      console.error("Governance context missing: organisationId");
-      throw new Error(GENERIC_USER_ERROR_MESSAGE);
-    }
+    console.error("Governance context missing: organisationId");
+    throw new Error(GENERIC_USER_ERROR_MESSAGE);
+  }
+
+  // Prefer globally selected hospital/ward from StructureContext persistence.
+  // This keeps service queries aligned with the header scope selector.
+  const selectedScope = readScopedStorageSelection(organisationId);
+  if (selectedScope.hospitalId) {
+    hospitalId = selectedScope.hospitalId;
+  }
+  if (selectedScope.wardId) {
+    wardId = selectedScope.wardId;
+  }
+
+  // Hard requirement for strict tenant scope: hospital must always be set for module access.
+  if ((!organisationId || !hospitalId) && DEMO_MODE) {
+    return {
+      role: role ?? DEMO_TENANT.role,
+      organisationId: DEMO_TENANT.organisationId,
+      hospitalId: DEMO_TENANT.hospitalId,
+      wardId: DEMO_TENANT.wardId,
+      serviceIds,
+    };
+  }
+  if (!organisationId || !hospitalId) {
+    throw new Error(GENERIC_USER_ERROR_MESSAGE);
   }
 
   return {

@@ -1,5 +1,6 @@
-import { addDoc, collection, getDocs, query, serverTimestamp, where } from "firebase/firestore";
+import { addDoc, collection, getDocs, limit, query, serverTimestamp, where } from "firebase/firestore";
 import { db, auth } from "../firebase";
+import { orgPatientsCollection } from "../utils/tenantCollections";
 
 function normalizeText(value) {
   return String(value ?? "").trim().toLowerCase();
@@ -15,14 +16,19 @@ export const runInspection = async ({ organisationId, hospitalId = null }) => {
     throw new Error("organisationId is required");
   }
 
-  const constraints = [where("organisationId", "==", org)];
+  const noteConstraints = [where("organisationId", "==", org)];
   if (hospitalId) {
-    constraints.push(where("hospitalId", "==", String(hospitalId).trim()));
+    noteConstraints.push(where("hospitalId", "==", String(hospitalId).trim()));
   }
 
+  const patientCol = orgPatientsCollection(db, org);
+  const patientQ = hospitalId
+    ? query(patientCol, where("hospitalId", "==", String(hospitalId).trim()), limit(500))
+    : query(patientCol, limit(500));
+
   const [notesSnap, patientsSnap, tasksSnap] = await Promise.all([
-    getDocs(query(collection(db, "notes"), ...constraints)),
-    getDocs(query(collection(db, "patients"), ...constraints)),
+    getDocs(query(collection(db, "notes"), ...noteConstraints)),
+    getDocs(patientQ),
     getDocs(query(collection(db, "tasks"), where("organisationId", "==", org))),
   ]);
   const notes = (notesSnap?.docs ?? []).map((d) => d.data() ?? {});

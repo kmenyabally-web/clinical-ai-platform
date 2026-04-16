@@ -1,13 +1,22 @@
 /**
  * Enforces non-empty organisation + hospital on Firestore creates.
- * Use {@link TENANT_UNSCOPED_HOSPITAL} / {@link TENANT_UNSCOPED_WARD} when no ward/hospital applies.
+ * Ward-scoped records must use {@link assertWardTenantContext}.
  */
-export const TENANT_UNSCOPED_HOSPITAL = "__tenant_unscoped__";
-export const TENANT_UNSCOPED_WARD = "__tenant_unscoped__";
 export const GENERIC_USER_ERROR_MESSAGE = "Something went wrong. Please try again.";
 
 export function assertTenantContext(organisationId, hospitalId) {
   if (!organisationId || !hospitalId) {
+    throw new Error(GENERIC_USER_ERROR_MESSAGE);
+  }
+}
+
+/**
+ * Enforces non-empty organisation + hospital + ward on Firestore creates.
+ * Use for records that are ward-scoped (patients, notes, incidents, physical health,
+ * safeguarding, care plans, and ward-bound reports).
+ */
+export function assertWardTenantContext(organisationId, hospitalId, wardId) {
+  if (!organisationId || !hospitalId || !wardId) {
     throw new Error(GENERIC_USER_ERROR_MESSAGE);
   }
 }
@@ -61,7 +70,7 @@ export function normalizeHospitalScopeId(id) {
   const t = id.trim();
   if (!t) return null;
   if (t.toUpperCase() === "UNASSIGNED") return null;
-  if (t === TENANT_UNSCOPED_HOSPITAL) return null;
+  if (t === "__tenant_unscoped__") return null;
   return t;
 }
 
@@ -70,7 +79,7 @@ export function normalizeWardScopeId(id) {
   const t = id.trim();
   if (!t) return null;
   if (t.toUpperCase() === "UNASSIGNED") return null;
-  if (t === TENANT_UNSCOPED_WARD) return null;
+  if (t === "__tenant_unscoped__") return null;
   return t;
 }
 
@@ -86,10 +95,10 @@ export function tenantFieldsFromContext(ctx) {
   const hospitalId =
     ctx?.hospitalId != null && String(ctx.hospitalId).trim() !== ""
       ? String(ctx.hospitalId).trim()
-      : TENANT_UNSCOPED_HOSPITAL;
+      : "";
   const wardId =
     ctx?.wardId != null && String(ctx.wardId).trim() !== ""
       ? String(ctx.wardId).trim()
-      : TENANT_UNSCOPED_WARD;
+      : "";
   return { organisationId, hospitalId, wardId };
 }

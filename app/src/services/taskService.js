@@ -13,6 +13,7 @@ import {
 } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { getUserContext } from "./authService";
+import { orgPatientDocumentRef } from "../utils/tenantCollections";
 import { logAuditEvent } from "./auditService";
 
 const TASKS_COLLECTION = "tasks";
@@ -51,11 +52,13 @@ export function getCurrentShift() {
 async function assertPatientInOrganisation(patientId, organisationId) {
   const pid = String(patientId ?? "").trim();
   if (!pid) throw new Error("patientId is required");
-  const ref = doc(db, "patients", pid);
+  const org = String(organisationId ?? "").trim();
+  if (!org) throw new Error("organisationId is required");
+  const ref = orgPatientDocumentRef(db, org, pid);
   const snap = await getDoc(ref);
   if (!snap?.exists?.()) throw new Error("Patient not found");
-  const org = String(snap.data()?.organisationId ?? "").trim();
-  if (org !== String(organisationId).trim()) {
+  const patientOrgId = String(snap.data()?.organisationId ?? "").trim();
+  if (patientOrgId !== org) {
     throw new Error("403 Forbidden: organisation scope mismatch");
   }
   return pid;

@@ -14,6 +14,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { calculateNEWS2, getRiskLevel } from "../utils/news2Calculator";
+import { getPatientById } from "./patientService";
 
 const COLLECTION = "physical_observations";
 
@@ -49,6 +50,17 @@ export async function submitPhysicalObservation(payload) {
   if (!patientId) throw new Error("patientId is required");
   if (!organisationId) throw new Error("organisationId is required");
 
+  // Enforce strict tenant scope: physical observations are hospital/ward scoped
+  // and must match the patient record.
+  const patient = await getPatientById(patientId);
+  if ((patient.organisationId ?? "") !== organisationId) {
+    throw new Error("organisationId mismatch between form and patient record.");
+  }
+  const hospitalId = String(patient.hospitalId ?? "").trim();
+  const wardId = String(patient.wardId ?? "").trim();
+  if (!hospitalId) throw new Error("Missing required context: hospitalId");
+  if (!wardId) throw new Error("Missing required context: wardId");
+
   const vitals = {
     respiratoryRate: payload.respiratoryRate,
     oxygenSaturation: payload.oxygenSaturation,
@@ -61,8 +73,8 @@ export async function submitPhysicalObservation(payload) {
   const doc = {
     patientId,
     organisationId,
-    hospitalId: coerceString(payload, "hospitalId", "") || "",
-    wardId: coerceString(payload, "wardId", "") || "",
+    hospitalId,
+    wardId,
     temperature: payload.temperature ?? null,
     pulse: payload.pulse ?? null,
     systolicBP: payload.systolicBP ?? null,
