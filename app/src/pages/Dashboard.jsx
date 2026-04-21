@@ -1168,21 +1168,21 @@ export default function Dashboard() {
             <Link to="/capacity" style={{ fontSize: "0.8rem", color: "#2563eb", marginTop: 4, display: "inline-block" }}>View →</Link>
           </div>
           <div className="stat-card" style={{ padding: 20, background: "#eff6ff", borderRadius: 12, border: "1px solid #bfdbfe" }}>
-            <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>Active Liberty Safeguards</h3>
+            <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>Active DoLS/LPS</h3>
             <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>
               {dolsMetricsLoading ? "—" : dolsMetrics.activeSafeguards}
             </p>
             <Link to="/patients" style={{ fontSize: "0.8rem", color: "#2563eb", marginTop: 4, display: "inline-block" }}>View →</Link>
           </div>
           <div className="stat-card" style={{ padding: 20, background: "#fffbeb", borderRadius: 12, border: "1px solid #fde68a" }}>
-            <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>Expiring (next 30 days)</h3>
+            <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>DoLS/LPS Expiring (next 30 days)</h3>
             <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>
               {dolsMetricsLoading ? "—" : dolsMetrics.expiringNext30Days}
             </p>
             <Link to="/patients" style={{ fontSize: "0.8rem", color: "#2563eb", marginTop: 4, display: "inline-block" }}>View →</Link>
           </div>
           <div className="stat-card" style={{ padding: 20, background: "#fef2f2", borderRadius: 12, border: "1px solid #fecaca" }}>
-            <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>Overdue</h3>
+            <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>DoLS/LPS Overdue</h3>
             <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>
               {dolsMetricsLoading ? "—" : dolsMetrics.overdue}
             </p>
@@ -1230,7 +1230,7 @@ export default function Dashboard() {
         </div>
         {dolsAlerts.length > 0 ? (
           <div role="alert" style={{ marginTop: 14, padding: "12px 14px", borderRadius: 10, border: "1px solid #fecaca", background: "#fef2f2", color: "#991b1b", fontWeight: 700, fontSize: 13 }}>
-            ⚠️ Liberty safeguards alerts active: {dolsAlerts.length} (expiring in 30 days, not applied, or overdue)
+            ⚠️ DoLS/LPS alerts active: {dolsAlerts.length} (expiring in 30 days, not applied, or overdue)
           </div>
         ) : null}
 
