@@ -27,7 +27,7 @@ function findButtonByTextIncludes(text) {
 }
 
 export default function DemoGuide() {
-  const { demoMode } = useAppContext();
+  const { demoMode, setDemoMode } = useAppContext();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -284,71 +284,94 @@ export default function DemoGuide() {
         position: "fixed",
         right: 22,
         bottom: 22,
-        zIndex: 99999,
+        zIndex: 10,
+        pointerEvents: "none",
         maxWidth: 420,
-        background: "rgba(15, 23, 42, 0.92)",
-        color: "white",
-        border: "1px solid rgba(167, 139, 250, 0.35)",
-        borderRadius: 14,
-        padding: "14px 16px",
-        boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
-        fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
       }}
-      role="dialog"
-      aria-label="Demo walkthrough"
     >
-      <div style={{ fontWeight: 900, fontSize: 12, color: "rgba(226, 232, 240, 0.9)", marginBottom: 6 }}>
-        Demo walkthrough · Step {stepIndex + 1} / {total}
-      </div>
-      <div style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.35 }}>{step.text}</div>
-      <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center" }}>
-        <button
-          type="button"
-          onClick={() => {
-            setStepIndex((i) => Math.max(0, i - 1));
-          }}
-          style={{
-            padding: "10px 12px",
-            borderRadius: 10,
-            border: "1px solid rgba(148, 163, 184, 0.35)",
-            background: "transparent",
-            color: "rgba(226, 232, 240, 0.95)",
-            fontWeight: 800,
-            cursor: stepIndex === 0 ? "not-allowed" : "pointer",
-            opacity: stepIndex === 0 ? 0.6 : 1,
-          }}
-          disabled={stepIndex === 0}
-        >
-          Back
-        </button>
+      <div
+        style={{
+          zIndex: 20,
+          pointerEvents: "auto",
+          background: "rgba(15, 23, 42, 0.92)",
+          color: "white",
+          border: "1px solid rgba(167, 139, 250, 0.35)",
+          borderRadius: 14,
+          padding: "14px 16px",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
+          fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
+        }}
+        role="dialog"
+        aria-label="Demo walkthrough"
+      >
+        <div style={{ fontWeight: 900, fontSize: 12, color: "rgba(226, 232, 240, 0.9)", marginBottom: 6 }}>
+          Demo walkthrough · Step {stepIndex + 1} / {total}
+        </div>
+        <div style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.35 }}>{step.text}</div>
+        <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => {
+              setStepIndex((i) => Math.max(0, i - 1));
+            }}
+            style={{
+              padding: "10px 12px",
+              borderRadius: 10,
+              border: "1px solid rgba(148, 163, 184, 0.35)",
+              background: "transparent",
+              color: "rgba(226, 232, 240, 0.95)",
+              fontWeight: 800,
+              cursor: stepIndex === 0 ? "not-allowed" : "pointer",
+              opacity: stepIndex === 0 ? 0.6 : 1,
+            }}
+            disabled={stepIndex === 0}
+          >
+            Back
+          </button>
 
-        <button
-          type="button"
-          onClick={() => {
-            if (stepIndex === total - 1) {
-              setCompleted(true);
-              try {
-                window.localStorage.setItem(COMPLETED_KEY, "1");
-              } catch {
-                // ignore
+          <button
+            type="button"
+            onClick={() => {
+              if (stepIndex === total - 1) {
+                setCompleted(true);
+                try {
+                  window.localStorage.setItem(COMPLETED_KEY, "1");
+                } catch {
+                  // ignore
+                }
+                return;
               }
-              return;
-            }
-            setStepIndex((i) => Math.min(total - 1, i + 1));
-          }}
-          disabled={!canGoNext}
-          style={{
-            padding: "10px 14px",
-            borderRadius: 10,
-            border: "none",
-            background: canGoNext ? "rgba(124,58,237,1)" : "rgba(148, 163, 184, 0.45)",
-            color: "white",
-            fontWeight: 900,
-            cursor: canGoNext ? "pointer" : "not-allowed",
-          }}
-        >
-          {nextLabel}
-        </button>
+              setStepIndex((i) => Math.min(total - 1, i + 1));
+            }}
+            disabled={!canGoNext}
+            style={{
+              padding: "10px 14px",
+              borderRadius: 10,
+              border: "none",
+              background: canGoNext ? "rgba(124,58,237,1)" : "rgba(148, 163, 184, 0.45)",
+              color: "white",
+              fontWeight: 900,
+              cursor: canGoNext ? "pointer" : "not-allowed",
+            }}
+          >
+            {nextLabel}
+          </button>
+          <button
+            type="button"
+            onClick={() => setDemoMode(false)}
+            style={{
+              padding: "10px 14px",
+              borderRadius: 10,
+              border: "1px solid rgba(248, 113, 113, 0.7)",
+              background: "rgba(127, 29, 29, 0.55)",
+              color: "#fecaca",
+              fontWeight: 900,
+              cursor: "pointer",
+            }}
+          >
+            Exit Demo Mode
+          </button>
+        </div>
       </div>
     </div>
   );

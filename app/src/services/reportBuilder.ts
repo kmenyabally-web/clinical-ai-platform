@@ -23,7 +23,79 @@ import { canAccessRCTribunalReport } from "../utils/rcTribunalAccess";
 import { generateManagementHearingReport } from "./enterpriseReportsService";
 import { managementHearingToUnified } from "./reportEngine";
 import { buildNursingTribunalUnifiedReport, buildRcTribunalUnifiedReport } from "./tribunalUnifiedGenerators";
+import { listCapacityAssessmentsForPatient, MCA_DECISION_TYPES, MCA_DECISION_TYPE_LABELS } from "./capacityAssessmentService";
+import { getLatestMdtSummaryForPatient } from "./mdtSummariesService";
+import { listLibertySafeguardsForPatient } from "./libertySafeguardsService";
 export { STRUCTURED_CLINICAL_REPORT_TAGLINE } from "../config/clinicalReportMessages";
+
+function buildCapacityReportContent(capacityAssessments: Record<string, unknown>[]): string {
+  const rows = Array.isArray(capacityAssessments) ? capacityAssessments : [];
+  if (rows.length === 0) return "No recent capacity assessments recorded.";
+  const latestByDecision = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    const decisionType = String(row?.decisionType ?? "").trim();
+    if (!decisionType) continue;
+    if (!latestByDecision.has(decisionType)) {
+      latestByDecision.set(decisionType, row);
+    }
+  }
+  const orderedDecisionTypes = [
+    ...MCA_DECISION_TYPES,
+    ...Array.from(latestByDecision.keys()).filter((key) => !MCA_DECISION_TYPES.includes(key)),
+  ];
+  const lines: string[] = [];
+  for (const decisionType of orderedDecisionTypes) {
+    const row = latestByDecision.get(decisionType);
+    if (!row) continue;
+    const status = row?.lacksCapacity === true ? "Lacks capacity" : "Capacity present";
+    const assessed = String(row?.assessmentDate ?? "").trim() || "Not recorded";
+    const bestInterests =
+      String(row?.chosenOption ?? "").trim() ||
+      String(row?.justification ?? "").trim() ||
+      String(row?.bestInterestsNotes ?? "").trim() ||
+      "Not recorded";
+    const label = MCA_DECISION_TYPE_LABELS[decisionType] || decisionType;
+    lines.push(`${label}: ${status} | Last assessed: ${assessed} | Best interests: ${bestInterests}`);
+  }
+  return lines.length > 0 ? lines.join("\n") : "No recent capacity assessments recorded.";
+}
+
+function buildCapacityStatusSectionContent(
+  capacityAssessments: Record<string, unknown>[],
+  disciplineComments: Record<string, unknown> | null
+): string {
+  const breakdown = buildCapacityReportContent(capacityAssessments);
+  const comments =
+    disciplineComments && Object.keys(disciplineComments).length
+      ? Object.entries(disciplineComments)
+          .map(([k, v]) => `${k}: ${String(v ?? "").trim() || "No comment"}`)
+          .join("\n")
+      : "No discipline comments recorded.";
+  return [
+    "Decision-based breakdown:",
+    breakdown,
+    "",
+    "Discipline comments:",
+    comments,
+  ].join("\n");
+}
+
+function buildDolsReportContent(libertyRows: Record<string, unknown>[]): string {
+  const rows = Array.isArray(libertyRows) ? libertyRows : [];
+  if (rows.length === 0) return "No DoLS/LPS record currently documented.";
+  return rows
+    .slice(0, 6)
+    .map((row) => {
+      const type = String(row?.type ?? "").trim() || "DoLS/LPS";
+      const status = String(row?.status ?? "").trim() || "Not recorded";
+      const applicationDate = String(row?.applicationDate ?? "").trim() || "Not recorded";
+      const authorisationDate = String(row?.authorisationDate ?? "").trim() || "Not recorded";
+      const expiryDate = String(row?.expiryDate ?? "").trim() || "Not recorded";
+      const reasoning = String(row?.reasonForDeprivation ?? "").trim() || "Not recorded";
+      return `${type}: status ${status} | Application ${applicationDate} | Authorisation ${authorisationDate} | Expiry ${expiryDate} | Reasoning ${reasoning}`;
+    })
+    .join("\n");
+}
 
 export function resolveCpaDisciplineKeyForReport(args: {
   showDisciplineSelect: boolean;
@@ -55,7 +127,11 @@ export async function buildDisciplineCPAUnifiedReport(
     return simpleTextToUnified("CPA Report", STRUCTURED_CLINICAL_REPORT_TAGLINE);
   }
 
-  const template = getCpaTemplateForDiscipline(disciplineKey);
+  const [template, capacityAssessments, libertySafeguards] = await Promise.all([
+    Promise.resolve(getCpaTemplateForDiscipline(disciplineKey)),
+    listCapacityAssessmentsForPatient(org, pid, { limitCount: 120 }).catch(() => []),
+    listLibertySafeguardsForPatient(org, pid, { limitCount: 40 }).catch(() => []),
+  ]);
   const sections: { heading: string; content: string }[] = [];
 
   for (const row of template) {
@@ -70,6 +146,14 @@ export async function buildDisciplineCPAUnifiedReport(
       content: (out.content ?? "").trim() || STRUCTURED_CLINICAL_REPORT_TAGLINE,
     });
   }
+  sections.push({
+    heading: `${template.length + 1}. Capacity Assessment`,
+    content: buildCapacityReportContent(capacityAssessments as Record<string, unknown>[]),
+  });
+  sections.push({
+    heading: `${template.length + 2}. DoLS / LPS Safeguards`,
+    content: buildDolsReportContent(libertySafeguards as Record<string, unknown>[]),
+  });
 
   return {
     kind: "unified",
@@ -139,8 +223,29 @@ export async function buildMdtSummaryUnifiedReport(patientId: string, organisati
 
   const rows = await listCpaDisciplineReportsForPatient(org, pid, { limitCount: 50 });
   const payload = buildReportsPayloadFromCpaDocuments(rows);
-  const structured = await generateMDTSummaryWithActivityTrend(payload, pid);
-  return mdtStructuredToUnified(structured);
+  const [structured, capacityAssessments, latestSummary, libertySafeguards] = await Promise.all([
+    generateMDTSummaryWithActivityTrend(payload, pid),
+    listCapacityAssessmentsForPatient(org, pid, { limitCount: 120 }).catch(() => []),
+    getLatestMdtSummaryForPatient(org, pid).catch(() => null),
+    listLibertySafeguardsForPatient(org, pid, { limitCount: 40 }).catch(() => []),
+  ]);
+  const report = mdtStructuredToUnified(structured);
+  if (Array.isArray(capacityAssessments) && capacityAssessments.length > 0) {
+    const disciplineComments =
+      (latestSummary?.data?.capacityStatus?.disciplineComments as Record<string, unknown> | null) ?? null;
+    report.sections.push({
+      heading: "11. Capacity Assessment",
+      content: buildCapacityStatusSectionContent(
+        capacityAssessments as Record<string, unknown>[],
+        disciplineComments
+      ),
+    });
+  }
+  report.sections.push({
+    heading: "12. DoLS / LPS Safeguards",
+    content: buildDolsReportContent(libertySafeguards as Record<string, unknown>[]),
+  });
+  return report;
 }
 
 export function buildTribunalAccessDeniedReport(): UnifiedReport {

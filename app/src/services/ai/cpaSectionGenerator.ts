@@ -77,6 +77,7 @@ function aggregateFromOverride(p: CpaPatientDataBundle, patientId: string): CpaA
       typeof p.mdtSummaryText === "string" && p.mdtSummaryText.trim()
         ? p.mdtSummaryText
         : buildMdtSummaryForCpa(notes),
+    capacityAssessment: p.capacityAssessment ?? null,
   };
 }
 

@@ -34,6 +34,58 @@ function normalizeAuditPayload(input = {}) {
 }
 
 /**
+ * Enterprise inspection-ready action log.
+ * Ensures required accountability fields are present on each row.
+ * @param {{
+ *  action: string,
+ *  entityId?: string | null,
+ *  organisationId?: string | null,
+ *  hospitalId?: string | null,
+ *  wardId?: string | null,
+ *  patientId?: string | null,
+ *  role?: string | null,
+ *  userId?: string | null,
+ *  userEmail?: string | null,
+ *  metadata?: Record<string, unknown>
+ * }} payload
+ */
+export async function logEnterpriseAudit(payload = {}) {
+  const action = String(payload?.action ?? "").trim();
+  if (!action) return;
+  let ctx = null;
+  try {
+    ctx = await getUserContext();
+  } catch {
+    ctx = null;
+  }
+  const organisationId = String(payload?.organisationId ?? ctx?.organisationId ?? "").trim();
+  if (!organisationId) return;
+  const userId = payload?.userId ?? auth.currentUser?.uid ?? null;
+  const userEmail = payload?.userEmail ?? auth.currentUser?.email ?? null;
+  const role = payload?.role ?? ctx?.role ?? null;
+  const entityId = payload?.entityId ?? payload?.patientId ?? null;
+  await writeAuditEvent({
+    action,
+    user: {
+      uid: userId,
+      email: userEmail,
+      role,
+    },
+    userId,
+    userEmail,
+    role,
+    organisationId,
+    hospitalId: payload?.hospitalId ?? ctx?.hospitalId ?? null,
+    wardId: payload?.wardId ?? ctx?.wardId ?? null,
+    patientId: payload?.patientId ?? null,
+    metadata: {
+      entityId,
+      ...(payload?.metadata && typeof payload.metadata === "object" ? payload.metadata : {}),
+    },
+  });
+}
+
+/**
  * Canonical audit writer (compliance events collection: `audit_logs`).
  * Supports rich actor + tenant context payloads.
  * @param {object} payload
@@ -263,6 +315,7 @@ export default {
   logAuditEvent,
   logAction,
   logAudit,
+  logEnterpriseAudit,
   logAuditEventNonBlocking,
   logAppInitStub,
   logEntityAudit,

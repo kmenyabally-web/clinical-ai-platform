@@ -10,12 +10,19 @@ export default function Header() {
   const { user, logout } = useAuth();
   const { organisation, organisationId } = useOrganisation();
   const { mdtRole } = useRole();
-  const { demoMode } = useAppContext();
+  const { demoMode, setDemoMode } = useAppContext();
 
   return (
     <div style={styles.header}>
       <div style={styles.orgRow}>
-        {demoMode ? <div style={styles.demoBanner}>🟣 DEMO MODE ACTIVE — Using sample patient data (Daniel K)</div> : null}
+        {demoMode ? (
+          <div style={styles.demoBanner}>
+            <span>🟣 DEMO MODE ACTIVE — Using sample patient data (Daniel K)</span>
+            <button type="button" className="btn btn-secondary" style={styles.exitDemoButton} onClick={() => setDemoMode(false)}>
+              Exit Demo Mode
+            </button>
+          </div>
+        ) : null}
         <span style={styles.orgText}>
           {`Organisation: ${organisation?.name?.trim() || "Unknown"}`}
         </span>
@@ -44,7 +51,7 @@ export default function Header() {
           ) : null}
           {user?.email}
         </span>
-        <button style={styles.button} onClick={logout}>
+        <button className="btn btn-primary" style={styles.button} onClick={logout}>
           Log out
         </button>
       </div>
@@ -61,6 +68,8 @@ const styles = {
     justifyContent: "space-between",
     alignItems: "center",
     padding: "10px 24px",
+    position: "relative",
+    zIndex: 55,
   },
   orgText: {
     fontWeight: 700,
@@ -75,14 +84,21 @@ const styles = {
   },
   demoBanner: {
     flexBasis: "100%",
-    background: "rgba(109, 40, 217, 0.12)",
-    border: "1px solid rgba(109, 40, 217, 0.35)",
-    color: "#5b21b6",
-    borderRadius: 10,
+    background: "#eff6ff",
+    border: "1px solid var(--border)",
+    color: "var(--text-primary)",
+    borderRadius: 12,
     padding: "8px 12px",
     fontWeight: 900,
     fontSize: 13,
     lineHeight: 1.3,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  exitDemoButton: {
+    padding: "6px 10px",
   },
   user: {
     display: "flex",
@@ -91,12 +107,5 @@ const styles = {
   },
   button: {
     padding: "8px 12px",
-    backgroundColor: "var(--primary)",
-    color: "white",
-    border: "none",
-    borderRadius: "6px",
-    cursor: "pointer",
-    fontWeight: 700,
-    fontSize: 12,
   },
 };

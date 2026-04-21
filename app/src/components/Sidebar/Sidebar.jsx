@@ -3,7 +3,6 @@ import { useOrganisation } from "../../context/OrganisationContext";
 import { useRole } from "../../context/RoleContext";
 import {
   NHS_BLUE,
-  NHS_BLUE_HOVER,
   SIDEBAR_WIDTH_EXPANDED,
   SIDEBAR_WIDTH_COLLAPSED,
   FOCUS_OUTLINE,
@@ -44,7 +43,7 @@ export default function Sidebar() {
         }
         .sidebar-toggle:hover {
           background-color: var(--surface-muted);
-          border-color: ${NHS_BLUE};
+          border-color: var(--primary);
         }
         .sidebar-toggle:focus-visible {
           outline: ${FOCUS_OUTLINE};
@@ -163,6 +162,8 @@ const sidebarRoot = {
   display: "flex",
   flexDirection: "column",
   flexShrink: 0,
+  position: "relative",
+  zIndex: 60,
   transition: "width 0.2s ease, min-width 0.2s ease",
   overflow: "hidden",
 };
@@ -178,7 +179,7 @@ const header = {
 };
 
 const brand = (collapsed) => ({
-  color: NHS_BLUE,
+  color: "var(--primary)",
   fontWeight: 700,
   fontSize: collapsed ? "12px" : "15px",
   lineHeight: 1.3,

@@ -527,96 +527,56 @@ export async function generateCqcEvidencePackDocument({ organisationId, patientI
 
   const sections = [
     {
-      title: "1. Patient Overview",
-      summary: `${patientName} is currently scoped to organisation ${org}.`,
-      keyPoints: [
-        `Organisation: ${org}`,
-        `Hospital: ${patient?.hospitalId ?? "Not recorded"}`,
-        `Ward: ${patient?.wardId ?? "Not recorded"}`,
-        `Legal status: ${patient?.legalStatus ?? "Not recorded"}`,
-      ],
-    },
-    {
-      title: "2. Risk Summary",
+      title: "SAFE",
       summary:
         ai?.riskSummary ||
-        `Current risk profile indicates ${openIncidents.length} open incident(s) and ${safeguardingIncidents.length} safeguarding concern(s).`,
+        `Safety evidence indicates ${incidents.length} incident(s), ${openIncidents.length} open case(s), and ${safeguardingIncidents.length} safeguarding concern(s).`,
       keyPoints: [
-        `Open incidents: ${openIncidents.length}`,
+        `Incidents: ${incidents.length} total (${openIncidents.length} open)`,
         `Safeguarding incidents: ${safeguardingIncidents.length}`,
-        `Critical issues flagged: ${(cqc.criticalIssues ?? []).length}`,
+        `Risk/critical issues flagged: ${(cqc.criticalIssues ?? []).length}`,
+        `Physical observations available: ${cqc?.counts?.physicalObservations ?? 0}`,
       ],
     },
     {
-      title: "3. Behaviour Trends",
-      summary: ai?.trendSummary || "Behaviour trends are derived from ABC logs, incidents, and discipline notes.",
+      title: "EFFECTIVE",
+      summary: "Effectiveness evidence combines MDT activity and care plan documentation quality.",
       keyPoints: [
-        `Behaviour/incident entries: ${incidents.length}`,
-        `Simulation warnings: ${(cqc?.simulation?.warnings ?? []).length}`,
-        `Trend source: clinical notes + incidents`,
+        `Care plans documented: ${cqc?.counts?.carePlans ?? 0}`,
+        `Clinical notes available: ${notes.length}`,
+        `MDT and multi-disciplinary evidence sections: ${domains.length}`,
       ],
     },
     {
-      title: "4. Clinical Notes Summary",
-      summary: `Clinical note coverage includes ${notes.length} note(s) across recorded disciplines.`,
-      keyPoints: Object.entries(byDiscipline)
-        .slice(0, 6)
-        .map(([k, v]) => `${k}: ${v}`),
-    },
-    {
-      title: "5. MDT Summary",
-      summary: "MDT evidence is aggregated from multidisciplinary documentation and inspection-domain simulation outputs.",
-      keyPoints: [
-        `Nursing/psychiatry/psychology evidence included where available`,
-        `Inspection domain sections: ${domains.length}`,
-        `Overall simulation score: ${Math.round(cqc?.simulation?.overallScore ?? 0)}`,
-      ],
-    },
-    {
-      title: "6. CPA Extract",
-      summary: "CPA-relevant themes extracted from current presentation, risk, engagement, and recommendation content.",
-      keyPoints: [
-        `Risk and recommendation strands are present in notes`,
-        `Medication adherence concerns included when documented`,
-        `Behavioural patterns included from incident/ABC evidence`,
-      ],
-    },
-    {
-      title: "7. Incident Summary",
-      summary: `${incidents.length} incident record(s) linked to the current patient scope.`,
-      keyPoints: [
-        `Open: ${openIncidents.length}`,
-        `Closed: ${Math.max(incidents.length - openIncidents.length, 0)}`,
-        `Highest severity captured in incident log`,
-      ],
-    },
-    {
-      title: "8. Safeguarding Overview",
-      summary: `${safeguardingIncidents.length} safeguarding-tagged incident(s) identified in current evidence.`,
-      keyPoints: [
-        `Safeguarding concerns tracked in incidents`,
-        `Related warnings included in simulation output`,
-        `MDT follow-up required for unresolved concerns`,
-      ],
-    },
-    {
-      title: "9. Physical Health Overview",
-      summary: `Physical observations included in evidence counts: ${cqc?.counts?.physicalObservations ?? 0}.`,
-      keyPoints: [
-        `Physical observations: ${cqc?.counts?.physicalObservations ?? 0}`,
-        `NEWS and vitals evidence included where recorded`,
-        `Clinical notes include physical health context`,
-      ],
-    },
-    {
-      title: "10. Compliance Indicators",
+      title: "CARING",
       summary:
         ai?.careQualitySummary ||
-        `Compliance indicators are derived from domain simulation, critical issues, and governance evidence.`,
+        "Caring evidence is drawn from clinical note quality, communication documentation, and person-centred language.",
       keyPoints: [
-        `Overall simulation score: ${Math.round(cqc?.simulation?.overallScore ?? 0)}`,
-        `Simulation rating: ${cqc?.simulation?.rating ?? "—"}`,
-        `Critical issues: ${(cqc.criticalIssues ?? []).length}`,
+        `Notes by discipline: ${Object.entries(byDiscipline)
+          .slice(0, 6)
+          .map(([k, v]) => `${k}(${v})`)
+          .join(", ") || "Not recorded"}`,
+        `Patient context documented: ${patientName}`,
+        `Communication evidence present in note corpus and MDT summaries`,
+      ],
+    },
+    {
+      title: "RESPONSIVE",
+      summary: ai?.trendSummary || "Responsiveness evidence reflects behaviour and incident trends over the current evidence period.",
+      keyPoints: [
+        `Behaviour/incident records reviewed: ${incidents.length}`,
+        `Simulation warnings: ${(cqc?.simulation?.warnings ?? []).length}`,
+        `Trend signals sourced from incidents, notes, and observation history`,
+      ],
+    },
+    {
+      title: "WELL_LED",
+      summary: "Well-led evidence includes governance audits and compliance monitoring outputs.",
+      keyPoints: [
+        `Audit events: ${(enginePack.audits ?? []).length}`,
+        `Inspection score snapshots: ${enginePack?.inspectionIntelligence?.historyCount ?? 0}`,
+        `Current simulation score/rating: ${Math.round(cqc?.simulation?.overallScore ?? 0)} / ${cqc?.simulation?.rating ?? "—"}`,
       ],
     },
   ];

@@ -7,10 +7,12 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 import SystemStatus from "./SystemStatus";
 import { APP_CONFIG } from "../config/appConfig";
 import DemoGuide from "./DemoGuide";
+import { useAppContext } from "../context/AppContext";
 
 export default function Layout() {
   const { organisationId, groupId } = useOrganisation();
   const { isSuperAdmin, isGroupAdmin } = useRole();
+  const { demoMode } = useAppContext();
   const showEnterpriseLink =
     organisationId && (isSuperAdmin || (isGroupAdmin && groupId));
   const location = useLocation();
@@ -83,7 +85,7 @@ export default function Layout() {
           <ContextGuard>
             <Outlet />
           </ContextGuard>
-          <DemoGuide />
+          {demoMode && <DemoGuide />}
           <footer style={layoutStyles.footer}>
             © {new Date().getFullYear()} {appName}. All rights reserved.
           </footer>
@@ -120,7 +122,7 @@ const layoutStyles = {
     flexDirection: "column",
   },
   content: {
-    padding: "20px clamp(16px, 3vw, 32px)",
+    padding: "24px clamp(16px, 3vw, 32px)",
     overflowY: "auto",
     maxWidth: "none",
     width: "100%",
@@ -129,17 +131,17 @@ const layoutStyles = {
   },
   subNav: {
     display: "flex",
-    gap: 10,
-    marginBottom: 16,
+    gap: 16,
+    marginBottom: 24,
     flexWrap: "wrap",
   },
   link: {
     display: "inline-block",
     padding: "8px 12px",
-    borderRadius: 6,
+    borderRadius: 10,
     textDecoration: "none",
     fontWeight: 700,
-    fontSize: 12,
+    fontSize: 13,
     color: "var(--text-primary)",
     backgroundColor: "var(--surface)",
     border: "1px solid var(--border)",

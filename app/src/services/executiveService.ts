@@ -70,6 +70,7 @@ export type ExecutiveWardPerformance = {
   improvingCount: number;
   deterioratingCount: number;
   stableCount: number;
+  complianceScore: number;
 };
 
 export type ExecutiveHighRiskWard = {
@@ -123,6 +124,25 @@ function wardTrendFromCounts(improving: number, deteriorating: number, stable: n
   if (deteriorating > improving && deteriorating >= stable) return "deteriorating";
   if (improving > deteriorating && improving >= stable) return "improving";
   return "stable";
+}
+
+function wardComplianceScoreFromSignals(args: {
+  totalPatients: number;
+  highRiskCount: number;
+  alertsCount: number;
+  improvingCount: number;
+  deterioratingCount: number;
+}): number {
+  const { totalPatients, highRiskCount, alertsCount, improvingCount, deterioratingCount } = args;
+  const denominator = Math.max(totalPatients, 1);
+  const highRiskRatio = highRiskCount / denominator;
+  const alertRatio = alertsCount / denominator;
+  let score = 100;
+  score -= Math.round(highRiskRatio * 45);
+  score -= Math.round(alertRatio * 25);
+  score -= Math.min(15, deterioratingCount * 5);
+  score += Math.min(10, improvingCount * 3);
+  return Math.max(0, Math.min(100, score));
 }
 
 function mainIssueForWard(rows: WardDashboardPatientRow[]): string {
@@ -237,6 +257,13 @@ export function aggregateOrganisationOverview(
       else stableCount += 1;
     }
     const trend = wardTrendFromCounts(improvingCount, deterioratingCount, stableCount);
+    const complianceScore = wardComplianceScoreFromSignals({
+      totalPatients: inWard.length,
+      highRiskCount,
+      alertsCount,
+      improvingCount,
+      deterioratingCount,
+    });
     return {
       wardId: wid,
       wardName: w?.name || wid,
@@ -250,6 +277,7 @@ export function aggregateOrganisationOverview(
       improvingCount,
       deterioratingCount,
       stableCount,
+      complianceScore,
     };
   });
 

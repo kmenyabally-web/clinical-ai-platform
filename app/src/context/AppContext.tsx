@@ -2,6 +2,7 @@ import {
   createContext,
   useContext,
   useMemo,
+  useState,
   type ReactNode,
 } from "react";
 import { useAuth } from "./AuthContext";
@@ -20,6 +21,7 @@ export type AppTenantContextValue = {
   orgLoading: boolean;
   scopeRevision: number;
   demoMode: boolean;
+  setDemoMode: (enabled: boolean) => void;
 };
 
 const AppContext = createContext<AppTenantContextValue | null>(null);
@@ -49,7 +51,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const { role } = useRole();
 
   // Guided demo experience (fixed tenant + patient).
-  const demoMode = true;
+  const [demoMode, setDemoMode] = useState(false);
   const lockedOrganisationId = "demo-org";
   const lockedHospitalId = "hospital001";
   const lockedWardId = "ward_picu";
@@ -79,6 +81,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       orgLoading,
       scopeRevision,
       demoMode,
+      setDemoMode,
     }),
     [
       demoMode,
@@ -92,6 +95,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       authLoading,
       orgLoading,
       scopeRevision,
+      setDemoMode,
     ]
   );
 

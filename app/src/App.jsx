@@ -56,6 +56,7 @@ import FeatureSettings from "./pages/FeatureSettings";
 import Policies from "./pages/Policies";
 import CommandCentre from "./pages/CommandCentre";
 import EnterpriseRoute from "./components/EnterpriseRoute";
+import CapacityAndConsent from "./pages/CapacityAndConsent";
 
 export default function App() {
   return (
@@ -211,6 +212,7 @@ export default function App() {
               </FeatureGate>
             }
           />
+          <Route path="/capacity" element={<CapacityAndConsent />} />
           <Route
             path="/compliance"
             element={

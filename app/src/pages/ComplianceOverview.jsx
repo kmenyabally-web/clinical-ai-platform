@@ -6,6 +6,8 @@ import {
   getComplianceScoresForOrganisation,
   getScoreBand,
   calculateComplianceScore,
+  getComplianceStatus,
+  getWardComplianceScores,
 } from "../services/complianceEngine";
 import ComplianceScoreCard from "../components/ComplianceScoreCard";
 import { isIndexError, INDEX_ERROR_MESSAGE } from "../lib/firestoreIndexError";
@@ -39,6 +41,7 @@ export default function ComplianceOverview() {
     missingIncidents: false,
     noTraining: false,
   });
+  const [wardScores, setWardScores] = useState([]);
 
   const serviceName =
     currentServiceId && Array.isArray(services)
@@ -64,9 +67,11 @@ export default function ComplianceOverview() {
           getComplianceScore(organisationId, currentServiceId ?? undefined, { calculateIfMissing: true }),
           getComplianceScoresForOrganisation(organisationId),
         ]);
+        const wards = await getWardComplianceScores(organisationId);
         if (!cancelled) {
           setScore(current);
           setAllScores(Array.isArray(all) ? all : []);
+          setWardScores(Array.isArray(wards) ? wards : []);
         }
       } catch (err) {
         console.error("Compliance overview load error:", err);
@@ -90,10 +95,14 @@ export default function ComplianceOverview() {
     setError(null);
     try {
       await calculateComplianceScore(organisationId, currentServiceId ?? undefined);
-      const updated = await getComplianceScore(organisationId, currentServiceId ?? undefined);
+      const [updated, all, wards] = await Promise.all([
+        getComplianceScore(organisationId, currentServiceId ?? undefined),
+        getComplianceScoresForOrganisation(organisationId),
+        getWardComplianceScores(organisationId),
+      ]);
       setScore(updated);
-      const all = await getComplianceScoresForOrganisation(organisationId);
       setAllScores(Array.isArray(all) ? all : []);
+      setWardScores(Array.isArray(wards) ? wards : []);
     } catch (err) {
       setError(isIndexError(err) ? INDEX_ERROR_MESSAGE : (err?.message ?? "Recalculation failed."));
     } finally {
@@ -233,10 +242,15 @@ export default function ComplianceOverview() {
             <p style={{ marginTop: "0.75rem", fontSize: "0.95rem" }}>
               <strong>Overall: {score.overallScore}%</strong>
               {" · "}
+              <strong>Status: {score.status || getComplianceStatus(score.overallScore)}</strong>
+              {" · "}
               <span style={{ color: "#64748b" }}>
-                90–100% Green · 70–89% Amber · Below 70% Red
+                Good ≥ 80 · Warning 60–79 · Risk &lt; 60
               </span>
             </p>
+            <div style={{ marginTop: "0.75rem", fontSize: 13, color: "#334155" }}>
+              <strong>Scoring rules (20% each):</strong> Notes completion, Capacity assessments, Care plans, MDT reviews, Incidents logging.
+            </div>
           </section>
 
           <section style={{ marginBottom: "1.5rem" }}>
@@ -352,6 +366,35 @@ export default function ComplianceOverview() {
               </div>
             </section>
           )}
+
+          <section style={{ marginTop: "1.5rem", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "1rem 1.1rem", boxShadow: "0 4px 14px rgba(15, 23, 42, 0.04)" }}>
+            <h2 style={{ fontSize: "1.1rem", margin: "0 0 0.5rem 0" }}>Ward compliance scores</h2>
+            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, overflow: "hidden" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
+                <thead>
+                  <tr style={{ background: "#f8fafc" }}>
+                    <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Ward</th>
+                    <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Ward score</th>
+                    <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {wardScores.map((w) => (
+                    <tr key={w.wardId} style={{ borderTop: "1px solid #e5e7eb" }}>
+                      <td style={{ padding: "0.5rem 0.75rem" }}>{w.wardName}</td>
+                      <td style={{ padding: "0.5rem 0.75rem", fontWeight: 700 }}>{w.wardScore}%</td>
+                      <td style={{ padding: "0.5rem 0.75rem", fontWeight: 700 }}>{w.status}</td>
+                    </tr>
+                  ))}
+                  {wardScores.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} style={{ padding: "0.75rem", color: "#64748b" }}>No ward scores available.</td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </section>
         </>
       )}
 

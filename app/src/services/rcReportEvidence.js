@@ -6,6 +6,7 @@
  *   behaviourLogs?: unknown[],
  *   physicalHealth?: unknown[],
  *   carePlans?: unknown[],
+ *   capacityAssessment?: unknown,
  * }} input
  * @returns {string}
  */
@@ -93,6 +94,24 @@ export function buildRcTribunalEvidenceContext(input) {
       if (strat) lines.push(`   Strategies: ${strat}`);
       if (content) lines.push(`   Content: ${content}`);
     });
+  }
+
+  const cap = input?.capacityAssessment && typeof input.capacityAssessment === "object" ? input.capacityAssessment : null;
+  if (cap) {
+    lines.push("\n=== CAPACITY ASSESSMENT ===");
+    lines.push(`Decision type: ${String(cap.decisionType ?? "—")}`);
+    lines.push(`Outcome: ${cap.lacksCapacity === true ? "Lacks capacity" : "Capacity present"}`);
+    const keyReasoning =
+      String(cap.stage1Details ?? "").trim() ||
+      String(cap.assessmentWarning ?? "").trim() ||
+      String(cap.understandReasoning?.clinicianInterpretation ?? "").trim() ||
+      String(cap.outcomeSummary ?? "").trim();
+    lines.push(`Key reasoning: ${keyReasoning || "Not recorded"}`);
+    const bestInterests =
+      String(cap.chosenOption ?? "").trim() ||
+      String(cap.justification ?? "").trim() ||
+      String(cap.bestInterestsNotes ?? "").trim();
+    lines.push(`Best interests: ${bestInterests ? bestInterests.slice(0, 1200) : "Not recorded"}`);
   }
 
   return lines.join("\n").slice(0, 120000);

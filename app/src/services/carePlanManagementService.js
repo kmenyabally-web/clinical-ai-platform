@@ -15,6 +15,7 @@ import { db } from "../firebase";
 import { addTimelineEntry } from "./patientTimelineService";
 import { getPatientById } from "./patientService";
 import { assertWardTenantContext } from "../utils/tenantContext";
+import { getLatestCapacityAssessment } from "./capacityAssessmentService";
 
 const CARE_PLANS_COLLECTION = "care_plans";
 const CARE_PLAN_VERSIONS_COLLECTION = "care_plan_versions";
@@ -59,11 +60,20 @@ function snapshotFromDoc(d) {
     updatedAt: x.updatedAt ?? null,
     version: typeof x.version === "number" ? x.version : 1,
     content: typeof x.content === "string" ? x.content : "",
+    basedOnBestInterestsDecision: x.basedOnBestInterestsDecision === true,
+    bestInterestsDecision: typeof x.bestInterestsDecision === "string" ? x.bestInterestsDecision : "",
+    bestInterestsJustification: typeof x.bestInterestsJustification === "string" ? x.bestInterestsJustification : "",
   };
 }
 
 /** AI draft rows in `care_plans`: full text + draft status (separate from structured care plan records). */
-export async function saveAiCarePlanDraft({ organisationId, patientId, content }) {
+export async function saveAiCarePlanDraft({
+  organisationId,
+  patientId,
+  content,
+  bestInterestsDecision = "",
+  bestInterestsJustification = "",
+}) {
   const org = (organisationId ?? "").trim() || null;
   if (!org) throw new Error("organisationId is required");
   if (!patientId?.trim()) throw new Error("patientId is required");
@@ -75,6 +85,13 @@ export async function saveAiCarePlanDraft({ organisationId, patientId, content }
   const wardId = (patient.wardId && String(patient.wardId).trim()) || "";
   if (!wardId) throw new Error("wardId is required to create care plan drafts.");
   assertWardTenantContext(org, hospitalId, wardId);
+  const latestCapacity = await getLatestCapacityAssessment(org, patientId.trim()).catch(() => null);
+  const lacksCapacity = latestCapacity?.lacksCapacity === true;
+  const decision = String(bestInterestsDecision ?? "").trim();
+  const justification = String(bestInterestsJustification ?? "").trim();
+  if (lacksCapacity && (!decision || !justification)) {
+    throw new Error("Best interests decision and justification are required when capacity is lacking.");
+  }
 
   const ref = collection(db, CARE_PLANS_COLLECTION);
   const payload = {
@@ -84,6 +101,9 @@ export async function saveAiCarePlanDraft({ organisationId, patientId, content }
     patientId: patientId.trim(),
     content: body,
     status: "draft",
+    basedOnBestInterestsDecision: lacksCapacity,
+    bestInterestsDecision: lacksCapacity ? decision : "",
+    bestInterestsJustification: lacksCapacity ? justification : "",
     createdAt: serverTimestamp(),
   };
   const snap = await addDoc(ref, payload);

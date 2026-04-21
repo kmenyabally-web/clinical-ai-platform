@@ -31,6 +31,12 @@ function ratingColor(rating) {
   return "#ef4444";
 }
 
+function domainLabelFromValue(value) {
+  const key = String(value ?? "").trim().toLowerCase();
+  if (key === "well-led") return "WELL_LED";
+  return String(key).toUpperCase();
+}
+
 /**
  * CQC Inspection Simulation. Managers/Admins run; Staff/Auditors view results.
  */
@@ -218,7 +224,7 @@ export default function InspectionSimulation() {
       <section aria-label="Inspection prediction" style={cardStyle}>
         <h2 style={{ marginTop: 0, marginBottom: "0.5rem", fontSize: "1.15rem" }}>Inspection prediction (data-driven)</h2>
         <p style={{ margin: "0 0 1rem 0", color: "#555", fontSize: "0.9rem" }}>
-          Predicted CQC ratings based on compliance scores, incidents, safeguarding, care plans and documents.
+          V2 maps outputs to SAFE, EFFECTIVE, CARING, RESPONSIVE and WELL_LED with score, risk areas, and suggested improvements.
         </p>
 
         <h3 style={{ fontSize: "1rem", marginBottom: "0.35rem" }}>Section 1 — Service information</h3>
@@ -291,7 +297,7 @@ export default function InspectionSimulation() {
               <p style={{ margin: 0, color: "#22c55e" }}>No specific risk areas identified.</p>
             )}
 
-            <h3 style={{ fontSize: "1rem", marginTop: "1.25rem", marginBottom: "0.35rem" }}>Section 4 — Recommendations</h3>
+            <h3 style={{ fontSize: "1rem", marginTop: "1.25rem", marginBottom: "0.35rem" }}>Section 4 — Suggested improvements</h3>
             <ul style={{ margin: 0, paddingLeft: "1.25rem" }}>
               {dataSimulationResult.recommendations?.map((rec, i) => (
                 <li key={i} style={{ marginBottom: "0.25rem" }}>{rec}</li>
@@ -385,7 +391,7 @@ export default function InspectionSimulation() {
           <div style={{ marginBottom: "1rem" }} aria-label={`Question ${currentIndex + 1} of ${questions.length}`}>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.875rem", color: "#666", marginBottom: 4 }}>
               <span>Question {currentIndex + 1} of {questions.length}</span>
-              <span>{CQC_KEY_QUESTIONS.find((d) => d.value === currentQuestion.domainType)?.label ?? currentQuestion.domainType}</span>
+              <span>{domainLabelFromValue(currentQuestion.domainType)}</span>
             </div>
             <div style={{ height: 6, background: "#e0e0e0", borderRadius: 3, overflow: "hidden" }}>
               <div
@@ -484,6 +490,38 @@ export default function InspectionSimulation() {
             <div style={{ fontSize: "1.5rem", fontWeight: 700 }}>Inspection readiness score: {result.overallScore}%</div>
             <div style={{ fontSize: "1.1rem", fontWeight: 600, marginTop: 4 }}>Risk level: {result.riskLevel}</div>
           </div>
+          {result.domainScores ? (
+            <div style={{ marginBottom: "1rem" }}>
+              <strong>Domain scores</strong>
+              <ul style={{ margin: "0.35rem 0 0 1.25rem" }}>
+                {Object.entries(result.domainScores).map(([domain, score]) => (
+                  <li key={domain}>
+                    {domainLabelFromValue(domain)}: {Number(score).toFixed(1)}%
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {result.riskAreas?.length > 0 ? (
+            <div style={{ marginBottom: "1rem" }}>
+              <strong>Risk areas</strong>
+              <ul style={{ margin: "0.35rem 0 0 1.25rem" }}>
+                {result.riskAreas.map((area, idx) => (
+                  <li key={`ra-${idx}`}>{area}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {result.suggestedImprovements?.length > 0 ? (
+            <div style={{ marginBottom: "1rem" }}>
+              <strong>Suggested improvements</strong>
+              <ul style={{ margin: "0.35rem 0 0 1.25rem" }}>
+                {result.suggestedImprovements.map((item, idx) => (
+                  <li key={`si-${idx}`}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {result.createdActionIds?.length > 0 && (
             <p style={{ color: "#666" }}>
               {result.createdActionIds.length} compliance action(s) were created for "No" responses. Find them in Actions.

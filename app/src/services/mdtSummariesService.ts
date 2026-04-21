@@ -94,6 +94,12 @@ export async function createMdtSummaryRecord(payload: {
   patientId: string;
   reportsUsed: Record<string, string | null>;
   summary: MDTSummaryStructured;
+  capacityStatus?: {
+    decisionAssessed?: string | null;
+    capacityOutcome?: string | null;
+    bestInterestsSummary?: string | null;
+    disciplineComments?: Record<string, string>;
+  } | null;
   createdBy?: string | null;
 }): Promise<string> {
   const organisationId = String(payload.organisationId ?? "").trim();
@@ -105,6 +111,7 @@ export async function createMdtSummaryRecord(payload: {
     patientId,
     reportsUsed: truncateReportsUsed(payload.reportsUsed),
     summary: payload.summary,
+    capacityStatus: payload.capacityStatus ?? null,
     generatedAt: serverTimestamp(),
     createdBy: payload.createdBy ?? null,
   });
@@ -130,4 +137,12 @@ export async function listMdtSummariesForPatient(
   );
   const snap = await getDocs(q);
   return snap.docs.map((d) => ({ id: d.id, data: d.data() ?? {} }));
+}
+
+export async function getLatestMdtSummaryForPatient(
+  organisationId: string,
+  patientId: string
+): Promise<{ id: string; data: Record<string, unknown> } | null> {
+  const rows = await listMdtSummariesForPatient(organisationId, patientId, { limitCount: 1 });
+  return rows[0] ?? null;
 }

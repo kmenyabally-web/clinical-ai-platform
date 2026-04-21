@@ -33,6 +33,7 @@ import type { CpaAggregatedPatientData } from "./ai/cpaPatientDataTypes";
 import { buildClinicalContextPromptBlock } from "../engine/clinicalContextEngine";
 import { getOrganisation } from "./organisation";
 import { getWardById } from "./structureService";
+import { getLatestCapacityAssessment } from "./capacityAssessmentService";
 
 export function extractMdtReviewsFromNotes(notes: unknown[]): unknown[] {
   const out: unknown[] = [];
@@ -78,6 +79,7 @@ export async function getPatientCPAData(
     psychiatry,
     ot,
     salt,
+    capacityAssessment,
   ] = await Promise.all([
     fetchClinicalNotesForPatient(pid, { limitCount: 50 }).catch(() => []),
     fetchStructuredBehaviourLogsForPatient(pid, { limitCount: 35 }).catch(() => []),
@@ -92,6 +94,7 @@ export async function getPatientCPAData(
     getPsychiatryData(pid).catch(() => null),
     getOTData(pid).catch(() => null),
     getSALTData(pid).catch(() => null),
+    getLatestCapacityAssessment(org, pid).catch(() => null),
   ]);
 
   const n = Array.isArray(notes) ? notes : [];
@@ -170,6 +173,29 @@ export async function getPatientCPAData(
       `${mdtSummaryText}\n\n=== Active alerts (early warning V1) ===\n${alertLines.join("\n")}`.slice(0, 85000);
   }
 
+  if (capacityAssessment) {
+    const summary = String(capacityAssessment?.outcomeSummary ?? "").trim();
+    const decisionType = String(capacityAssessment?.decisionType ?? "Decision").trim();
+    const keyReasoning =
+      String(capacityAssessment?.stage1Details ?? "").trim() ||
+      String(capacityAssessment?.assessmentWarning ?? "").trim() ||
+      String((capacityAssessment as Record<string, unknown>)?.understandReasoning?.clinicianInterpretation ?? "").trim() ||
+      summary;
+    const bestInterests =
+      String(capacityAssessment?.chosenOption ?? "").trim() ||
+      String(capacityAssessment?.justification ?? "").trim() ||
+      String(capacityAssessment?.bestInterestsNotes ?? "").trim();
+    const capacityBlock = [
+      `Decision type: ${decisionType}`,
+      `Outcome: ${capacityAssessment?.lacksCapacity === true ? "Lacks capacity" : "Capacity present"}`,
+      `Key reasoning: ${keyReasoning || "Not recorded"}`,
+      `Best interests: ${bestInterests || "Not recorded"}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    mdtSummaryText = `${mdtSummaryText}\n\n=== Capacity Assessment ===\n${capacityBlock}`.slice(0, 85000);
+  }
+
   return {
     notes: n,
     behaviours: Array.isArray(behaviours) ? behaviours : [],
@@ -187,6 +213,7 @@ export async function getPatientCPAData(
     salt,
     risk,
     alerts,
+    capacityAssessment,
     mdtSummaryText,
     clinicalContextBlock,
   };

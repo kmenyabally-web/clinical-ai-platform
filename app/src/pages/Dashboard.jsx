@@ -10,6 +10,7 @@ import { listPatients } from "../services/patientService";
 import { fetchIncidents } from "../services/incidentService";
 import { fetchDocuments } from "../services/documentService";
 import { countCarePlansDueForReview } from "../services/carePlanManagementService";
+import { listCarePlansForOrganisation } from "../services/carePlanManagementService";
 import { listPolicies } from "../services/policyService";
 import { listStaffTraining } from "../services/staffTrainingService";
 import { fetchClinicalNotesForOrganisation } from "../services/noteService";
@@ -43,12 +44,26 @@ import { getInspectionSimulationSnapshot } from "../services/inspectionSimulatio
 import { collection, getDocs, limit, orderBy, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAppContext } from "../context/AppContext";
+import { getCapacityDashboardStats } from "../services/capacityAssessmentService";
+import { getLibertySafeguardsDashboardStats, listDolsAlertsForOrganisation } from "../services/libertySafeguardsService";
 
 function earlyWarningCardStyle(severity) {
   const s = String(severity ?? "").toLowerCase();
   if (s === "high") return { borderLeft: "4px solid #dc2626", background: "#fef2f2" };
   if (s === "medium") return { borderLeft: "4px solid #d97706", background: "#fffbeb" };
   return { borderLeft: "4px solid #16a34a", background: "#f0fdf4" };
+}
+
+function clampPercent(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 0;
+  return Math.max(0, Math.min(100, Math.round(num)));
+}
+
+function complianceStatusFromScore(score) {
+  if (score >= 80) return "Good";
+  if (score >= 60) return "Requires Improvement";
+  return "Risk";
 }
 
 export default function Dashboard() {
@@ -166,6 +181,20 @@ export default function Dashboard() {
     documentsUploaded: 0,
     carePlansDue: 0,
   });
+  const [capacityMetricsLoading, setCapacityMetricsLoading] = useState(true);
+  const [capacityMetrics, setCapacityMetrics] = useState({
+    assessmentsDue: 0,
+    patientsLackingCapacity: 0,
+    highRiskDecisions: 0,
+  });
+  const [dolsMetricsLoading, setDolsMetricsLoading] = useState(true);
+  const [dolsMetrics, setDolsMetrics] = useState({
+    activeSafeguards: 0,
+    expiringNext30Days: 0,
+    overdue: 0,
+  });
+  const [dolsAlerts, setDolsAlerts] = useState([]);
+  const [carePlanRows, setCarePlanRows] = useState([]);
   const [complianceScore, setComplianceScore] = useState(demoMode ? DEMO_COMPLIANCE_SCORE : null);
   const [complianceLoading, setComplianceLoading] = useState(demoMode ? false : true);
   const [complianceError, setComplianceError] = useState(null);
@@ -221,6 +250,52 @@ export default function Dashboard() {
       }
     }
     void loadRiskFeed();
+    return () => {
+      cancelled = true;
+    };
+  }, [organisationId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadDolsAlerts() {
+      if (!organisationId) {
+        setDolsAlerts([]);
+        return;
+      }
+      const rows = await listDolsAlertsForOrganisation(organisationId, { limitCount: 500 }).catch(() => []);
+      if (!cancelled) setDolsAlerts(Array.isArray(rows) ? rows : []);
+    }
+    void loadDolsAlerts();
+    return () => {
+      cancelled = true;
+    };
+  }, [organisationId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadDolsMetrics() {
+      if (!organisationId) {
+        setDolsMetrics({ activeSafeguards: 0, expiringNext30Days: 0, overdue: 0 });
+        setDolsMetricsLoading(false);
+        return;
+      }
+      setDolsMetricsLoading(true);
+      try {
+        const stats = await getLibertySafeguardsDashboardStats(organisationId);
+        if (!cancelled) {
+          setDolsMetrics({
+            activeSafeguards: Number(stats?.activeSafeguards ?? 0),
+            expiringNext30Days: Number(stats?.expiringNext30Days ?? 0),
+            overdue: Number(stats?.overdue ?? 0),
+          });
+        }
+      } catch {
+        if (!cancelled) setDolsMetrics({ activeSafeguards: 0, expiringNext30Days: 0, overdue: 0 });
+      } finally {
+        if (!cancelled) setDolsMetricsLoading(false);
+      }
+    }
+    void loadDolsMetrics();
     return () => {
       cancelled = true;
     };
@@ -456,6 +531,48 @@ export default function Dashboard() {
 
   useEffect(() => {
     let cancelled = false;
+    async function loadCarePlanRows() {
+      if (!organisationId) {
+        setCarePlanRows([]);
+        return;
+      }
+      const rows = await listCarePlansForOrganisation(organisationId, { limitCount: 400 }).catch(() => []);
+      if (!cancelled) setCarePlanRows(Array.isArray(rows) ? rows : []);
+    }
+    void loadCarePlanRows();
+    return () => {
+      cancelled = true;
+    };
+  }, [organisationId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCapacityMetrics() {
+      if (!organisationId) {
+        setCapacityMetrics({ assessmentsDue: 0, patientsLackingCapacity: 0, highRiskDecisions: 0 });
+        setCapacityMetricsLoading(false);
+        return;
+      }
+      setCapacityMetricsLoading(true);
+      try {
+        const stats = await getCapacityDashboardStats(organisationId);
+        if (!cancelled) setCapacityMetrics(stats);
+      } catch {
+        if (!cancelled) {
+          setCapacityMetrics({ assessmentsDue: 0, patientsLackingCapacity: 0, highRiskDecisions: 0 });
+        }
+      } finally {
+        if (!cancelled) setCapacityMetricsLoading(false);
+      }
+    }
+    void loadCapacityMetrics();
+    return () => {
+      cancelled = true;
+    };
+  }, [organisationId]);
+
+  useEffect(() => {
+    let cancelled = false;
 
     async function loadInspectionData() {
       if (!organisationId) {
@@ -640,6 +757,46 @@ export default function Dashboard() {
   const stage7HighAlert =
     !incidentStatsLoading && incidentStats.highSeverityIncidents > 0;
 
+  const complianceV2Domains = useMemo(() => {
+    const incidentsCount = Array.isArray(inspectionData.incidents) ? inspectionData.incidents.length : 0;
+    const safeguardingCount = Array.isArray(inspectionData.incidents)
+      ? inspectionData.incidents.filter((x) => String(x?.type ?? x?.incidentType ?? "").toLowerCase().includes("safeguard")).length
+      : 0;
+    const riskPenalty = Math.min(30, Number(incidentStats.highSeverityIncidents ?? 0) * 6);
+    const safeScore = clampPercent(
+      100 -
+        Math.min(35, incidentsCount * 2) -
+        Math.min(20, safeguardingCount * 5) -
+        Math.min(20, Number(dolsMetrics.overdue ?? 0) * 10) -
+        riskPenalty
+    );
+
+    const totalCarePlans = Array.isArray(carePlanRows) ? carePlanRows.length : 0;
+    const dueCarePlans = Number(metrics.carePlansDue ?? 0);
+    const carePlanCoverage = totalCarePlans > 0 ? Math.max(0, 100 - (dueCarePlans / totalCarePlans) * 100) : 60;
+    const notesCount = Array.isArray(inspectionData.notes) ? inspectionData.notes.length : 0;
+    const mdtEvidenceCount = Array.isArray(inspectionData.notes)
+      ? inspectionData.notes.filter((n) => n?.mdtReview || n?.reports?.mdtReview).length
+      : 0;
+    const notesScore = Math.min(100, notesCount * 2);
+    const mdtScore = Math.min(100, mdtEvidenceCount * 12);
+    const effectiveScore = clampPercent(carePlanCoverage * 0.45 + mdtScore * 0.3 + notesScore * 0.25);
+
+    const caringScore = clampPercent(
+      100 - Math.min(20, safeguardingCount * 5) - Math.min(20, Number(incidentStats.highSeverityIncidents ?? 0) * 5)
+    );
+    const responsiveScore = clampPercent(100 - Math.min(40, Number(metrics.openIncidents ?? 0) * 4) - Math.min(30, Number(dolsMetrics.expiringNext30Days ?? 0) * 5));
+    const wellLedScore = clampPercent(100 - Math.min(30, Number(metrics.carePlansDue ?? 0) * 4) - Math.min(25, Number(dolsAlerts.length ?? 0) * 4));
+
+    return [
+      { key: "SAFE", score: safeScore, status: complianceStatusFromScore(safeScore) },
+      { key: "EFFECTIVE", score: effectiveScore, status: complianceStatusFromScore(effectiveScore) },
+      { key: "CARING", score: caringScore, status: complianceStatusFromScore(caringScore) },
+      { key: "RESPONSIVE", score: responsiveScore, status: complianceStatusFromScore(responsiveScore) },
+      { key: "WELL_LED", score: wellLedScore, status: complianceStatusFromScore(wellLedScore) },
+    ];
+  }, [inspectionData.incidents, inspectionData.notes, incidentStats.highSeverityIncidents, dolsMetrics.overdue, dolsMetrics.expiringNext30Days, carePlanRows, metrics.carePlansDue, metrics.openIncidents, dolsAlerts.length]);
+
   const systemSecureStyle = {
     display: "inline-flex",
     alignItems: "center",
@@ -650,7 +807,7 @@ export default function Dashboard() {
     border: "1px solid rgba(34, 197, 94, 0.35)",
     color: "#166534",
     fontWeight: 900,
-    marginBottom: 16,
+    marginBottom: 24,
     boxShadow:
       "0 0 0 4px rgba(34, 197, 94, 0.12), 0 0 18px rgba(34, 197, 94, 0.35)",
   };
@@ -714,14 +871,15 @@ export default function Dashboard() {
 
       <section
         style={{
-          marginBottom: "1.25rem",
-          padding: "1rem 1.25rem",
+          marginBottom: "24px",
+          padding: "20px",
           borderRadius: 12,
-          border: "1px solid #e2e8f0",
-          background: "#fafafa",
+          border: "1px solid var(--border)",
+          background: "var(--surface)",
+          boxShadow: "var(--shadow-card)",
         }}
       >
-        <h2 style={{ marginTop: 0, marginBottom: "0.75rem", fontSize: "1.1rem", fontWeight: 900, color: "#0f172a" }}>
+        <h2 className="section-title" style={{ marginTop: 0 }}>
           Inspection readiness (CQC engine)
         </h2>
         {inspectionReadinessLoading ? (
@@ -756,27 +914,20 @@ export default function Dashboard() {
         )}
       </section>
 
-      <h2 style={{ marginTop: 0, marginBottom: "0.9rem" }}>
+      <h2 className="section-title" style={{ marginTop: 0 }}>
         CQC Readiness: {inspectionDataLoading ? "..." : `${overallScore}%`}
       </h2>
       <DomainScoreCards scores={domainScores} />
       <InspectionPredictionCard risk={prediction} reasons={predictionReasons} />
       <div style={{ marginBottom: "1rem", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <button
+          className="btn btn-secondary"
           type="button"
           onClick={() => {
             void persistInspectionScore();
           }}
           disabled={savingScore || !organisationId}
-          style={{
-            border: "1px solid #cbd5e1",
-            borderRadius: 8,
-            background: "#fff",
-            color: "#0f172a",
-            padding: "8px 12px",
-            fontWeight: 700,
-            cursor: savingScore ? "default" : "pointer",
-          }}
+          style={{ cursor: savingScore ? "default" : "pointer" }}
         >
           {savingScore ? "Saving..." : "Save score snapshot"}
         </button>
@@ -930,7 +1081,7 @@ export default function Dashboard() {
       ) : null}
 
       <section style={styles.section}>
-        <h2 style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>Dashboard</h2>
+        <h2 className="section-title">Dashboard</h2>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 20 }}>
           <div className="stat-card" style={{ padding: 20, background: "#f3f3f3", borderRadius: 12 }}>
             <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>Total Patients</h3>
@@ -995,6 +1146,48 @@ export default function Dashboard() {
             </p>
             <Link to="/care-plans" style={{ fontSize: "0.8rem", color: "#2563eb", marginTop: 4, display: "inline-block" }}>View →</Link>
           </div>
+          <div className="stat-card" style={{ padding: 20, background: "#fff7ed", borderRadius: 12, border: "1px solid #fdba74" }}>
+            <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>Capacity Assessments Due</h3>
+            <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>
+              {capacityMetricsLoading ? "—" : capacityMetrics.assessmentsDue}
+            </p>
+            <Link to="/capacity" style={{ fontSize: "0.8rem", color: "#2563eb", marginTop: 4, display: "inline-block" }}>View →</Link>
+          </div>
+          <div className="stat-card" style={{ padding: 20, background: "#fef2f2", borderRadius: 12, border: "1px solid #fecaca" }}>
+            <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>Patients Lacking Capacity</h3>
+            <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>
+              {capacityMetricsLoading ? "—" : capacityMetrics.patientsLackingCapacity}
+            </p>
+            <Link to="/capacity" style={{ fontSize: "0.8rem", color: "#2563eb", marginTop: 4, display: "inline-block" }}>View →</Link>
+          </div>
+          <div className="stat-card" style={{ padding: 20, background: "#fef2f2", borderRadius: 12, border: "1px solid #fca5a5" }}>
+            <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>High Risk Decisions</h3>
+            <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>
+              {capacityMetricsLoading ? "—" : capacityMetrics.highRiskDecisions}
+            </p>
+            <Link to="/capacity" style={{ fontSize: "0.8rem", color: "#2563eb", marginTop: 4, display: "inline-block" }}>View →</Link>
+          </div>
+          <div className="stat-card" style={{ padding: 20, background: "#eff6ff", borderRadius: 12, border: "1px solid #bfdbfe" }}>
+            <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>Active Liberty Safeguards</h3>
+            <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>
+              {dolsMetricsLoading ? "—" : dolsMetrics.activeSafeguards}
+            </p>
+            <Link to="/patients" style={{ fontSize: "0.8rem", color: "#2563eb", marginTop: 4, display: "inline-block" }}>View →</Link>
+          </div>
+          <div className="stat-card" style={{ padding: 20, background: "#fffbeb", borderRadius: 12, border: "1px solid #fde68a" }}>
+            <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>Expiring (next 30 days)</h3>
+            <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>
+              {dolsMetricsLoading ? "—" : dolsMetrics.expiringNext30Days}
+            </p>
+            <Link to="/patients" style={{ fontSize: "0.8rem", color: "#2563eb", marginTop: 4, display: "inline-block" }}>View →</Link>
+          </div>
+          <div className="stat-card" style={{ padding: 20, background: "#fef2f2", borderRadius: 12, border: "1px solid #fecaca" }}>
+            <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>Overdue</h3>
+            <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>
+              {dolsMetricsLoading ? "—" : dolsMetrics.overdue}
+            </p>
+            <Link to="/patients" style={{ fontSize: "0.8rem", color: "#2563eb", marginTop: 4, display: "inline-block" }}>View →</Link>
+          </div>
           <div className="stat-card" style={{ padding: 20, background: "#f3f3f3", borderRadius: 12 }}>
             <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "0.9rem" }}>Compliance Score</h3>
             <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>
@@ -1007,15 +1200,15 @@ export default function Dashboard() {
             style={{
               padding: 20,
               borderRadius: 12,
-              border: "2px solid",
-              borderColor:
+              border: `2px solid ${
                 displayRiskLevel === "LOW RISK"
                   ? "#22c55e"
                   : displayRiskLevel === "MEDIUM RISK"
                   ? "#f59e0b"
                   : displayRiskLevel === "HIGH RISK"
                   ? "#ef4444"
-                  : "#e5e7eb",
+                  : "#e5e7eb"
+              }`,
               background:
                 displayRiskLevel === "LOW RISK"
                   ? "#dcfce7"
@@ -1033,6 +1226,29 @@ export default function Dashboard() {
             <Link to="/inspection-simulation" style={{ fontSize: "0.8rem", color: "#2563eb", marginTop: 4, display: "inline-block" }}>
               Run simulation →
             </Link>
+          </div>
+        </div>
+        {dolsAlerts.length > 0 ? (
+          <div role="alert" style={{ marginTop: 14, padding: "12px 14px", borderRadius: 10, border: "1px solid #fecaca", background: "#fef2f2", color: "#991b1b", fontWeight: 700, fontSize: 13 }}>
+            ⚠️ Liberty safeguards alerts active: {dolsAlerts.length} (expiring in 30 days, not applied, or overdue)
+          </div>
+        ) : null}
+
+        <div style={{ marginTop: 16, padding: "14px 16px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12 }}>
+          <h3 style={{ margin: "0 0 10px", fontSize: "1rem" }}>CQC Compliance Dashboard V2</h3>
+          <p style={{ margin: "0 0 12px", color: "#64748b", fontSize: 13 }}>
+            Domain scoring with explicit source mapping. SAFE: incidents, safeguarding, liberty safeguards, risk. EFFECTIVE: care plans, MDT, notes.
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+            {complianceV2Domains.map((row) => (
+              <div key={row.key} style={{ border: "1px solid #e2e8f0", borderRadius: 10, background: "#fff", padding: "10px 12px" }}>
+                <div style={{ fontWeight: 800, fontSize: 12, color: "#334155", marginBottom: 4 }}>{row.key}</div>
+                <div style={{ fontSize: 22, fontWeight: 900, color: "#0f172a" }}>{row.score}%</div>
+                <div style={{ marginTop: 4, fontSize: 12, fontWeight: 800, color: row.status === "Good" ? "#166534" : row.status === "Requires Improvement" ? "#92400e" : "#991b1b" }}>
+                  {row.status}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -1207,7 +1423,7 @@ export default function Dashboard() {
       </section>
 
       <section aria-label="Recent incidents" style={styles.section}>
-        <h2 style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>Recent Activity (Last 5 incidents)</h2>
+        <h2 className="section-title">Recent Activity (Last 5 incidents)</h2>
         <div style={{ background: "#ffffff", borderRadius: 12, border: "1px solid #e2e8f0", overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
@@ -1245,7 +1461,7 @@ export default function Dashboard() {
       </section>
 
       <section aria-label="CQC compliance scores" style={styles.section}>
-        <h2 style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>CQC compliance scores</h2>
+        <h2 className="section-title">CQC compliance scores</h2>
         {complianceLoading && (
           <p style={{ color: "#666" }}>Loading compliance scores…</p>
         )}
@@ -1311,6 +1527,8 @@ const styles = {
     marginTop: 0,
     marginBottom: 6,
     color: "#0f172a",
+    fontSize: 26,
+    fontWeight: 700,
   },
   subtitle: {
     margin: "0 0 1rem 0",
@@ -1318,11 +1536,11 @@ const styles = {
     fontSize: "0.95rem",
   },
   section: {
-    marginBottom: "1.5rem",
+    marginBottom: "24px",
     background: "#ffffff",
     border: "1px solid #e2e8f0",
-    borderRadius: 14,
-    padding: "1rem 1.1rem",
-    boxShadow: "0 4px 14px rgba(15, 23, 42, 0.04)",
+    borderRadius: 12,
+    padding: "20px",
+    boxShadow: "var(--shadow-card)",
   },
 };

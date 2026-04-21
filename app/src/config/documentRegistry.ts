@@ -58,6 +58,7 @@ export function getMainMenuFromDocumentRegistry(): MenuItem[] {
     { path: "/incidents", label: "Incidents & Safeguarding" },
     { path: "/documents", label: "Documents" },
     { path: "/care-plans", label: "Care Plans" },
+    { path: "/capacity", label: "Capacity & Consent" },
     { path: "/mdt", label: "MDT Reviews" },
     // From DOCUMENTS.reports
     { path: "/reports", label: "AI Reports" },
@@ -221,6 +222,7 @@ export type FormSlug =
   | "behaviour_log"
   | "physical_health_obs"
   | "care_monitoring"
+  | "capacity_assessment"
   | "incident"
   | "cpa_section"
   | "mdt_review"
@@ -248,6 +250,7 @@ export const FORMS_BY_MODULE: Record<string, FormSlug[]> = {
   "/mdt": ["mdt_review"],
   "/care-plans": ["care_monitoring", "crisis_plan", "admission_assessment", "ot_plan", "discharge_planning", "section_17_leave"],
   "/care-plan": ["care_monitoring", "crisis_plan", "admission_assessment", "ot_plan", "discharge_planning", "section_17_leave"],
+  "/capacity": ["capacity_assessment"],
 };
 
 const DOCUMENTS_BY_FORM: Partial<Record<FormSlug, SupportingDocumentId[]>> = {
@@ -255,6 +258,7 @@ const DOCUMENTS_BY_FORM: Partial<Record<FormSlug, SupportingDocumentId[]>> = {
   behaviour_log: ["behaviour_logs"],
   physical_health_obs: ["physical_health"],
   care_monitoring: ["care_monitoring"],
+  capacity_assessment: ["capacity_assessment"],
   incident: ["incident_investigation"],
   cpa_section: ["cpa_discipline"],
   mdt_review: ["mdt_review"],

@@ -17,6 +17,11 @@ import { isOrganisationAdminRole } from "../utils/organisationAdmin";
 import { useStructure } from "../context/StructureContext";
 import { useRole } from "../context/RoleContext";
 import { patientMatchesHospitalFilter, patientMatchesWardFilter } from "../utils/patientScopeMatch";
+import {
+  listCapacityAssessmentsForPatient,
+  MCA_DECISION_TYPES,
+  MCA_DECISION_TYPE_LABELS,
+} from "../services/capacityAssessmentService";
 
 export default function PatientList() {
   const { organisationId, organisation, isPlatformAdmin } = useOrganisation();
@@ -51,6 +56,8 @@ export default function PatientList() {
   const [restoreConfirmPatient, setRestoreConfirmPatient] = useState(null);
   /** Full org ward list — used to resolve wardId → label even when the ward filter is narrowed. */
   const [allOrgWards, setAllOrgWards] = useState([]);
+  const [capacityOverviewByPatient, setCapacityOverviewByPatient] = useState({});
+  const [capacityOverviewLoading, setCapacityOverviewLoading] = useState(false);
 
   const canManagePatients = isOrganisationAdminRole(role) || Boolean(isPlatformAdmin);
 
@@ -170,6 +177,36 @@ export default function PatientList() {
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSearchTerm]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCapacityOverview() {
+      if (!organisationId || !Array.isArray(filteredRows) || filteredRows.length === 0) {
+        setCapacityOverviewByPatient({});
+        return;
+      }
+      setCapacityOverviewLoading(true);
+      try {
+        const entries = await Promise.all(
+          filteredRows.map(async (patient) => {
+            const pid = String(patient?.id ?? "").trim();
+            if (!pid) return [pid, []];
+            const assessments = await listCapacityAssessmentsForPatient(organisationId, pid, { limitCount: 120 }).catch(() => []);
+            return [pid, buildCapacityOverviewRows(assessments)];
+          })
+        );
+        if (!cancelled) {
+          setCapacityOverviewByPatient(Object.fromEntries(entries.filter(([pid]) => Boolean(pid))));
+        }
+      } finally {
+        if (!cancelled) setCapacityOverviewLoading(false);
+      }
+    }
+    void loadCapacityOverview();
+    return () => {
+      cancelled = true;
+    };
+  }, [organisationId, filteredRows]);
 
   return (
     <div style={styles.container}>
@@ -322,6 +359,7 @@ export default function PatientList() {
               <th style={styles.th}>Hospital</th>
               <th style={styles.th}>Ward</th>
               <th style={styles.th}>DOB</th>
+              <th style={styles.th}>Capacity overview</th>
               {canManagePatients ? <th style={styles.th}>Actions</th> : null}
             </tr>
           </thead>
@@ -351,6 +389,32 @@ export default function PatientList() {
                     "—"}
                 </td>
                 <td style={styles.td}>{formatDob(r.dob)}</td>
+                <td style={styles.td}>
+                  {capacityOverviewLoading && !capacityOverviewByPatient[r.id] ? (
+                    <span style={{ color: "#64748b" }}>Loading…</span>
+                  ) : (
+                    <div style={styles.capacityWrap}>
+                      {(capacityOverviewByPatient[r.id] ?? []).map((item) => (
+                        <div key={`${r.id}-${item.decisionType}`} style={styles.capacityChip}>
+                          <span style={styles.capacityDecision}>{item.label}</span>
+                          <span
+                            style={{
+                              ...styles.capacityStatus,
+                              ...(item.status === "lacks"
+                                ? styles.capacityStatusLacks
+                                : item.status === "has"
+                                  ? styles.capacityStatusHas
+                                  : styles.capacityStatusPending),
+                            }}
+                          >
+                            {item.status}
+                          </span>
+                          <span style={styles.capacityDate}>{item.lastAssessedDate || "—"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </td>
                 {canManagePatients ? (
                   <td style={styles.td}>
                     {showArchived ? (
@@ -390,7 +454,7 @@ export default function PatientList() {
             ))}
             {filteredRows.length === 0 ? (
               <tr>
-                <td style={styles.td} colSpan={canManagePatients ? 6 : 5}>
+                <td style={styles.td} colSpan={canManagePatients ? 7 : 6}>
                   {isSearchActive
                     ? "No patients match your search criteria."
                     : "No patients registered yet"}
@@ -502,6 +566,7 @@ export default function PatientList() {
               await createPatient(payload);
               setShowCreate(false);
               await load();
+              showToast("Patient created. ⚠️ Capacity assessment required (Consent to care, Residence, Medication).", "success");
             } catch (err) {
               setCreateError(err?.message ?? "Failed to create patient.");
             } finally {
@@ -830,6 +895,51 @@ function formatDob(value) {
   return "";
 }
 
+function getAssessmentSortMs(row) {
+  const createdAt = row?.createdAt;
+  if (createdAt && typeof createdAt.toMillis === "function") {
+    try {
+      return createdAt.toMillis();
+    } catch {
+      return 0;
+    }
+  }
+  if (typeof createdAt?.seconds === "number") return createdAt.seconds * 1000;
+  const dateValue = String(row?.assessmentDate ?? "").trim();
+  const parsed = dateValue ? new Date(dateValue).getTime() : 0;
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function toCapacityStatus(row) {
+  if (String(row?.status ?? "").toLowerCase() === "pending") return "pending";
+  return row?.lacksCapacity === true ? "lacks" : "has";
+}
+
+function buildCapacityOverviewRows(assessments) {
+  const rows = Array.isArray(assessments) ? assessments : [];
+  const latestByDecision = new Map();
+  for (const decisionType of MCA_DECISION_TYPES) {
+    latestByDecision.set(decisionType, null);
+  }
+  for (const row of rows) {
+    const decisionType = String(row?.decisionType ?? "").trim();
+    if (!MCA_DECISION_TYPES.includes(decisionType)) continue;
+    const existing = latestByDecision.get(decisionType);
+    if (!existing || getAssessmentSortMs(row) > getAssessmentSortMs(existing)) {
+      latestByDecision.set(decisionType, row);
+    }
+  }
+  return MCA_DECISION_TYPES.map((decisionType) => {
+    const latest = latestByDecision.get(decisionType);
+    return {
+      decisionType,
+      label: MCA_DECISION_TYPE_LABELS[decisionType] || decisionType,
+      status: latest ? toCapacityStatus(latest) : "pending",
+      lastAssessedDate: latest ? String(latest?.assessmentDate ?? "").trim() || "—" : "—",
+    };
+  });
+}
+
 const styles = {
   container: {
     padding: "4px 0 20px 0",
@@ -941,6 +1051,51 @@ const styles = {
     color: "#2563eb",
     textDecoration: "none",
     fontWeight: 800,
+  },
+  capacityWrap: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 6,
+    maxWidth: 460,
+  },
+  capacityChip: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "4px 8px",
+    borderRadius: 999,
+    background: "#f8fafc",
+    border: "1px solid #e2e8f0",
+    fontSize: 11,
+    lineHeight: 1.2,
+  },
+  capacityDecision: {
+    fontWeight: 800,
+    color: "#0f172a",
+  },
+  capacityStatus: {
+    textTransform: "uppercase",
+    fontWeight: 900,
+    padding: "1px 6px",
+    borderRadius: 999,
+    fontSize: 10,
+    letterSpacing: 0.2,
+  },
+  capacityStatusHas: {
+    background: "#dcfce7",
+    color: "#166534",
+  },
+  capacityStatusLacks: {
+    background: "#fee2e2",
+    color: "#991b1b",
+  },
+  capacityStatusPending: {
+    background: "#fef3c7",
+    color: "#92400e",
+  },
+  capacityDate: {
+    color: "#475569",
+    fontWeight: 700,
   },
   errorBox: {
     padding: 12,

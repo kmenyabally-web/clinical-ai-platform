@@ -5,5 +5,5 @@
  * real Firebase Authentication behaviour (login/logout, claims)
  * is exercised even in development.
  */
-export const DEV_AUTH_BYPASS = false;
+export const DEV_AUTH_BYPASS = true;
 

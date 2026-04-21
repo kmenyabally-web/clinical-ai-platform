@@ -16,6 +16,7 @@ import { CarePlanFullViewModal } from "../components/CarePlanFullViewModal";
 import { db } from "../firebase";
 import { formatUkDateTime } from "../utils/dateFormat";
 import { usePatients } from "../hooks/usePatients";
+import { getLatestCapacityAssessment } from "../services/capacityAssessmentService";
 
 const clinicalMapping = {
   mobility: "Manual Handling",
@@ -109,6 +110,10 @@ export default function CarePlans() {
   const [trainingError, setTrainingError] = useState(null);
   /** Debounced observations text for competency keyword matching (500ms) */
   const [debouncedKeyObs, setDebouncedKeyObs] = useState("");
+  const [capacityAssessment, setCapacityAssessment] = useState(null);
+  const [capacityLoading, setCapacityLoading] = useState(false);
+  const [bestInterestsDecision, setBestInterestsDecision] = useState("");
+  const [bestInterestsJustification, setBestInterestsJustification] = useState("");
 
   const selectedPatient = useMemo(
     () => patients.find((p) => p.id === selectedPatientId) ?? null,
@@ -222,6 +227,34 @@ export default function CarePlans() {
   }, [selectedPatientId]);
 
   useEffect(() => {
+    let cancelled = false;
+    async function loadCapacity() {
+      if (!selectedPatientId) {
+        setCapacityAssessment(null);
+        return;
+      }
+      setCapacityLoading(true);
+      try {
+        const claims = await getUserContext().catch(() => ({}));
+        const org = (organisationContextId || claims?.organisationId || null)?.toString() ?? "";
+        if (!org) throw new Error("organisationId required");
+        const latest = await getLatestCapacityAssessment(org, selectedPatientId);
+        if (!cancelled) setCapacityAssessment(latest ?? null);
+      } catch {
+        if (!cancelled) setCapacityAssessment(null);
+      } finally {
+        if (!cancelled) setCapacityLoading(false);
+      }
+    }
+    void loadCapacity();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPatientId, organisationContextId]);
+
+  const requiresBestInterests = capacityAssessment?.lacksCapacity === true;
+
+  useEffect(() => {
     if (!selectedPlan || !selectedPatientId) {
       setCompetencyWarning(null);
       setCompetencyLoading(false);
@@ -302,6 +335,10 @@ export default function CarePlans() {
       setSaveError("Nothing to save yet. Generate a draft first.");
       return;
     }
+    if (requiresBestInterests && (!bestInterestsDecision.trim() || !bestInterestsJustification.trim())) {
+      setSaveError("Best interests decision and justification are required when patient lacks capacity.");
+      return;
+    }
 
     setSaveLoading(true);
     try {
@@ -312,6 +349,8 @@ export default function CarePlans() {
         patientId: selectedPatient.id,
         content: generatedPlan,
         organisationId: org,
+        bestInterestsDecision,
+        bestInterestsJustification,
       });
       setSaveSuccess("Saved to patient record.");
       await loadRecentCarePlans();
@@ -377,6 +416,14 @@ export default function CarePlans() {
         }}
       >
         <h2 style={{ fontSize: "1rem", marginTop: 0, marginBottom: "1rem" }}>Inputs</h2>
+        {capacityLoading ? (
+          <p style={{ margin: "0 0 12px", color: "#64748b", fontSize: 13, fontWeight: 700 }}>Checking latest capacity status…</p>
+        ) : null}
+        {requiresBestInterests ? (
+          <div style={{ marginBottom: 12, padding: "10px 12px", borderRadius: 10, border: "1px solid #fecaca", background: "#fef2f2", color: "#7f1d1d", fontWeight: 700, fontSize: 13 }}>
+            Care plan based on best interests decision
+          </div>
+        ) : null}
 
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 2fr)", gap: 12, alignItems: "start" }}>
           <div>
@@ -413,6 +460,28 @@ export default function CarePlans() {
             />
           </div>
         </div>
+        {requiresBestInterests ? (
+          <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
+            <div>
+              <label style={{ display: "block", fontWeight: 900, marginBottom: 6, fontSize: 13 }}>Best interests decision *</label>
+              <input
+                value={bestInterestsDecision}
+                onChange={(e) => setBestInterestsDecision(e.target.value)}
+                placeholder="Document the best interests decision"
+                style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #cbd5e1" }}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontWeight: 900, marginBottom: 6, fontSize: 13 }}>Justification *</label>
+              <input
+                value={bestInterestsJustification}
+                onChange={(e) => setBestInterestsJustification(e.target.value)}
+                placeholder="Legal/clinical justification for this plan"
+                style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #cbd5e1" }}
+              />
+            </div>
+          </div>
+        ) : null}
 
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14, gap: 10, flexWrap: "wrap" }}>
           <button
@@ -693,6 +762,11 @@ export default function CarePlans() {
                     }}
                   >
                     <div style={{ fontSize: 12, fontWeight: 800, color: "#475569" }}>{formatSavedAt(plan.createdAt)}</div>
+                    {plan.basedOnBestInterestsDecision ? (
+                      <div style={{ fontSize: 12, fontWeight: 900, color: "#991b1b" }}>
+                        Care plan based on best interests decision
+                      </div>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => setSelectedPlan(plan)}

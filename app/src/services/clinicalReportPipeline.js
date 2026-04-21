@@ -19,6 +19,7 @@ import {
 import { runHospitalReportPipeline } from "./reportBuilder";
 import { STRUCTURED_CLINICAL_REPORT_TAGLINE } from "../config/clinicalReportMessages";
 import { enrichUnifiedReportWithExecutiveLayers } from "./executiveReportEnrichment";
+import { logEnterpriseAudit } from "./auditService";
 
 /** @typedef {"weekly"|"monthly"|"summary"|"tribunal"|"cpa"|"mdtReview"|"mdt"|"hearing"|"mdt_summary"} ReportPipelineType */
 
@@ -220,7 +221,19 @@ export async function generateReport({
     userDiscipline: userDiscipline ?? "nurse",
     selectedDiscipline,
   });
-  return enrichUnifiedReportWithExecutiveLayers(core, organisationId, patientId);
+  const enriched = await enrichUnifiedReportWithExecutiveLayers(core, organisationId, patientId);
+  void logEnterpriseAudit({
+    action: "REPORT_GENERATED",
+    entityId: `${String(type)}-${pid}-${Date.now()}`,
+    organisationId: oid,
+    patientId: pid,
+    metadata: {
+      reportType: String(type),
+      notesCount: Array.isArray(notes) ? notes.length : 0,
+      organisationType: orgType,
+    },
+  });
+  return enriched;
 }
 
 /**

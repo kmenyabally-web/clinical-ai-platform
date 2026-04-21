@@ -29,6 +29,7 @@ import { assertManagementWrite } from "./managementPermissions";
 import { logManagementAudit } from "./managementAuditLog";
 import { orgPatientsCollection, orgPatientDocumentRef } from "../utils/tenantCollections";
 import { canonicalHospitalId, canonicalWardId } from "../utils/patientScopeMatch";
+import { ensureAdmissionPendingCapacityAssessments } from "./capacityAssessmentService";
 
 const MAX_ORG_WIDE_PATIENTS = 500;
 
@@ -444,6 +445,25 @@ export async function createPatient(params) {
       serviceId: patientPayload.serviceId ?? null,
     },
   });
+
+  const pendingCapacity = await ensureAdmissionPendingCapacityAssessments({
+    organisationId,
+    hospitalId: resolvedHospitalId,
+    wardId: resolvedWardId,
+    patientId: docRef.id,
+  });
+  if (pendingCapacity.length > 0) {
+    await logAuditEventNonBlocking({
+      action: "CAPACITY_ASSESSMENT_PENDING_CREATED",
+      entityType: "PATIENT",
+      organisationId,
+      entityId: docRef.id,
+      metadata: {
+        decisionTypes: pendingCapacity.map((x) => x.decisionType),
+        count: pendingCapacity.length,
+      },
+    });
+  }
 
   return { id: docRef.id };
 }

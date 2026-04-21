@@ -72,6 +72,11 @@ export async function fetchComplianceActions(organisationId, options = {}) {
       status: d.status ?? "open",
       assignedTo: d.assignedTo ?? null,
       dueDate: d.dueDate ?? null,
+      status: d.status ?? "open",
+      linkedEntityType: d.linkedEntityType ?? null,
+      linkedEntityId: d.linkedEntityId ?? null,
+      linkedEntityIds: Array.isArray(d.linkedEntityIds) ? d.linkedEntityIds : [],
+      issueCategory: d.issueCategory ?? null,
       createdAt: d.createdAt ?? null,
       updatedAt: d.updatedAt ?? null,
     };
@@ -162,6 +167,14 @@ export async function createComplianceAction(organisationId, data, auditContext,
   });
   assertTenantContext(tenant.organisationId, tenant.hospitalId);
   const ref = collection(db, "compliance_actions");
+  const allowedStatus = new Set(["open", "in-progress", "complete"]);
+  const nextStatus = allowedStatus.has(String(data.status ?? "").trim()) ? String(data.status).trim() : "open";
+  const linkedEntityType = String(data.linkedEntityType ?? "").trim().toLowerCase();
+  const linkedEntityId = String(data.linkedEntityId ?? "").trim() || null;
+  const linkedEntityIds = Array.isArray(data.linkedEntityIds)
+    ? data.linkedEntityIds.map((x) => String(x ?? "").trim()).filter(Boolean)
+    : [];
+  const issueCategory = String(data.issueCategory ?? "").trim() || null;
   const docData = {
     organisationId,
     hospitalId: tenant.hospitalId,
@@ -172,9 +185,13 @@ export async function createComplianceAction(organisationId, data, auditContext,
     domainId: data.domainId ?? null,
     priority: data.priority ?? "medium",
     riskLevel: data.riskLevel ?? "medium",
-    status: "open",
+    status: nextStatus,
     assignedTo: data.assignedTo ?? null,
     dueDate: data.dueDate ?? null,
+    linkedEntityType: linkedEntityType || null,
+    linkedEntityId,
+    linkedEntityIds,
+    issueCategory,
     createdAt: serverTimestamp(),
   };
   const snap = await addDoc(ref, docData);

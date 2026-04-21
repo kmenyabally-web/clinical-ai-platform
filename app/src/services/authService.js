@@ -50,16 +50,20 @@ const DEMO_TENANT = {
 export async function getUserContext() {
   const user = auth.currentUser;
 
+  // Keep service-layer tenant scope aligned with OrganisationContext demo mode.
+  // Without this, pages render under demo-org while writes/reads resolve to a
+  // signed-in token org, causing widespread organisation mismatch/403 errors.
+  if (DEMO_MODE) {
+    return {
+      role: DEMO_TENANT.role,
+      organisationId: DEMO_TENANT.organisationId,
+      hospitalId: DEMO_TENANT.hospitalId,
+      wardId: DEMO_TENANT.wardId,
+      serviceIds: null,
+    };
+  }
+
   if (!user) {
-    if (DEMO_MODE) {
-      return {
-        role: DEMO_TENANT.role,
-        organisationId: DEMO_TENANT.organisationId,
-        hospitalId: DEMO_TENANT.hospitalId,
-        wardId: DEMO_TENANT.wardId,
-        serviceIds: null,
-      };
-    }
     return {
       role: null,
       organisationId: null,

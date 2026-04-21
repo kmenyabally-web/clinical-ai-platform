@@ -18,7 +18,7 @@ import { auth } from "../firebase";
 import { getUserContext } from "./authService";
 import { getCurrentUserProfile } from "./organisation";
 import { getPatientById } from "./patientService";
-import { logAuditEventNonBlocking } from "./auditService";
+import { logAuditEventNonBlocking, logEnterpriseAudit } from "./auditService";
 import {
   assertTenantContext,
   assertWardTenantContext,
@@ -167,6 +167,19 @@ export async function createIncidentLegacy({
     severity,
     incidentType: type,
   }).catch(() => {});
+  void logEnterpriseAudit({
+    action: "INCIDENT_LOGGED",
+    entityId: incidentId,
+    organisationId,
+    hospitalId,
+    wardId,
+    patientId,
+    metadata: {
+      incidentId,
+      severity,
+      incidentType: type,
+    },
+  });
 
   // Legacy: patientTimeline collection (existing behaviour).
   const timelineRef = collection(db, PATIENT_TIMELINE_COLLECTION);
@@ -262,6 +275,19 @@ export async function createIncident(incidentData) {
       severity: safePayload.severity ?? null,
     },
   }).catch(() => {});
+  void logEnterpriseAudit({
+    action: "INCIDENT_LOGGED",
+    entityId: snap.id,
+    organisationId: orgId,
+    hospitalId: tenant.hospitalId,
+    wardId: tenant.wardId,
+    patientId: safePayload.patientId ?? null,
+    metadata: {
+      incidentId: snap.id,
+      category: safePayload.category ?? null,
+      severity: safePayload.severity ?? null,
+    },
+  });
 
   return { id: snap.id };
 }
@@ -338,6 +364,19 @@ export async function createIncidentReport({
     patientId: patientId.trim(),
     severity: severity.toLowerCase(),
   }).catch(() => {});
+  void logEnterpriseAudit({
+    action: "INCIDENT_LOGGED",
+    entityId: incidentId,
+    organisationId,
+    hospitalId,
+    wardId,
+    patientId: patientId.trim(),
+    metadata: {
+      incidentId,
+      severity: severity.toLowerCase(),
+      title: title.trim(),
+    },
+  });
 
   return { id: incidentId };
 }

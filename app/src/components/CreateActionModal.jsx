@@ -5,6 +5,18 @@ const SEVERITY_OPTIONS = [
   { value: "medium", label: "Medium" },
   { value: "high", label: "High" },
 ];
+const STATUS_OPTIONS = [
+  { value: "open", label: "Open" },
+  { value: "in-progress", label: "In progress" },
+  { value: "complete", label: "Complete" },
+];
+const LINK_TYPE_OPTIONS = [
+  { value: "", label: "— None —" },
+  { value: "incident", label: "Incident" },
+  { value: "capacity", label: "Capacity" },
+  { value: "dols", label: "DoLS / LPS" },
+  { value: "compliance_issue", label: "Compliance issue" },
+];
 
 /**
  * Modal form for creating a compliance action.
@@ -18,6 +30,9 @@ export default function CreateActionModal({ open, onClose, domains = [], onSubmi
   const [severity, setSeverity] = useState("medium");
   const [assignedTo, setAssignedTo] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [status, setStatus] = useState("open");
+  const [linkedEntityType, setLinkedEntityType] = useState("");
+  const [linkedEntityId, setLinkedEntityId] = useState("");
 
   function reset() {
     setTitle("");
@@ -26,6 +41,9 @@ export default function CreateActionModal({ open, onClose, domains = [], onSubmi
     setSeverity("medium");
     setAssignedTo("");
     setDueDate("");
+    setStatus("open");
+    setLinkedEntityType("");
+    setLinkedEntityId("");
   }
 
   function handleClose() {
@@ -44,6 +62,10 @@ export default function CreateActionModal({ open, onClose, domains = [], onSubmi
       priority: severity,
       assignedTo: assignedTo.trim() || null,
       dueDate: due,
+      status,
+      linkedEntityType: linkedEntityType || null,
+      linkedEntityId: linkedEntityId.trim() || null,
+      issueCategory: linkedEntityType || null,
     });
     reset();
     onClose();
@@ -147,6 +169,23 @@ export default function CreateActionModal({ open, onClose, domains = [], onSubmi
             </select>
           </div>
           <div style={{ marginBottom: "1rem" }}>
+            <label htmlFor="action-status" style={{ display: "block", marginBottom: 4, fontWeight: 600 }}>
+              Status
+            </label>
+            <select
+              id="action-status"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              style={inputStyle}
+            >
+              {STATUS_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div style={{ marginBottom: "1rem" }}>
             <label htmlFor="action-assigned" style={{ display: "block", marginBottom: 4, fontWeight: 600 }}>
               Assigned to
             </label>
@@ -157,6 +196,36 @@ export default function CreateActionModal({ open, onClose, domains = [], onSubmi
               onChange={(e) => setAssignedTo(e.target.value)}
               style={inputStyle}
               placeholder="User name or email"
+            />
+          </div>
+          <div style={{ marginBottom: "1.25rem" }}>
+            <label htmlFor="action-link-type" style={{ display: "block", marginBottom: 4, fontWeight: 600 }}>
+              Link type
+            </label>
+            <select
+              id="action-link-type"
+              value={linkedEntityType}
+              onChange={(e) => setLinkedEntityType(e.target.value)}
+              style={inputStyle}
+            >
+              {LINK_TYPE_OPTIONS.map((o) => (
+                <option key={o.value || "none"} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div style={{ marginBottom: "1.25rem" }}>
+            <label htmlFor="action-link-id" style={{ display: "block", marginBottom: 4, fontWeight: 600 }}>
+              Linked record ID
+            </label>
+            <input
+              id="action-link-id"
+              type="text"
+              value={linkedEntityId}
+              onChange={(e) => setLinkedEntityId(e.target.value)}
+              style={inputStyle}
+              placeholder="Incident / capacity / DoLS / compliance issue ID"
             />
           </div>
           <div style={{ marginBottom: "1.25rem" }}>

@@ -15,7 +15,7 @@ import {
   type DocumentReference,
 } from "firebase/firestore";
 import { db, auth } from "../firebase";
-import { logAction, logAudit, logAuditEvent, logEntityAudit } from "./auditService";
+import { logAction, logAudit, logAuditEvent, logEntityAudit, logEnterpriseAudit } from "./auditService";
 import { isDocumentActive } from "../utils/auditSchema";
 import { canDeleteClinicalNotesAccess } from "../utils/rbac";
 import { canApproveNote, getNormalizedNoteStatus, isSystemApproverRole } from "../utils/clinicalNoteApproval";
@@ -584,6 +584,20 @@ export async function addClinicalNote(
       discipline,
     },
   });
+  void logEnterpriseAudit({
+    action: "NOTE_CREATED",
+    entityId: noteSnap.id,
+    organisationId,
+    hospitalId,
+    wardId,
+    patientId: targetPatientId,
+    role: authorRole ?? null,
+    metadata: {
+      noteId: noteSnap.id,
+      category,
+      discipline,
+    },
+  });
 
   return { id: noteSnap.id };
 }
@@ -638,6 +652,20 @@ export async function deleteClinicalNote(noteId: string): Promise<void> {
     wardId: noteWardId || (ctxWardId ? String(ctxWardId) : null),
     patientId,
     metadata: { noteId: id },
+  });
+  void logEnterpriseAudit({
+    action: "NOTE_CREATED",
+    entityId: noteSnap.id,
+    organisationId,
+    hospitalId,
+    wardId,
+    patientId,
+    role: authorRole ?? null,
+    metadata: {
+      noteId: noteSnap.id,
+      category,
+      discipline,
+    },
   });
   void logEntityAudit({
     action: "SOFT_DELETE_NOTE",

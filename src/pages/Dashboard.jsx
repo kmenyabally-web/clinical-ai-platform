@@ -179,6 +179,8 @@ export default function Dashboard() {
   const overallScore = stats?.overallComplianceScore ?? 0;
   const openActionCount = stats?.openActionCount ?? 0;
   const highRiskActionCount = stats?.highRiskActionCount ?? 0;
+  const patientAlertCount = openIncidents.filter((incident) => incident?.safeguardingHighPriority || (incident?.status || "").toLowerCase() !== "resolved").length;
+  const complianceScore = Math.round((overallScore + evidenceReadiness.overallScore + readinessScore) / 3);
   const safeDomains = Array.isArray(domains) ? domains : [];
   const isEmpty = !loading && !error && safeDomains.length === 0 && !stats;
   const notSetUpYet = (organisationId && !loading && organisation == null) || (organisationId && Array.isArray(services) && services.length === 0 && !serviceLoading);
@@ -210,6 +212,22 @@ export default function Dashboard() {
 
   return (
     <div style={{ padding: "2rem" }}>
+      <section
+        style={{
+          padding: "1rem 1.25rem",
+          background: "linear-gradient(90deg, #0f4c81 0%, #1f6aa5 100%)",
+          borderRadius: 12,
+          color: "#fff",
+          marginBottom: "1.25rem",
+        }}
+      >
+        <div style={{ fontSize: "0.8rem", opacity: 0.9, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+          SanctumCare
+        </div>
+        <h2 style={{ margin: "0.2rem 0 0", fontSize: "1.3rem" }}>
+          Clinical Intelligence Command Center
+        </h2>
+      </section>
       <h1>Dashboard</h1>
       <p>Signed in as {user?.email}</p>
       {organisation != null && (
@@ -220,6 +238,36 @@ export default function Dashboard() {
       </p>
 
       {loading && <DashboardSkeleton />}
+      {!loading && !error && (
+        <section aria-label="Executive overview" style={{ marginTop: "1rem" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "0.9rem" }}>
+            <div style={{ padding: "1rem", borderRadius: 10, border: "1px solid #f8d7da", background: "#fff5f5" }}>
+              <div style={{ fontSize: "0.82rem", color: "#7f1d1d" }}>Risk summary</div>
+              <div style={{ fontSize: "1.45rem", fontWeight: 700, color: "#b91c1c" }}>{readinessRiskLevel}</div>
+              <div style={{ fontSize: "0.82rem", color: "#7f1d1d" }}>{highRiskActionCount} high-risk action(s)</div>
+            </div>
+            <div style={{ padding: "1rem", borderRadius: 10, border: "1px solid #fed7aa", background: "#fff7ed" }}>
+              <div style={{ fontSize: "0.82rem", color: "#9a3412" }}>Patient alerts</div>
+              <div style={{ fontSize: "1.45rem", fontWeight: 700, color: "#c2410c" }}>{patientAlertCount}</div>
+              <div style={{ fontSize: "0.82rem", color: "#9a3412" }}>Live incident feed monitored</div>
+            </div>
+            <div style={{ padding: "1rem", borderRadius: 10, border: "1px solid #bfdbfe", background: "#eff6ff" }}>
+              <div style={{ fontSize: "0.82rem", color: "#1e3a8a" }}>Compliance score</div>
+              <div style={{ fontSize: "1.45rem", fontWeight: 700, color: "#1d4ed8" }}>{complianceScore}%</div>
+              <div style={{ fontSize: "0.82rem", color: "#1e3a8a" }}>Composite across readiness models</div>
+            </div>
+            <div style={{ padding: "1rem", borderRadius: 10, border: "1px solid #d1fae5", background: "#f0fdf4" }}>
+              <div style={{ fontSize: "0.82rem", color: "#065f46", marginBottom: 8 }}>Quick actions</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: "0.88rem", fontWeight: 600 }}>
+                <Link to="/incidents">Review incidents</Link>
+                <Link to="/actions">Update actions</Link>
+                <Link to="/evidence">Upload evidence</Link>
+                <Link to="/reports">Open report</Link>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       {!loading && !error && organisationId && ((Array.isArray(overdueActions) && overdueActions.length > 0) || (Array.isArray(missingEvidence) && missingEvidence.length > 0) || (Array.isArray(domainScores) && domainScores.some((d) => d?.riskLevel === "High"))) && (
         <section aria-label="Alerts" style={{ marginTop: "1.5rem" }}>

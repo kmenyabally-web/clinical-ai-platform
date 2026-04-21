@@ -47,8 +47,8 @@ export default function InspectionTrendChart({ scores = [] }) {
   return (
     <div className="card">
       <h3 style={{ marginTop: 0 }}>Inspection Trend</h3>
-      <div style={{ width: "100%", height: 260 }}>
-        <ResponsiveContainer width="100%" height="100%">
+      <div style={{ width: "100%", height: 260, minWidth: 0, minHeight: 260 }}>
+        <ResponsiveContainer width="100%" height="100%" minWidth={280} minHeight={220}>
           <LineChart data={data}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="date" />

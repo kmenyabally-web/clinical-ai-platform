@@ -6,6 +6,13 @@ const OrganisationContext = createContext(null);
 
 export const useOrganisation = () => useContext(OrganisationContext);
 
+function normalizeOrganisationType(source) {
+  const raw = String(source || "").trim().toUpperCase().replace(/\s+/g, "_");
+  if (!raw) return "CARE_HOME";
+  if (raw === "ORGANIZATION" || raw === "ORGANISATION") return "CARE_HOME";
+  return raw;
+}
+
 export const OrganisationProvider = ({ children }) => {
   const [profile, setProfile] = useState(null);
   const [organisationId, setOrganisationIdState] = useState(null);
@@ -77,6 +84,7 @@ export const OrganisationProvider = ({ children }) => {
           organisationId: orgId,
           hospitalId: hospId,
           wardId: wId,
+          organisationType: normalizeOrganisationType(data.organisationType || org?.organisationType || org?.type),
         };
 
         setProfile(normalizedProfile);
@@ -124,6 +132,7 @@ export const OrganisationProvider = ({ children }) => {
         wardId,
         loading,
         hasFeature,
+        organisationType: normalizeOrganisationType(profile?.organisationType || organisation?.organisationType || organisation?.type),
       }}
     >
       {children}

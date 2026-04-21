@@ -37,6 +37,17 @@ import { isCareSetting, isClinicalSetting } from "../utils/orgHelpers";
 import { CLINICAL_CONTENT_MAX_WIDTH_PX } from "../config/contentLayout";
 import { getWardById } from "../services/structureService";
 import { deriveClinicalContext } from "../engine/clinicalContextEngine";
+import {
+  countPendingCapacityAssessments,
+  getCapacityReassessmentRecommendation,
+  getCapacityReassessmentDueState,
+  getDolsTriggerState,
+  listCapacityAssessmentsForPatient,
+  MCA_DECISION_TYPES,
+  MCA_DECISION_TYPE_LABELS,
+} from "../services/capacityAssessmentService";
+import { fetchStructuredBehaviourLogsForPatient } from "../services/behaviourService";
+import { getDolsWorkflowEligibility, listDolsAlertsForPatient, listLibertySafeguardsForPatient } from "../services/libertySafeguardsService";
 
 const openedAuditKeys = new Set();
 
@@ -91,6 +102,17 @@ export default function PatientDetail() {
   const [aggregateClinicalRiskLoading, setAggregateClinicalRiskLoading] = useState(false);
   const [earlyWarnings, setEarlyWarnings] = useState([]);
   const [earlyWarningsLoading, setEarlyWarningsLoading] = useState(false);
+  const [pendingCapacityCount, setPendingCapacityCount] = useState(0);
+  const [behaviourLogs, setBehaviourLogs] = useState([]);
+  const [capacityReassessmentDue, setCapacityReassessmentDue] = useState({ due: false, reasons: [] });
+  const [capacityHistory, setCapacityHistory] = useState([]);
+  const [capacityHistoryLoading, setCapacityHistoryLoading] = useState(false);
+  const [capacityDecisionFilter, setCapacityDecisionFilter] = useState("all");
+  const [libertySafeguards, setLibertySafeguards] = useState([]);
+  const [libertySafeguardsLoading, setLibertySafeguardsLoading] = useState(false);
+  const [dolsWorkflowEligibility, setDolsWorkflowEligibility] = useState({ allowed: false, reason: "" });
+  const [dolsAlerts, setDolsAlerts] = useState([]);
+  const [dolsTriggerState, setDolsTriggerState] = useState({ triggered: false, reasons: [] });
 
   useEffect(() => {
     if (!id) return;
@@ -99,6 +121,134 @@ export default function PatientDetail() {
     openedAuditKeys.add(key);
     void logAuditEvent("PATIENT_OPENED", { patientId: id });
   }, [id]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!organisationId || !id) {
+      setCapacityReassessmentDue({ due: false, reasons: [] });
+      return () => {
+        mounted = false;
+      };
+    }
+    void getCapacityReassessmentDueState(organisationId, id)
+      .then((signal) => {
+        if (mounted) setCapacityReassessmentDue(signal);
+      })
+      .catch(() => {
+        if (mounted) setCapacityReassessmentDue({ due: false, reasons: [] });
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [organisationId, id]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!organisationId || !id) {
+      setDolsAlerts([]);
+      return () => {
+        mounted = false;
+      };
+    }
+    void listDolsAlertsForPatient(organisationId, id, { limitCount: 120 })
+      .then((rows) => {
+        if (mounted) setDolsAlerts(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (mounted) setDolsAlerts([]);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [organisationId, id]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!organisationId || !id) {
+      setDolsWorkflowEligibility({ allowed: false, reason: "" });
+      return () => {
+        mounted = false;
+      };
+    }
+    void getDolsWorkflowEligibility(organisationId, id)
+      .then((state) => {
+        if (mounted) setDolsWorkflowEligibility(state);
+      })
+      .catch(() => {
+        if (mounted) setDolsWorkflowEligibility({ allowed: false, reason: "Unable to verify DoLS eligibility." });
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [organisationId, id]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!organisationId || !id) {
+      setLibertySafeguards([]);
+      return () => {
+        mounted = false;
+      };
+    }
+    setLibertySafeguardsLoading(true);
+    void listLibertySafeguardsForPatient(organisationId, id, { limitCount: 80 })
+      .then((rows) => {
+        if (mounted) setLibertySafeguards(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (mounted) setLibertySafeguards([]);
+      })
+      .finally(() => {
+        if (mounted) setLibertySafeguardsLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [organisationId, id]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!organisationId || !id) {
+      setDolsTriggerState({ triggered: false, reasons: [] });
+      return () => {
+        mounted = false;
+      };
+    }
+    void getDolsTriggerState(organisationId, id)
+      .then((state) => {
+        if (mounted) setDolsTriggerState(state);
+      })
+      .catch(() => {
+        if (mounted) setDolsTriggerState({ triggered: false, reasons: [] });
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [organisationId, id]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!organisationId || !id) {
+      setCapacityHistory([]);
+      return () => {
+        mounted = false;
+      };
+    }
+    setCapacityHistoryLoading(true);
+    void listCapacityAssessmentsForPatient(organisationId, id, { limitCount: 80 })
+      .then((rows) => {
+        if (mounted) setCapacityHistory(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (mounted) setCapacityHistory([]);
+      })
+      .finally(() => {
+        if (mounted) setCapacityHistoryLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [organisationId, id]);
 
   useEffect(() => {
     let mounted = true;
@@ -307,6 +457,46 @@ export default function PatientDetail() {
     };
   }, [id, organisationId, showRiskUi, redactSensitive]);
 
+  useEffect(() => {
+    let mounted = true;
+    if (!organisationId || !id) {
+      setPendingCapacityCount(0);
+      return () => {
+        mounted = false;
+      };
+    }
+    void countPendingCapacityAssessments(organisationId, id)
+      .then((count) => {
+        if (mounted) setPendingCapacityCount(Number.isFinite(count) ? count : 0);
+      })
+      .catch(() => {
+        if (mounted) setPendingCapacityCount(0);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [organisationId, id]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!id) {
+      setBehaviourLogs([]);
+      return () => {
+        mounted = false;
+      };
+    }
+    void fetchStructuredBehaviourLogsForPatient(id, { limitCount: 40 })
+      .then((rows) => {
+        if (mounted) setBehaviourLogs(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (mounted) setBehaviourLogs([]);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [id]);
+
   const visibleEarlyWarnings = useMemo(
     () =>
       sortAlertsBySeverity(
@@ -323,6 +513,15 @@ export default function PatientDetail() {
     !redactSensitive &&
     showRiskUi &&
     visibleEarlyWarnings.some((a) => String(a.severity).toLowerCase() === "high");
+
+  const capacityReassessmentSignal = useMemo(
+    () => getCapacityReassessmentRecommendation({ behaviours: behaviourLogs, incidents }),
+    [behaviourLogs, incidents]
+  );
+  const filteredCapacityHistory = useMemo(() => {
+    if (capacityDecisionFilter === "all") return capacityHistory;
+    return capacityHistory.filter((x) => String(x?.decisionType ?? "").trim() === capacityDecisionFilter);
+  }, [capacityHistory, capacityDecisionFilter]);
 
   /** Newest first (createdAt DESC) for risk engine, deterioration, and tables. */
   const physicalObsDesc = useMemo(
@@ -601,6 +800,39 @@ export default function PatientDetail() {
       </div>
 
       <h2 style={styles.title}>{fullName || "Patient record"}</h2>
+
+      {pendingCapacityCount > 0 ? (
+        <div role="alert" style={styles.highRiskBanner}>
+          ⚠️ Capacity assessment required ({pendingCapacityCount} pending)
+        </div>
+      ) : null}
+
+      {capacityReassessmentSignal.shouldRecommend ? (
+        <div role="alert" style={styles.highRiskBanner}>
+          ⚠️ Capacity reassessment recommended
+          {capacityReassessmentSignal.reasons.length > 0
+            ? ` — ${capacityReassessmentSignal.reasons.join(", ")}`
+            : ""}
+        </div>
+      ) : null}
+
+      {capacityReassessmentDue.due ? (
+        <div role="alert" style={styles.highRiskBanner}>
+          ⚠️ Capacity reassessment due
+          {capacityReassessmentDue.reasons.length > 0 ? ` — ${capacityReassessmentDue.reasons.join(", ")}` : ""}
+        </div>
+      ) : null}
+
+      {dolsTriggerState.triggered ? (
+        <div role="alert" style={styles.highRiskBanner}>
+          ⚠️ Possible Deprivation of Liberty
+        </div>
+      ) : null}
+      {dolsAlerts.length > 0 ? (
+        <div role="alert" style={styles.highRiskBanner}>
+          ⚠️ Liberty safeguards alert active ({dolsAlerts.length}) — expiring in 30 days, not applied, or overdue
+        </div>
+      ) : null}
 
       {showRiskUi && !redactSensitive && aggregateClinicalRiskLoading ? (
         <p style={{ color: "#64748b", fontSize: 14, marginBottom: 12 }}>Loading clinical aggregate risk…</p>
@@ -896,6 +1128,119 @@ export default function PatientDetail() {
           <div style={styles.label}>Emergency contact</div>
           <div style={styles.value}>{patient?.emergencyContact || "—"}</div>
         </div>
+      </div>
+
+      <div style={{ ...styles.card, marginTop: 14 }}>
+        <div style={{ ...styles.row, borderBottom: "1px solid #f1f5f9", alignItems: "center" }}>
+          <div style={styles.label}>Capacity history</div>
+          <div style={{ ...styles.value, display: "flex", justifyContent: "flex-end" }}>
+            <select
+              value={capacityDecisionFilter}
+              onChange={(e) => setCapacityDecisionFilter(e.target.value)}
+              style={{ minWidth: 220, padding: "6px 8px", border: "1px solid #cbd5e1", borderRadius: 8 }}
+            >
+              <option value="all">All decision types</option>
+              {MCA_DECISION_TYPES.map((key) => (
+                <option key={key} value={key}>
+                  {MCA_DECISION_TYPE_LABELS[key]}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        {capacityHistoryLoading ? (
+          <div style={{ padding: "10px 14px", color: "#64748b", fontSize: 13 }}>Loading assessments…</div>
+        ) : filteredCapacityHistory.length === 0 ? (
+          <div style={{ padding: "10px 14px", color: "#64748b", fontSize: 13 }}>No capacity assessments found for this filter.</div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ textAlign: "left", color: "#64748b", background: "#f8fafc" }}>
+                  <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0" }}>Date</th>
+                  <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0" }}>Decision</th>
+                  <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0" }}>Outcome</th>
+                  <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0" }}>Status</th>
+                  <th style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0" }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredCapacityHistory.map((row) => (
+                  <tr key={row.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                    <td style={{ padding: "8px 10px" }}>{String(row?.assessmentDate ?? "").trim() || "—"}</td>
+                    <td style={{ padding: "8px 10px" }}>
+                      {MCA_DECISION_TYPE_LABELS[String(row?.decisionType ?? "").trim()] ||
+                        String(row?.decisionType ?? "").trim() ||
+                        "—"}
+                    </td>
+                    <td style={{ padding: "8px 10px" }}>
+                      {row?.lacksCapacity === true
+                        ? "Lacks capacity"
+                        : row?.lacksCapacity === false
+                          ? "Capacity present"
+                          : "Pending"}
+                    </td>
+                    <td style={{ padding: "8px 10px", textTransform: "capitalize" }}>
+                      {String(row?.status ?? "completed")}
+                    </td>
+                    <td style={{ padding: "8px 10px" }}>
+                      <Link
+                        to={`/capacity?patient=${encodeURIComponent(id)}&assessment=${encodeURIComponent(row.id)}`}
+                        style={{ color: "#2563eb", fontWeight: 700, textDecoration: "none" }}
+                      >
+                        Open in Capacity
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div style={{ ...styles.card, marginTop: 14 }}>
+        <div style={{ ...styles.row, borderBottom: "1px solid #f1f5f9", alignItems: "center" }}>
+          <div style={styles.label}>Liberty safeguards timeline</div>
+          <div style={{ ...styles.value, color: dolsWorkflowEligibility.allowed ? "#166534" : "#92400e", fontSize: 12, fontWeight: 700 }}>
+            {dolsWorkflowEligibility.allowed ? "Safeguards workflow enabled" : "Safeguards workflow locked"}
+          </div>
+        </div>
+        {!dolsWorkflowEligibility.allowed ? (
+          <div style={{ padding: "10px 14px", fontSize: 12, color: "#92400e", background: "#fffbeb", borderBottom: "1px solid #fde68a" }}>
+            Safeguards linkage rule: enable DoLS workflow only when residence capacity assessment shows lacks capacity.
+            {dolsWorkflowEligibility.reason ? ` ${dolsWorkflowEligibility.reason}` : ""}
+          </div>
+        ) : null}
+        {libertySafeguardsLoading ? (
+          <div style={{ padding: "10px 14px", color: "#64748b", fontSize: 13 }}>Loading DoLS/LPS records…</div>
+        ) : libertySafeguards.length === 0 ? (
+          <div style={{ padding: "10px 14px", color: "#64748b", fontSize: 13 }}>No DoLS/LPS records found for this patient.</div>
+        ) : (
+          <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+            {libertySafeguards.map((row) => (
+              <div key={row.id} style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: "10px 12px", background: "#f8fafc" }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                  <strong style={{ fontSize: 13 }}>{String(row?.type ?? "DoLS/LPS")}</strong>
+                  <span style={{ fontSize: 11, textTransform: "uppercase", fontWeight: 800, color: "#0f172a", background: "#e2e8f0", padding: "2px 8px", borderRadius: 999 }}>
+                    {String(row?.status ?? "pending")}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, color: "#334155", lineHeight: 1.45 }}>
+                  <div><strong>Reason:</strong> {String(row?.reasonForDeprivation ?? "").trim() || "—"}</div>
+                  <div><strong>Application:</strong> {String(row?.applicationDate ?? "").trim() || "—"}</div>
+                  <div><strong>Authorisation:</strong> {String(row?.authorisationDate ?? "").trim() || "—"}</div>
+                  <div><strong>Expiry:</strong> {String(row?.expiryDate ?? "").trim() || "—"}</div>
+                  <div><strong>Supervisory body:</strong> {String(row?.supervisoryBody ?? "").trim() || "—"}</div>
+                </div>
+                <div style={{ marginTop: 8, fontSize: 12, color: "#475569" }}>
+                  <strong>Lifecycle:</strong> pending → applied → authorised → expired
+                  {String(row?.status ?? "").toLowerCase() === "rejected" ? " (terminated: rejected)" : ""}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {patient?.id && organisationId && showTasksUi ? (

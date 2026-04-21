@@ -14,11 +14,19 @@ import { orgPatientsCollection } from "../utils/tenantCollections";
 import { fetchIncidents } from "./incidentService";
 import { fetchEvidence } from "./evidenceService";
 import { fetchComplianceActions } from "./complianceService";
+import { listWardsForOrganisation } from "./structureService";
 
 export const COMPLIANCE_SCORES_COLLECTION = "compliance_scores";
 
 /** CQC domain keys used in scoring. */
 export const CQC_DOMAINS = ["safe", "effective", "caring", "responsive", "wellLed"];
+export const COMPLIANCE_RULE_WEIGHTS = {
+  notesCompletion: 20,
+  capacityAssessments: 20,
+  carePlans: 20,
+  mdtReviews: 20,
+  incidentsLogging: 20,
+};
 
 /** Score band colours: 90-100 green, 70-89 amber, below 70 red. */
 export function getScoreBand(score) {
@@ -26,6 +34,13 @@ export function getScoreBand(score) {
   if (n >= 90) return "green";
   if (n >= 70) return "amber";
   return "red";
+}
+
+export function getComplianceStatus(score) {
+  const n = typeof score === "number" ? score : 0;
+  if (n >= 80) return "Good";
+  if (n >= 60) return "Warning";
+  return "Risk";
 }
 
 /**
@@ -85,7 +100,7 @@ async function fetchScoringData(organisationId, serviceId) {
 
   // Care plans count (by service)
   let carePlansCount = 0;
-  const carePlansRef = collection(db, "carePlans");
+  const carePlansRef = collection(db, "care_plans");
   const carePlansConstraints = [
     where("organisationId", "==", organisationId),
     limit(500),
@@ -119,6 +134,28 @@ async function fetchScoringData(organisationId, serviceId) {
     // Index may not exist; skip timeline-based metrics
   }
 
+  // Notes + capacity + MDT summaries
+  let notesCount = 0;
+  let capacityCompletedCount = 0;
+  let mdtReviewsCount = 0;
+  try {
+    const [notesSnap, capacitySnap, mdtSnap] = await Promise.all([
+      getDocs(query(collection(db, "notes"), where("organisationId", "==", organisationId), limit(1000))).catch(() => null),
+      getDocs(query(collection(db, "capacityAssessments"), where("organisationId", "==", organisationId), limit(1000))).catch(() => null),
+      getDocs(query(collection(db, "mdt_summaries"), where("organisationId", "==", organisationId), limit(1000))).catch(() => null),
+    ]);
+    notesCount = notesSnap?.docs?.length ?? 0;
+    capacityCompletedCount = (capacitySnap?.docs ?? []).filter((d) => {
+      const x = d?.data?.() ?? {};
+      return String(x.status ?? "completed").toLowerCase() !== "pending";
+    }).length;
+    mdtReviewsCount = mdtSnap?.docs?.length ?? 0;
+  } catch {
+    notesCount = 0;
+    capacityCompletedCount = 0;
+    mdtReviewsCount = 0;
+  }
+
   return {
     incidents: incidentsList,
     evidence: evidenceList,
@@ -128,6 +165,9 @@ async function fetchScoringData(organisationId, serviceId) {
     assessmentCount,
     stompMonitoredCount,
     stompCompliantCount,
+    notesCount,
+    capacityCompletedCount,
+    mdtReviewsCount,
   };
 }
 
@@ -140,76 +180,56 @@ function computeDomainScores(data) {
     evidence,
     actions,
     carePlansCount,
-    clinicalNoteCount,
-    assessmentCount,
-    stompMonitoredCount,
-    stompCompliantCount,
+    notesCount,
+    capacityCompletedCount,
+    mdtReviewsCount,
   } = data;
+  const patientCount = Math.max(1, Number(data?.patientCount ?? 0));
 
   const openIncidents = incidents.filter((i) => (i.status || "open") !== "closed");
-  const safeguardingCount = incidents.filter((i) => (i.type || "") === "safeguarding");
-  const openSafeguarding = safeguardingCount.filter((i) => (i.status || "open") !== "closed");
-  const highSeverityCount = incidents.filter(
-    (i) => (i.severity || "").toLowerCase() === "high" || (i.severity || "").toLowerCase() === "critical"
-  );
-
-  // —— SAFE: Start 100, subtract for unresolved incidents, safeguarding, high severity ——
-  let safeScore = 100;
-  safeScore -= Math.min(30, openIncidents.length * 5);
-  safeScore -= Math.min(25, openSafeguarding.length * 8);
-  safeScore -= Math.min(25, highSeverityCount.length * 6);
-  safeScore = Math.max(0, Math.min(100, Math.round(safeScore)));
-
-  // —— EFFECTIVE: Care plan updates, clinical docs, assessments ——
-  const hasCarePlans = carePlansCount > 0;
-  const effectiveEvidenceCount = evidence.filter(
-    (e) => (e.domain || "").toLowerCase() === "effective"
-  ).length;
-  const effectiveScore = Math.min(
-    100,
-    Math.round(
-      30 + (hasCarePlans ? 25 : 0) + Math.min(25, effectiveEvidenceCount * 8) + Math.min(20, (clinicalNoteCount + assessmentCount) * 2)
-    )
-  );
-  const stompRatio =
-    stompMonitoredCount > 0 ? stompCompliantCount / stompMonitoredCount : 1;
-  const stompAdjustment = Math.round((stompRatio - 1) * 20); // up to -20 when non-compliant
-  const effectiveScoreWithStomp = Math.max(0, Math.min(100, effectiveScore + stompAdjustment));
-
-  // —— CARING: Evidence in caring domain, incident response (closed ratio) ——
-  const caringEvidenceCount = evidence.filter((e) => (e.domain || "").toLowerCase() === "caring").length;
   const totalIncidents = incidents.length;
-  const closedIncidents = incidents.filter((i) => (i.status || "") === "closed").length;
-  const closureRatio = totalIncidents > 0 ? closedIncidents / totalIncidents : 1;
-  const caringScore = Math.min(
-    100,
-    Math.round(40 + Math.min(30, caringEvidenceCount * 10) + Math.min(30, closureRatio * 30))
-  );
+  const incidentLoggingRatio =
+    totalIncidents === 0
+      ? 1
+      : incidents.filter((i) => {
+          const hasCore = Boolean(String(i?.patientId ?? "").trim() && String(i?.severity ?? "").trim());
+          const hasDesc = Boolean(String(i?.description ?? i?.title ?? "").trim());
+          return hasCore && hasDesc;
+        }).length / totalIncidents;
 
-  // —— RESPONSIVE: Action completion speed, incident closure ——
-  const totalActions = actions.length;
-  const completedActions = actions.filter((a) => (a.status || "").toLowerCase() === "completed" || (a.status || "").toLowerCase() === "closed").length;
-  const actionCompletionRatio = totalActions > 0 ? completedActions / totalActions : 1;
-  const responsiveScore = Math.min(
-    100,
-    Math.round(30 + Math.min(40, actionCompletionRatio * 40) + Math.min(30, closureRatio * 30))
-  );
+  const notesCompletionScore = Math.round(Math.min(100, (notesCount / patientCount) * 100));
+  const capacityAssessmentsScore = Math.round(Math.min(100, (capacityCompletedCount / patientCount) * 100));
+  const carePlansScore = Math.round(Math.min(100, (carePlansCount / patientCount) * 100));
+  const mdtReviewsScore = Math.round(Math.min(100, (mdtReviewsCount / patientCount) * 100));
+  const incidentsLoggingScore = Math.round(Math.min(100, incidentLoggingRatio * 100));
 
-  // —— WELL-LED: Policy/evidence in well-led, governance (evidence + actions completed) ——
-  const wellLedEvidenceCount = evidence.filter(
-    (e) => (e.domain || "").toLowerCase() === "well-led"
-  ).length;
-  const wellLedScore = Math.min(
-    100,
-    Math.round(30 + Math.min(35, wellLedEvidenceCount * 12) + Math.min(35, actionCompletionRatio * 35))
-  );
+  // Backward-compatible domain mapping for existing UI cards.
+  const safeScore = incidentsLoggingScore;
+  const effectiveScore = notesCompletionScore;
+  const caringScore = carePlansScore;
+  const responsiveScore = capacityAssessmentsScore;
+  const wellLedScore = mdtReviewsScore;
+
+  const weightedOverall =
+    (notesCompletionScore * COMPLIANCE_RULE_WEIGHTS.notesCompletion +
+      capacityAssessmentsScore * COMPLIANCE_RULE_WEIGHTS.capacityAssessments +
+      carePlansScore * COMPLIANCE_RULE_WEIGHTS.carePlans +
+      mdtReviewsScore * COMPLIANCE_RULE_WEIGHTS.mdtReviews +
+      incidentsLoggingScore * COMPLIANCE_RULE_WEIGHTS.incidentsLogging) /
+    100;
 
   return {
     safeScore,
-    effectiveScore: effectiveScoreWithStomp,
+    effectiveScore,
     caringScore,
     responsiveScore,
     wellLedScore,
+    notesCompletionScore,
+    capacityAssessmentsScore,
+    carePlansScore,
+    mdtReviewsScore,
+    incidentsLoggingScore,
+    weightedOverall,
   };
 }
 
@@ -227,16 +247,20 @@ export async function calculateComplianceScore(organisationId, serviceId) {
   }
 
   const data = await fetchScoringData(organisationId, serviceId || null);
+  data.patientCount = await (async () => {
+    try {
+      const constraints = [limit(1000)];
+      if (serviceId) constraints.unshift(where("serviceId", "==", String(serviceId).trim()));
+      const q = query(orgPatientsCollection(db, organisationId), ...constraints);
+      const snap = await getDocs(q);
+      return snap?.docs?.length ?? 0;
+    } catch {
+      return 0;
+    }
+  })();
   const domainScores = computeDomainScores(data);
 
-  const overallScore = Math.round(
-    (domainScores.safeScore +
-      domainScores.effectiveScore +
-      domainScores.caringScore +
-      domainScores.responsiveScore +
-      domainScores.wellLedScore) /
-      5
-  );
+  const overallScore = Math.round(domainScores.weightedOverall);
 
   const payload = {
     organisationId: organisationId.trim(),
@@ -246,7 +270,13 @@ export async function calculateComplianceScore(organisationId, serviceId) {
     caringScore: domainScores.caringScore,
     responsiveScore: domainScores.responsiveScore,
     wellLedScore: domainScores.wellLedScore,
+    notesCompletionScore: domainScores.notesCompletionScore,
+    capacityAssessmentsScore: domainScores.capacityAssessmentsScore,
+    carePlansScore: domainScores.carePlansScore,
+    mdtReviewsScore: domainScores.mdtReviewsScore,
+    incidentsLoggingScore: domainScores.incidentsLoggingScore,
     overallScore: Math.max(0, Math.min(100, overallScore)),
+    status: getComplianceStatus(Math.max(0, Math.min(100, overallScore))),
     calculatedAt: serverTimestamp(),
   };
 
@@ -289,6 +319,12 @@ export async function getComplianceScore(organisationId, serviceId, options = {}
       responsiveScore: typeof d.responsiveScore === "number" ? d.responsiveScore : 0,
       wellLedScore: typeof d.wellLedScore === "number" ? d.wellLedScore : 0,
       overallScore: typeof d.overallScore === "number" ? d.overallScore : 0,
+      status: typeof d.status === "string" ? d.status : getComplianceStatus(typeof d.overallScore === "number" ? d.overallScore : 0),
+      notesCompletionScore: typeof d.notesCompletionScore === "number" ? d.notesCompletionScore : 0,
+      capacityAssessmentsScore: typeof d.capacityAssessmentsScore === "number" ? d.capacityAssessmentsScore : 0,
+      carePlansScore: typeof d.carePlansScore === "number" ? d.carePlansScore : 0,
+      mdtReviewsScore: typeof d.mdtReviewsScore === "number" ? d.mdtReviewsScore : 0,
+      incidentsLoggingScore: typeof d.incidentsLoggingScore === "number" ? d.incidentsLoggingScore : 0,
       calculatedAt: d.calculatedAt ?? null,
     };
   }
@@ -305,6 +341,12 @@ export async function getComplianceScore(organisationId, serviceId, options = {}
       responsiveScore: result.responsiveScore,
       wellLedScore: result.wellLedScore,
       overallScore: result.overallScore,
+      status: getComplianceStatus(result.overallScore),
+      notesCompletionScore: result.notesCompletionScore ?? 0,
+      capacityAssessmentsScore: result.capacityAssessmentsScore ?? 0,
+      carePlansScore: result.carePlansScore ?? 0,
+      mdtReviewsScore: result.mdtReviewsScore ?? 0,
+      incidentsLoggingScore: result.incidentsLoggingScore ?? 0,
       calculatedAt: result.calculatedAt,
     };
   }
@@ -339,6 +381,12 @@ export async function getComplianceScoresForOrganisation(organisationId) {
       responsiveScore: typeof x.responsiveScore === "number" ? x.responsiveScore : 0,
       wellLedScore: typeof x.wellLedScore === "number" ? x.wellLedScore : 0,
       overallScore: typeof x.overallScore === "number" ? x.overallScore : 0,
+      status: typeof x.status === "string" ? x.status : getComplianceStatus(typeof x.overallScore === "number" ? x.overallScore : 0),
+      notesCompletionScore: typeof x.notesCompletionScore === "number" ? x.notesCompletionScore : 0,
+      capacityAssessmentsScore: typeof x.capacityAssessmentsScore === "number" ? x.capacityAssessmentsScore : 0,
+      carePlansScore: typeof x.carePlansScore === "number" ? x.carePlansScore : 0,
+      mdtReviewsScore: typeof x.mdtReviewsScore === "number" ? x.mdtReviewsScore : 0,
+      incidentsLoggingScore: typeof x.incidentsLoggingScore === "number" ? x.incidentsLoggingScore : 0,
       calculatedAt: x.calculatedAt ?? null,
     };
   });
@@ -353,4 +401,65 @@ export function recalculateComplianceScoreAsync(organisationId, serviceId) {
   calculateComplianceScore(organisationId, serviceId).catch((err) =>
     console.error("Compliance score recalculation failed:", err)
   );
+}
+
+export async function getWardComplianceScores(organisationId) {
+  const org = String(organisationId ?? "").trim();
+  if (!org) return [];
+  const wards = await listWardsForOrganisation(org).catch(() => []);
+  const wardList = Array.isArray(wards) ? wards : [];
+  const [notesSnap, capSnap, carePlansSnap, mdtSnap] = await Promise.all([
+    getDocs(query(collection(db, "notes"), where("organisationId", "==", org), limit(2000))).catch(() => null),
+    getDocs(query(collection(db, "capacityAssessments"), where("organisationId", "==", org), limit(2000))).catch(() => null),
+    getDocs(query(collection(db, "care_plans"), where("organisationId", "==", org), limit(2000))).catch(() => null),
+    getDocs(query(collection(db, "mdt_summaries"), where("organisationId", "==", org), limit(2000))).catch(() => null),
+  ]);
+  const incidents = await fetchIncidents(org, {}).catch(() => []);
+  const patientsSnap = await getDocs(query(orgPatientsCollection(db, org), limit(2000))).catch(() => null);
+  const patients = (patientsSnap?.docs ?? []).map((d) => d.data() ?? {});
+  const notes = (notesSnap?.docs ?? []).map((d) => d.data() ?? {});
+  const caps = (capSnap?.docs ?? []).map((d) => d.data() ?? {});
+  const carePlans = (carePlansSnap?.docs ?? []).map((d) => d.data() ?? {});
+  const mdts = (mdtSnap?.docs ?? []).map((d) => d.data() ?? {});
+  const incidentRows = Array.isArray(incidents) ? incidents : [];
+
+  return wardList.map((w) => {
+    const wid = String(w?.id ?? "").trim();
+    const patientCount = patients.filter((p) => String(p?.wardId ?? "").trim() === wid).length;
+    const denom = Math.max(1, patientCount);
+    const notesScore = Math.min(100, Math.round((notes.filter((n) => String(n?.wardId ?? "").trim() === wid).length / denom) * 100));
+    const capScore = Math.min(
+      100,
+      Math.round(
+        (caps.filter((x) => String(x?.wardId ?? "").trim() === wid && String(x?.status ?? "completed").toLowerCase() !== "pending").length / denom) * 100
+      )
+    );
+    const carePlanScore = Math.min(100, Math.round((carePlans.filter((x) => String(x?.wardId ?? "").trim() === wid).length / denom) * 100));
+    const mdtScore = Math.min(100, Math.round((mdts.filter((x) => String(x?.wardId ?? "").trim() === wid).length / denom) * 100));
+    const wardIncidents = incidentRows.filter((x) => String(x?.wardId ?? "").trim() === wid);
+    const incidentScore =
+      wardIncidents.length === 0
+        ? 100
+        : Math.round(
+            (wardIncidents.filter((i) => {
+              const hasCore = Boolean(String(i?.patientId ?? "").trim() && String(i?.severity ?? "").trim());
+              const hasDesc = Boolean(String(i?.description ?? i?.title ?? "").trim());
+              return hasCore && hasDesc;
+            }).length /
+              wardIncidents.length) *
+              100
+          );
+    const wardScore = Math.round((notesScore + capScore + carePlanScore + mdtScore + incidentScore) / 5);
+    return {
+      wardId: wid,
+      wardName: String(w?.name ?? wid),
+      wardScore,
+      status: getComplianceStatus(wardScore),
+      notesCompletionScore: notesScore,
+      capacityAssessmentsScore: capScore,
+      carePlansScore: carePlanScore,
+      mdtReviewsScore: mdtScore,
+      incidentsLoggingScore: incidentScore,
+    };
+  });
 }

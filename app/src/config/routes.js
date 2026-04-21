@@ -55,6 +55,7 @@ export const NAV_ITEMS = [
   { path: "/organisation/policies", label: "Policies", ariaLabel: "Organisation policy library", allowedRoles: undefined },
   { path: "/care-plans", label: "Care Plans", ariaLabel: "Patient care plans", allowedRoles: undefined },
   { path: "/care-plan", label: "Care Plan", ariaLabel: "Care plan risk engine", allowedRoles: undefined },
+  { path: "/capacity", label: "Capacity & Consent", ariaLabel: "Mental Capacity Act assessments", allowedRoles: undefined },
   { path: "/staff-training", label: "Staff Training", ariaLabel: "Staff competency and training records", allowedRoles: undefined },
   { path: "/compliance", label: "Compliance", ariaLabel: "CQC compliance scores and risk", allowedRoles: undefined },
   { path: "/reports", label: "AI Reports", ariaLabel: "AI-generated reports", allowedRoles: undefined },

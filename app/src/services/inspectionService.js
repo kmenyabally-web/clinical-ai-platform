@@ -200,6 +200,54 @@ export function calculateInspectionScore(responses, questions) {
   return { overallScore, totalWeight, earnedWeight };
 }
 
+function calculateDomainScoresFromResponses(questions, responses) {
+  const responseByQuestion = new Map((responses ?? []).map((r) => [r.questionId, r.response]));
+  const domainScores = {};
+  for (const domain of CQC_KEY_QUESTIONS) {
+    const domainQuestions = (questions ?? []).filter((q) => String(q?.domainType ?? "") === domain.value);
+    if (domainQuestions.length === 0) {
+      domainScores[domain.value] = 100;
+      continue;
+    }
+    let totalWeight = 0;
+    let earnedWeight = 0;
+    for (const q of domainQuestions) {
+      const w = Number(q?.riskWeight ?? 1) || 1;
+      totalWeight += w;
+      const res = responseByQuestion.get(q.id) ?? "No";
+      const factor = res === "Yes" ? SCORE_YES : res === "Partial" ? SCORE_PARTIAL : SCORE_NO;
+      earnedWeight += w * factor;
+    }
+    const score = totalWeight > 0 ? Math.round((earnedWeight / totalWeight) * 1000) / 10 : 0;
+    domainScores[domain.value] = Math.max(0, Math.min(100, score));
+  }
+  return domainScores;
+}
+
+function buildDomainRiskAreas(domainScores) {
+  return CQC_KEY_QUESTIONS
+    .map((domain) => {
+      const score = Number(domainScores?.[domain.value] ?? 100);
+      if (score >= 70) return null;
+      return `${String(domain.label).toUpperCase()} domain at risk (${score.toFixed(1)}%)`;
+    })
+    .filter(Boolean);
+}
+
+function buildDomainSuggestedImprovements(domainScores) {
+  const rows = [];
+  for (const domain of CQC_KEY_QUESTIONS) {
+    const score = Number(domainScores?.[domain.value] ?? 100);
+    if (score >= 80) continue;
+    if (domain.value === "safe") rows.push("Improve SAFE evidence: incidents, safeguarding response, and risk mitigation.");
+    if (domain.value === "effective") rows.push("Improve EFFECTIVE evidence: care plans, MDT quality, and outcome tracking.");
+    if (domain.value === "caring") rows.push("Improve CARING evidence: patient voice, dignity, and communication records.");
+    if (domain.value === "responsive") rows.push("Improve RESPONSIVE evidence: behaviour response times and escalation pathways.");
+    if (domain.value === "well-led") rows.push("Improve WELL_LED evidence: governance audits and compliance action closure.");
+  }
+  return [...new Set(rows)];
+}
+
 async function getStompInspectionAdjustment(organisationId, serviceId) {
   if (!organisationId?.trim()) return 0;
   try {
@@ -238,22 +286,28 @@ async function getStompInspectionAdjustment(organisationId, serviceId) {
  * @param {Array<{ id: string, questionText: string, domainType: string, riskWeight: number }>} questions
  * @param {Array<{ questionId: string, response: string }>} responses
  * @param {{ userId: string, userRole: string }} auditContext
- * @returns {Promise<{ overallScore: number, riskLevel: string, createdActionIds: string[] }>}
+ * @returns {Promise<{ overallScore: number, riskLevel: string, createdActionIds: string[], domainScores: Record<string, number>, riskAreas: string[], suggestedImprovements: string[] }>}
  */
 export async function completeSession(sessionId, organisationId, questions, responses, auditContext) {
   if (!sessionId || !organisationId) throw new Error("sessionId and organisationId required");
   const session = await getSession(sessionId);
   const serviceId = session?.serviceId ?? null;
   const { overallScore } = calculateInspectionScore(responses, questions);
+  const domainScores = calculateDomainScoresFromResponses(questions, responses);
   const stompAdjustment = await getStompInspectionAdjustment(organisationId, serviceId);
   const adjustedOverallScore = Math.max(0, Math.min(100, overallScore + stompAdjustment));
   const riskLevel = getInspectionRiskLevel(adjustedOverallScore);
+  const riskAreas = buildDomainRiskAreas(domainScores);
+  const suggestedImprovements = buildDomainSuggestedImprovements(domainScores);
   const sessionRef = doc(db, SESSIONS_COLLECTION, sessionId);
   await updateDoc(sessionRef, {
     completedAt: serverTimestamp(),
     overallScore: adjustedOverallScore,
     riskLevel,
     stompAdjustment,
+    domainScores,
+    riskAreas,
+    suggestedImprovements,
   });
 
   const questionMap = new Map(questions.map((q) => [q.id, q]));
@@ -272,6 +326,9 @@ export async function completeSession(sessionId, organisationId, questions, resp
         description: `Domain: ${domainName}. Auto-created from inspection simulation.`,
         riskLevel: "high",
         priority: "high",
+        issueCategory: "compliance_issue",
+        linkedEntityType: "compliance_issue",
+        linkedEntityId: r.questionId,
       },
       auditContextWithOrg,
       serviceId
@@ -290,7 +347,7 @@ export async function completeSession(sessionId, organisationId, questions, resp
       entityId: sessionId,
       entityName: "Inspection simulation",
       previousValue: null,
-      newValue: { overallScore: adjustedOverallScore, riskLevel, createdActionIds, stompAdjustment },
+      newValue: { overallScore: adjustedOverallScore, riskLevel, createdActionIds, stompAdjustment, domainScores },
     });
   }
   if (riskLevel === "High risk" && auditContext) {
@@ -309,7 +366,7 @@ export async function completeSession(sessionId, organisationId, questions, resp
       serviceId
     ).catch(() => {});
   }
-  return { overallScore: adjustedOverallScore, riskLevel, createdActionIds };
+  return { overallScore: adjustedOverallScore, riskLevel, createdActionIds, domainScores, riskAreas, suggestedImprovements };
 }
 
 /**

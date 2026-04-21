@@ -32,6 +32,7 @@ export type CpaAggregatedPatientData = {
   risk: RiskScore;
   /** Early warning alerts (multi-disciplinary, sorted high → medium → low). */
   alerts: Alert[];
+  capacityAssessment?: unknown | null;
   mdtSummaryText?: string;
   /** Pre-built Sanctum LD/MH/ward/org instructions for Gemini (CPA section prompts). */
   clinicalContextBlock?: string;
@@ -55,6 +56,7 @@ export type CpaPatientDataBundle = {
   careLogs?: unknown[];
   mdtReviews?: unknown[];
   mdtSummaryText?: string;
+  capacityAssessment?: unknown | null;
   abcLogs?: unknown[];
   nursingObs?: unknown[];
   formulation?: unknown | null;

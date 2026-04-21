@@ -70,6 +70,7 @@ export default function ActionTable({
           <tr>
             <th style={thStyle}>Title</th>
             <th style={thStyle}>Domain</th>
+            <th style={thStyle}>Linked issue</th>
             <th style={thStyle}>Severity</th>
             <th style={thStyle}>Status</th>
             <th style={thStyle}>Assigned to</th>
@@ -84,6 +85,11 @@ export default function ActionTable({
                 <strong>{action.title || "—"}</strong>
               </td>
               <td style={tdStyle}>{domainMap.get(action.domainId) ?? action.domainId ?? "—"}</td>
+              <td style={tdStyle}>
+                {action.linkedEntityType
+                  ? `${String(action.linkedEntityType).replace(/_/g, " ")}${action.linkedEntityId ? `: ${action.linkedEntityId}` : ""}`
+                  : "—"}
+              </td>
               <td style={tdStyle}>
                 <span style={{ textTransform: "capitalize" }}>
                   {action.riskLevel || action.priority || "—"}

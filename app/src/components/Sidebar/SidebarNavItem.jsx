@@ -1,5 +1,4 @@
 import { NavLink } from "react-router-dom";
-import { NHS_BLUE, FOCUS_OUTLINE, FOCUS_OUTLINE_OFFSET } from "./constants";
 
 /**
  * Single nav link with active state and accessible labelling.
@@ -45,7 +44,7 @@ const linkDefault = {
 };
 const linkActive = {
   color: "var(--surface)",
-  backgroundColor: NHS_BLUE,
+  backgroundColor: "var(--primary)",
 };
 
 const charOnly = {

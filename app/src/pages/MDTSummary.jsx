@@ -14,11 +14,13 @@ import {
 import {
   buildReportsPayloadFromCpaDocuments,
   createMdtSummaryRecord,
+  getLatestMdtSummaryForPatient,
   listMdtSummariesForPatient,
 } from "../services/mdtSummariesService";
 import { listCpaDisciplineReportsForPatient } from "../services/cpaDisciplineReportService";
 import { exportMDTReport } from "../services/exportMDT";
 import { CLINICAL_CONTENT_MAX_WIDTH_PX } from "../config/contentLayout";
+import { getLatestCapacityAssessment } from "../services/capacityAssessmentService";
 
 const NO_INFO = "No information recorded";
 
@@ -137,6 +139,15 @@ export default function MDTSummary() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [lastSavedId, setLastSavedId] = useState(null);
   const [generatedAtDisplay, setGeneratedAtDisplay] = useState(null);
+  const [capacityStatus, setCapacityStatus] = useState(null);
+  const [capacityLoading, setCapacityLoading] = useState(false);
+  const [disciplineComments, setDisciplineComments] = useState({
+    nursing: "",
+    psychiatry: "",
+    psychology: "",
+    occupationalTherapy: "",
+    speechAndLanguage: "",
+  });
 
   const selectedPatient = useMemo(
     () => patients.find((p) => p.id === selectedPatientId) ?? null,
@@ -163,6 +174,62 @@ export default function MDTSummary() {
     void loadHistory();
   }, [loadHistory]);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCapacityAndComments() {
+      if (!organisationId || !selectedPatientId) {
+        setCapacityStatus(null);
+        setDisciplineComments({
+          nursing: "",
+          psychiatry: "",
+          psychology: "",
+          occupationalTherapy: "",
+          speechAndLanguage: "",
+        });
+        return;
+      }
+      setCapacityLoading(true);
+      try {
+        const [capacity, latestSummary] = await Promise.all([
+          getLatestCapacityAssessment(organisationId, selectedPatientId).catch(() => null),
+          getLatestMdtSummaryForPatient(organisationId, selectedPatientId).catch(() => null),
+        ]);
+        if (cancelled) return;
+        if (capacity) {
+          setCapacityStatus({
+            decisionAssessed: String(capacity?.decisionType ?? "").trim() || NO_INFO,
+            capacityOutcome: capacity?.lacksCapacity === true ? "Lacks capacity" : "Capacity present",
+            bestInterestsSummary:
+              String(capacity?.chosenOption ?? "").trim() ||
+              String(capacity?.justification ?? "").trim() ||
+              String(capacity?.bestInterestsNotes ?? "").trim() ||
+              NO_INFO,
+          });
+        } else {
+          setCapacityStatus({
+            decisionAssessed: NO_INFO,
+            capacityOutcome: NO_INFO,
+            bestInterestsSummary: NO_INFO,
+          });
+        }
+        const savedComments = latestSummary?.data?.capacityStatus?.disciplineComments;
+        setDisciplineComments({
+          nursing: String(savedComments?.nursing ?? ""),
+          psychiatry: String(savedComments?.psychiatry ?? ""),
+          psychology: String(savedComments?.psychology ?? ""),
+          occupationalTherapy: String(savedComments?.occupationalTherapy ?? ""),
+          speechAndLanguage: String(savedComments?.speechAndLanguage ?? ""),
+        });
+      } finally {
+        if (!cancelled) setCapacityLoading(false);
+      }
+    }
+    void loadCapacityAndComments();
+    return () => {
+      cancelled = true;
+    };
+  }, [organisationId, selectedPatientId]);
+
   const handleGenerate = async () => {
     if (!organisationId || !selectedPatientId) return;
     setBusy(true);
@@ -183,6 +250,12 @@ export default function MDTSummary() {
         patientId: selectedPatientId,
         reportsUsed: payload,
         summary: result,
+        capacityStatus: {
+          decisionAssessed: capacityStatus?.decisionAssessed ?? NO_INFO,
+          capacityOutcome: capacityStatus?.capacityOutcome ?? NO_INFO,
+          bestInterestsSummary: capacityStatus?.bestInterestsSummary ?? NO_INFO,
+          disciplineComments,
+        },
         createdBy: user?.uid ?? null,
       });
       setLastSavedId(id);
@@ -365,6 +438,37 @@ export default function MDTSummary() {
           </ul>
         </div>
       ) : null}
+
+      <div className="no-print" style={controlCard}>
+        <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>Capacity Status (MDT)</h2>
+        {capacityLoading ? <p style={{ color: "#64748b", margin: 0 }}>Loading capacity status…</p> : null}
+        <div style={{ display: "grid", gap: 8, marginTop: 8, marginBottom: 12, fontSize: 14 }}>
+          <div><strong>Decision assessed:</strong> {capacityStatus?.decisionAssessed ?? NO_INFO}</div>
+          <div><strong>Capacity outcome:</strong> {capacityStatus?.capacityOutcome ?? NO_INFO}</div>
+          <div><strong>Best interests summary:</strong> {capacityStatus?.bestInterestsSummary ?? NO_INFO}</div>
+        </div>
+        <h3 style={{ margin: "6px 0 10px", fontSize: "0.95rem", color: "#0f172a" }}>Discipline comments</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+          {[
+            ["nursing", "Nursing"],
+            ["psychiatry", "Psychiatry"],
+            ["psychology", "Psychology"],
+            ["occupationalTherapy", "Occupational Therapy"],
+            ["speechAndLanguage", "Speech and Language"],
+          ].map(([key, label]) => (
+            <label key={key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 700 }}>{label}</span>
+              <textarea
+                value={disciplineComments[key] ?? ""}
+                onChange={(e) => setDisciplineComments((prev) => ({ ...prev, [key]: e.target.value }))}
+                rows={3}
+                style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1", resize: "vertical" }}
+                placeholder={`Add ${label.toLowerCase()} comment on capacity status`}
+              />
+            </label>
+          ))}
+        </div>
+      </div>
 
       <div
         id="mdt-report"
@@ -558,6 +662,24 @@ export default function MDTSummary() {
           ) : (
             <p style={{ margin: 0 }}>{NO_INFO}</p>
           )}
+        </ReportSection>
+
+        <ReportSection title="Capacity Status">
+          <div style={{ display: "grid", gap: 8 }}>
+            <div><strong>Decision assessed:</strong> {capacityStatus?.decisionAssessed ?? NO_INFO}</div>
+            <div><strong>Capacity outcome:</strong> {capacityStatus?.capacityOutcome ?? NO_INFO}</div>
+            <div><strong>Best interests summary:</strong> {capacityStatus?.bestInterestsSummary ?? NO_INFO}</div>
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <strong>Discipline comments</strong>
+            <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+              {Object.entries(disciplineComments).map(([k, v]) => (
+                <li key={k}>
+                  <strong>{k}:</strong> {String(v ?? "").trim() || NO_INFO}
+                </li>
+              ))}
+            </ul>
+          </div>
         </ReportSection>
 
         <footer

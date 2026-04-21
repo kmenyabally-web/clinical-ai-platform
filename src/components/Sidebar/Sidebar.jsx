@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useOrganisation } from "../../context/OrganisationContext";
 import { useRole } from "../../context/RoleContext";
-import { NAV_ITEMS } from "../../config/routes";
+import { MODULE_GROUPS, NAV_ITEMS } from "../../config/routes";
 import {
   NHS_BLUE,
   SIDEBAR_WIDTH_EXPANDED,
@@ -13,7 +13,7 @@ import SidebarNavItem from "./SidebarNavItem";
 import { APP_CONFIG } from "../../config/appConfig";
 
 export default function Sidebar({ isSuperAdmin: isSuperAdminProp = false, showManagementMenu = true }) {
-  const { organisation, organisationId, isPlatformAdmin } = useOrganisation();
+  const { organisation, organisationId, isPlatformAdmin, organisationType } = useOrganisation();
   const { isAllowed, isSuperAdmin: isSuperAdminFromContext } = useRole();
   const [collapsed, setCollapsed] = useState(false);
   const isSuperAdmin = isSuperAdminProp || isSuperAdminFromContext;
@@ -27,13 +27,24 @@ export default function Sidebar({ isSuperAdmin: isSuperAdminProp = false, showMa
 
       return NAV_ITEMS.filter((item) => {
         if (item.platformAdminOnly) return isPlatformAdmin;
+        if (Array.isArray(item.visibleForOrgTypes) && item.visibleForOrgTypes.length > 0) {
+          if (!item.visibleForOrgTypes.includes(organisationType)) return false;
+        }
         // Tenant-only menus should only appear when org is bound.
         const tenantMenuLabels = new Set(["Hospitals", "Wards", "Users", "Patients"]);
         if (tenantMenuLabels.has(item.label)) return Boolean(organisationId);
         return organisationId && isAllowed(item.allowedRoles);
       });
     },
-    [isAllowed, isPlatformAdmin, organisationId, isSuperAdmin]
+    [isAllowed, isPlatformAdmin, organisationId, isSuperAdmin, organisationType]
+  );
+  const groupedItems = useMemo(
+    () =>
+      MODULE_GROUPS.map((group) => ({
+        ...group,
+        items: visibleItems.filter((item) => item.group === group.id),
+      })).filter((group) => group.items.length > 0),
+    [visibleItems]
   );
 
   const width = collapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH_EXPANDED;
@@ -89,8 +100,17 @@ export default function Sidebar({ isSuperAdmin: isSuperAdminProp = false, showMa
           </button>
         </div>
         <nav aria-label="Main navigation" style={nav}>
-          {(visibleItems ?? []).map((item, idx) => (
-            item ? <SidebarNavItem key={item.path ?? idx} item={item} collapsed={collapsed} /> : null
+          {groupedItems.map((group) => (
+            <div key={group.id} style={groupSection}>
+              {!collapsed ? (
+                <div style={{ ...groupLabel, color: group.color }}>
+                  {group.label}
+                </div>
+              ) : null}
+              {group.items.map((item, idx) => (
+                item ? <SidebarNavItem key={item.path ?? idx} item={item} collapsed={collapsed} /> : null
+              ))}
+            </div>
           ))}
           {isSuperAdmin && showManagementMenu ? (
             <div
@@ -194,4 +214,16 @@ const nav = {
   flexDirection: "column",
   gap: "4px",
   overflowY: "auto",
+};
+
+const groupSection = {
+  marginBottom: "10px",
+};
+
+const groupLabel = {
+  fontSize: 11,
+  fontWeight: 800,
+  letterSpacing: "0.02em",
+  textTransform: "uppercase",
+  padding: "6px 8px",
 };
